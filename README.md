@@ -8,12 +8,12 @@
 <p align="center">
   🔄 Zero switching · 🧠 Zero barrier · 💰 Zero cost
 </p>
-
 <p align="center">
-  <a href="https://github.com/Frankkk1912/excel-prism/releases">📥 Download Installer</a> ·
+  <a href="https://github.com/Frankkk1912/xstars/releases">📥 Download Installer</a> ·
   <a href="README.zh-CN.md">🇨🇳 中文文档</a> ·
   <a href="#-quick-start">🚀 Quick Start</a>
 </p>
+
 
 ---
 
@@ -47,7 +47,7 @@
 ## 🎬 Demo
 
 ### ⚡ Quick Run — One click, instant figure
-![Quick Run Demo](assets/quick%20run.gif)
+![Quick Run Demo](assets/quick_run.gif)
 
 ---
 

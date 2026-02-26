@@ -8,12 +8,12 @@
 <p align="center">
   🔄 零切换 · 🧠 零门槛 · 💰 零成本
 </p>
-
 <p align="center">
-  <a href="https://github.com/Frankkk1912/excel-prism/releases">📥 下载安装包</a> ·
+  <a href="https://github.com/Frankkk1912/xstars/releases">📥 下载安装包</a> ·
   <a href="README.md">🇬🇧 English</a> ·
   <a href="#-快速开始">🚀 快速开始</a>
 </p>
+
 
 ---
 
