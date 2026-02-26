@@ -1,0 +1,8 @@
+xlwings>=0.33.0
+pandas>=2.0
+numpy>=1.24
+scipy>=1.11
+scikit-posthocs>=0.9
+statannotations>=0.6
+matplotlib>=3.7
+seaborn>=0.13

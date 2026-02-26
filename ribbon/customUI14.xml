@@ -1,0 +1,216 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon>
+    <tabs>
+      <tab id="tabXSTARS" label="XSTARS" insertAfterMso="TabData">
+        <group id="grpAnalysis" label="Analysis">
+          <button id="btnRun"
+                  label="Run Analysis"
+                  size="large"
+                  imageMso="PlayMacro"
+                  screentip="Open settings dialog and generate chart with statistics"
+                  onAction="RibbonCallbacks.RunXSTARS"/>
+          <button id="btnRunQuick"
+                  label="Quick Run"
+                  size="large"
+                  imageMso="Repeat"
+                  screentip="Generate chart with last-used (or default) settings"
+                  onAction="RibbonCallbacks.RunXSTARSQuick"/>
+        </group>
+        <group id="grpPresets" label="Experiment Presets">
+          <button id="btnWB"
+                  label="Western Blot"
+                  size="large"
+                  imageMso="GroupSmartArtQuickStyles"
+                  screentip="WB band intensity → fold-change normalization"
+                  onAction="RibbonCallbacks.RunXSTARSWB"/>
+          <button id="btnQPCR"
+                  label="qPCR"
+                  size="large"
+                  imageMso="FunctionWizard"
+                  screentip="qPCR Ct values → ΔΔCt relative quantification"
+                  onAction="RibbonCallbacks.RunXSTARSQPCR"/>
+          <button id="btnCCK8"
+                  label="CCK-8"
+                  size="large"
+                  imageMso="ChartInsert"
+                  screentip="CCK-8 OD readings → viability % and IC50 fitting"
+                  onAction="RibbonCallbacks.RunXSTARSCCK8"/>
+          <button id="btnELISA"
+                  label="ELISA"
+                  size="large"
+                  imageMso="ShapeFillTextureGallery"
+                  screentip="ELISA: standard curve fitting → back-calculate sample concentrations → stats"
+                  onAction="RibbonCallbacks.RunElisa"/>
+        </group>
+        <group id="grpTools" label="Tools">
+          <button id="btnTransformOnly"
+                  label="Transform Only"
+                  size="large"
+                  imageMso="ConvertTextToTable"
+                  screentip="Apply preset data processing and write results (no stats or chart)"
+                  onAction="RibbonCallbacks.TransformOnly"/>
+          <button id="btnStandardCurve"
+                  label="Standard Curve"
+                  size="large"
+                  imageMso="GroupChartAnalysis"
+                  screentip="Fit standard curve and back-calculate sample concentrations"
+                  onAction="RibbonCallbacks.RunStandardCurve"/>
+          <button id="btnExportChart"
+                  label="Export Image"
+                  size="large"
+                  imageMso="FileSaveAs"
+                  screentip="Export the selected picture as high-resolution image (PNG/TIFF/JPG/PDF, custom DPI)"
+                  onAction="RibbonCallbacks.ExportChart"/>
+        </group>
+        <group id="grpTheme" label="Theme">
+          <menu id="mnuBaseTheme"
+                label="Base Theme"
+                size="large"
+                imageMso="ThemesGallery"
+                screentip="Choose visual style (background, spines, grid)">
+            <button id="btnThemeClassic"
+                    label="Classic"
+                    imageMso="ShapeRectangle"
+                    onAction="RibbonCallbacks.SetBaseThemeClassic"/>
+            <button id="btnThemeBW"
+                    label="BW"
+                    imageMso="BorderOutside"
+                    onAction="RibbonCallbacks.SetBaseThemeBW"/>
+            <button id="btnThemeMinimal"
+                    label="Minimal"
+                    imageMso="BorderNone"
+                    onAction="RibbonCallbacks.SetBaseThemeMinimal"/>
+            <button id="btnThemeDark"
+                    label="Dark"
+                    imageMso="BlackAndWhiteBlackWithWhiteFill"
+                    onAction="RibbonCallbacks.SetBaseThemeDark"/>
+          </menu>
+          <menu id="mnuJournal"
+                label="Layout"
+                size="large"
+                imageMso="SlideLayoutGallery"
+                screentip="Set font size, line width, and figure dimensions for a journal">
+            <button id="btnThemeDefault"
+                    label="Default"
+                    imageMso="ThemeColorsGallery"
+                    onAction="RibbonCallbacks.SetThemeDefault"/>
+            <menuSeparator id="sepTypoTop3" title="Top Journals"/>
+            <button id="btnThemeNature"
+                    label="Nature"
+                    imageMso="AppointmentColor9"
+                    onAction="RibbonCallbacks.SetThemeNature"/>
+            <button id="btnThemeScience"
+                    label="Science"
+                    imageMso="AppointmentColor1"
+                    onAction="RibbonCallbacks.SetThemeScience"/>
+            <button id="btnThemeCell"
+                    label="Cell"
+                    imageMso="AppointmentColor2"
+                    onAction="RibbonCallbacks.SetThemeCell"/>
+            <menuSeparator id="sepTypoMed4" title="Medical Journals"/>
+            <button id="btnThemeLancet"
+                    label="Lancet"
+                    imageMso="AppointmentColor5"
+                    onAction="RibbonCallbacks.SetThemeLancet"/>
+            <button id="btnThemeNEJM"
+                    label="NEJM"
+                    imageMso="AppointmentColor6"
+                    onAction="RibbonCallbacks.SetThemeNEJM"/>
+            <button id="btnThemeJAMA"
+                    label="JAMA"
+                    imageMso="AppointmentColor3"
+                    onAction="RibbonCallbacks.SetThemeJAMA"/>
+            <button id="btnThemeBMJ"
+                    label="BMJ"
+                    imageMso="AppointmentColor7"
+                    onAction="RibbonCallbacks.SetThemeBMJ"/>
+          </menu>
+          <menu id="mnuJournalPalette"
+                label="Palette"
+                size="large"
+                imageMso="CellFillColorPicker"
+                screentip="Choose a journal color scheme for chart elements">
+            <button id="btnJPalDefault"
+                    label="Default"
+                    imageMso="ThemeColorsGallery"
+                    onAction="RibbonCallbacks.SetJPalDefault"/>
+            <menuSeparator id="sepPalTop3" title="Top Journals"/>
+            <button id="btnJPalNature"
+                    label="Nature"
+                    imageMso="AppointmentColor9"
+                    onAction="RibbonCallbacks.SetJPalNature"/>
+            <button id="btnJPalScience"
+                    label="Science"
+                    imageMso="AppointmentColor1"
+                    onAction="RibbonCallbacks.SetJPalScience"/>
+            <button id="btnJPalCell"
+                    label="Cell"
+                    imageMso="AppointmentColor2"
+                    onAction="RibbonCallbacks.SetJPalCell"/>
+            <menuSeparator id="sepPalMed4" title="Medical Journals"/>
+            <button id="btnJPalLancet"
+                    label="Lancet"
+                    imageMso="AppointmentColor5"
+                    onAction="RibbonCallbacks.SetJPalLancet"/>
+            <button id="btnJPalNEJM"
+                    label="NEJM"
+                    imageMso="AppointmentColor6"
+                    onAction="RibbonCallbacks.SetJPalNEJM"/>
+            <button id="btnJPalJAMA"
+                    label="JAMA"
+                    imageMso="AppointmentColor3"
+                    onAction="RibbonCallbacks.SetJPalJAMA"/>
+            <button id="btnJPalBMJ"
+                    label="BMJ"
+                    imageMso="AppointmentColor7"
+                    onAction="RibbonCallbacks.SetJPalBMJ"/>
+          </menu>
+          <menu id="mnuColorStyle"
+                label="Color Style"
+                size="large"
+                imageMso="GradientGallery"
+                screentip="Adjust color tone: lighten, darken, or boost saturation">
+            <button id="btnStyleOriginal"
+                    label="Original"
+                    imageMso="ThemeColorsGallery"
+                    onAction="RibbonCallbacks.SetPaletteDefault"/>
+            <button id="btnStylePastel"
+                    label="Pastel"
+                    imageMso="LightShading"
+                    onAction="RibbonCallbacks.SetPalettePastel"/>
+            <button id="btnStyleDeep"
+                    label="Deep"
+                    imageMso="DarkShading"
+                    onAction="RibbonCallbacks.SetPaletteDeep"/>
+            <button id="btnStyleVibrant"
+                    label="Vibrant"
+                    imageMso="TextHighlightColorPicker"
+                    onAction="RibbonCallbacks.SetPaletteVibrant"/>
+            <button id="btnStyleMuted"
+                    label="Muted"
+                    imageMso="GradientGallery"
+                    onAction="RibbonCallbacks.SetPaletteMuted"/>
+            <button id="btnStyleColorblind"
+                    label="Colorblind"
+                    imageMso="AppointmentColor4"
+                    onAction="RibbonCallbacks.SetPaletteColorblind"/>
+          </menu>
+          <button id="btnResetSettings"
+                  label="Reset Settings"
+                  size="large"
+                  imageMso="ReviewRejectChange"
+                  screentip="Delete saved settings and restore defaults"
+                  onAction="RibbonCallbacks.ResetSettings"/>
+        </group>
+        <group id="grpHelp" label="Help">
+          <button id="btnAbout"
+                  label="About"
+                  size="large"
+                  imageMso="Info"
+                  screentip="Show XSTARS version and info"
+                  onAction="RibbonCallbacks.ShowAbout"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
