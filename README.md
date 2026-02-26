@@ -161,8 +161,8 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 ### Option B: 🛠️ Developer Setup (Python required)
 
 ```bash
-git clone https://github.com/Frankkk1912/excel-prism.git
-cd excel-prism
+git clone https://github.com/Frankkk1912/xstars.git
+cd xstars
 pip install -e ".[dev]"
 xlwings addin install
 ```
