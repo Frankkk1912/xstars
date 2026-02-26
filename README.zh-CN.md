@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.png" alt="XSTARS Logo" width="120">
-</p>
-
 <h1 align="center">✨ XSTARS</h1>
 
 <p align="center">
