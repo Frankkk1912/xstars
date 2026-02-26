@@ -161,8 +161,8 @@
 ### 方式 B：🛠️ 开发者安装（需要 Python）
 
 ```bash
-git clone https://github.com/Frankkk1912/excel-prism.git
-cd excel-prism
+git clone https://github.com/Frankkk1912/xstars.git
+cd xstars
 pip install -e ".[dev]"
 xlwings addin install
 ```
