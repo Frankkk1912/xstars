@@ -10,7 +10,7 @@ build/
 *.xlsx
 ~$*
 # Track XSTARS.xlsm (template workbook)
-!XSTARS.xlsm
+!XSTARS_Templates.xlsx
 
 .venv/
 venv/
