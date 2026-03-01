@@ -94,11 +94,26 @@ def _stars(p: float, alpha: float = 0.05) -> str:
     return "ns"
 
 
+# Minimum n per group to trust a normality test result.
+# Below this threshold Shapiro-Wilk is unreliable on tiny samples
+# (spurious rejections), so we assume normality and prefer parametric
+# tests — matching Prism's "N too small" behaviour for D'Agostino,
+# Anderson-Darling, and KS tests.
+_MIN_N_FOR_NORMALITY_TEST = 5
+
+
 def _shapiro(values: np.ndarray) -> float:
-    """Return Shapiro-Wilk p-value. If n < 3 or constant, return 0."""
+    """Return Shapiro-Wilk p-value, or 1.0 when n is too small to trust.
+
+    When n < _MIN_N_FOR_NORMALITY_TEST the test has negligible power and
+    commonly produces false rejections, so we return 1.0 (assume normal)
+    rather than forcing a non-parametric path on tiny samples.
+    """
     clean = values[~np.isnan(values)]
     if len(clean) < 3 or np.ptp(clean) == 0:
-        return 0.0
+        return 0.0  # degenerate / constant → treat as non-normal
+    if len(clean) < _MIN_N_FOR_NORMALITY_TEST:
+        return 1.0  # N too small — assume normal
     _, p = stats.shapiro(clean)
     return float(p)
 
@@ -124,11 +139,19 @@ class StatsEngine:
 
         # --- Normality check per group ---
         norm_ps: dict[str, float] = {}
+        n_too_small: list[str] = []
         for g in groups:
             vals = df_wide[g].dropna().to_numpy()
+            if len(vals) < _MIN_N_FOR_NORMALITY_TEST:
+                n_too_small.append(g)
             norm_ps[g] = _shapiro(vals)
 
         all_normal = all(p >= alpha for p in norm_ps.values())
+        normality_test_label = (
+            f"Shapiro-Wilk (N too small, assumed normal: {', '.join(n_too_small)})"
+            if n_too_small
+            else "Shapiro-Wilk"
+        )
 
         # --- Variance homogeneity (Levene) ---
         group_arrays = [df_wide[g].dropna().to_numpy() for g in groups]
@@ -138,10 +161,12 @@ class StatsEngine:
         if n_groups == 2:
             return self._two_groups(
                 df_wide, groups, norm_ps, all_normal, equal_var, lev_p, alpha,
+                normality_test_label,
             )
         else:
             return self._multi_groups(
                 df_wide, groups, norm_ps, all_normal, equal_var, lev_p, alpha,
+                normality_test_label,
             )
 
     # ------------------------------------------------------------------
@@ -157,6 +182,7 @@ class StatsEngine:
         equal_var: bool,
         lev_p: float,
         alpha: float,
+        normality_test_label: str = "Shapiro-Wilk",
     ) -> StatsResult:
         a_vals = df_wide[groups[0]].dropna().to_numpy()
         b_vals = df_wide[groups[1]].dropna().to_numpy()
@@ -201,7 +227,7 @@ class StatsEngine:
 
         return StatsResult(
             decision_path=path,
-            normality_test="Shapiro-Wilk",
+            normality_test=normality_test_label,
             normality_pvalues=norm_ps,
             all_normal=all_normal,
             variance_test="Levene",
@@ -226,6 +252,7 @@ class StatsEngine:
         equal_var: bool,
         lev_p: float,
         alpha: float,
+        normality_test_label: str = "Shapiro-Wilk",
     ) -> StatsResult:
         group_arrays = [df_wide[g].dropna().to_numpy() for g in groups]
         long = df_wide.melt(var_name="Group", value_name="Value").dropna(
@@ -286,7 +313,7 @@ class StatsEngine:
 
         return StatsResult(
             decision_path=path,
-            normality_test="Shapiro-Wilk",
+            normality_test=normality_test_label,
             normality_pvalues=norm_ps,
             all_normal=all_normal,
             variance_test="Levene",

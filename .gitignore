@@ -10,7 +10,7 @@ build/
 *.xlsx
 ~$*
 # Track XSTARS.xlsm (template workbook)
-!XSTARS_Templates.xlsx
+!XSTARS.xlsm
 
 .venv/
 venv/
@@ -39,3 +39,5 @@ warn-*.txt
 installer/output/
 installer/XSTARS.xlam
 installer/ExcelPrism.xlam
+XSTARS_Setup_v1.1.1.exe
+xstars_v1.1.1.zip

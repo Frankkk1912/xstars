@@ -98,6 +98,9 @@ Auto-select the appropriate test:
 
 Significance brackets (`*`, `**`, `***`, `****`, or exact p-values) are drawn automatically. ✨
 
+
+> ⚠️ **Small samples (N < 5):** Normality tests are unreliable at very small N — XSTARS skips the test and assumes normality.
+
 ### 🧪 Experiment Presets
 
 Built-in workflows for common lab assays — no manual calculation needed:
@@ -118,7 +121,7 @@ Built-in workflows for common lab assays — no manual calculation needed:
 - Dose-response curve with flexible axis scaling
 
 🧫 **ELISA**
-- Standard curve fitting (4PL/5PL/linear)
+- Standard curve fitting (4PL/linear)
 - Sample concentration back-calculation
 - Supports manual parameter input for existing curves
 
@@ -157,6 +160,8 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 2. Run the installer — it sets up the Excel add-in automatically
 3. Open Excel → you'll see the **XSTARS** tab in the ribbon
 4. Select your data (with headers) → click **Run** 🎉
+
+> 💡 **New to XSTARS?** Open `XSTARS_Templates.xlsx` (included in the installer) for ready-to-run example datasets covering every chart type and experiment preset — just click Run on any sheet to see XSTARS in action.
 
 ### Option B: 🛠️ Developer Setup (Python required)
 
