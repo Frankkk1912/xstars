@@ -1,0 +1,41 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+*.xlsx
+~$*
+# Track XSTARS.xlsm (template workbook)
+!XSTARS.xlsm
+
+.venv/
+venv/
+env/
+.env
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+.DS_Store
+Thumbs.db
+
+# PyInstaller
+*.spec.bak
+*.manifest
+warn-*.txt
+
+# Installer build output
+installer/output/
+installer/XSTARS.xlam
+installer/ExcelPrism.xlam

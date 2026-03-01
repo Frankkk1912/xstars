@@ -39,6 +39,17 @@ def _write_transformed_data(
     return row
 
 
+def _next_plot_name(sheet, base: str = "XSTARS_Plot") -> str:
+    """Return the next unused picture name (e.g. XSTARS_Plot_1, XSTARS_Plot_2...)."""
+    existing = {p.name for p in sheet.pictures}
+    i = 1
+    while True:
+        name = f"{base}_{i}"
+        if name not in existing:
+            return name
+        i += 1
+
+
 def _guess_control(groups: list[str]) -> str:
     """Pick the most likely control group from column names."""
     for g in groups:
@@ -322,23 +333,50 @@ def _run_elisa_impl(book: xw.Book) -> None:
     plotter = PlotEngine(config)
     fig = plotter.plot(conc_df, stats_result)
 
-    # Insert analysis chart
-    insert_cell = handler.get_insertion_cell(sheet)
-    insert_left = sheet.range(insert_cell).left
-    insert_top = sheet.range(insert_cell).top
+    if config.export_path:
+        export_figure(fig, config.export_path, config.export_dpi)
+
+    # 6. Write output tables below selection
+    out_row = sel.row + sel.rows.count + 2
+    out_col = sel.column
+
+    # Standard curve parameters
+    sheet.range((out_row, out_col)).value = "Standard Curve Results"
+    out_row += 1
+    param_data = [
+        ["Method", fit.method],
+        ["Equation", fit.equation_str],
+        ["R²", fit.r_squared if fit.r_squared is not None else "N/A"],
+    ]
+    for k, v in fit.params.items():
+        param_data.append([k, v])
+    sheet.range((out_row, out_col)).value = param_data
+    out_row += len(param_data) + 1
+
+    # Stats table
+    if config.output_stats:
+        stats_df = stats_result.to_dataframe()
+        dest = sheet.range((out_row, out_col))
+        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
+        out_row += len(stats_df) + 2
+
+    # Concentration data
+    if config.output_data:
+        out_row = _write_transformed_data(sheet, out_row, out_col, conc_df,
+                                          "Back-Calculated Concentrations")
+
+    # 7. Insert analysis chart below tables
+    insert_left = sheet.range((out_row, out_col)).left
+    insert_top = sheet.range((out_row, out_col)).top
     pic = sheet.pictures.add(
         fig,
-        name="XSTARS_Plot",
-        update=True,
+        name=_next_plot_name(sheet),
         left=insert_left,
         top=insert_top,
     )
     current_top = insert_top + pic.height + 15
 
-    if config.export_path:
-        export_figure(fig, config.export_path, config.export_dpi)
-
-    # 6. Optional standard curve chart
+    # 8. Optional standard curve chart below analysis chart
     if dlg_result.show_fit_curve:
         with get_prism_context(config.journal_preset, config.base_theme):
             fig_std, ax = plt.subplots(figsize=(4.5, 3.5), dpi=config.dpi)
@@ -373,45 +411,15 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
         sheet.pictures.add(
             fig_std,
-            name="XSTARS_ELISA_StdCurve",
-            update=True,
+            name=_next_plot_name(sheet, "XSTARS_ELISA_StdCurve"),
             left=insert_left,
             top=current_top,
         )
         plt.close(fig_std)
 
-    # 7. Write output tables below selection
-    out_row = sel.row + sel.rows.count + 2
-    out_col = sel.column
-
-    # Standard curve parameters
-    sheet.range((out_row, out_col)).value = "Standard Curve Results"
-    out_row += 1
-    param_data = [
-        ["Method", fit.method],
-        ["Equation", fit.equation_str],
-        ["R²", fit.r_squared if fit.r_squared is not None else "N/A"],
-    ]
-    for k, v in fit.params.items():
-        param_data.append([k, v])
-    sheet.range((out_row, out_col)).value = param_data
-    out_row += len(param_data) + 1
-
-    # Stats table
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        dest = sheet.range((out_row, out_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        out_row += len(stats_df) + 2
-
-    # Concentration data
-    if config.output_data:
-        _write_transformed_data(sheet, out_row, out_col, conc_df,
-                                "Back-Calculated Concentrations")
-
     r2_str = f", R²={fit.r_squared:.4f}" if fit.r_squared else ""
     book.app.status_bar = (
-        f"Excel-Prism: ELISA ({fit.method}{r2_str}) — {stats_result.decision_path}"
+        f"XSTARS: ELISA ({fit.method}{r2_str}) — {stats_result.decision_path}"
     )
 
 
@@ -504,24 +512,13 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
     plotter = PlotEngine(config)
     fig = plotter.plot(df_wide, stats_result)
 
-    # Insert
-    insert_cell = handler.get_insertion_cell(sheet)
-    sheet.pictures.add(
-        fig,
-        name="XSTARS_Plot",
-        update=True,
-        left=sheet.range(insert_cell).left,
-        top=sheet.range(insert_cell).top,
-    )
-
     if config.export_path:
         export_figure(fig, config.export_path, config.export_dpi)
 
-    # Stats summary table
+    # Stats summary table below data selection
     sel = book.selection
-    start_row = sel.row + sel.rows.count + 2
     start_col = sel.column
-    next_row = start_row
+    next_row = sel.row + sel.rows.count + 2
 
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
@@ -544,9 +541,17 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     # Write processed data
     if config.output_data:
-        _write_transformed_data(sheet, next_row, start_col, df_wide, "Processed Data")
+        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, "Processed Data")
 
-    book.app.status_bar = f"Excel-Prism: {stats_result.decision_path}"
+    # Insert chart below stats/data tables
+    sheet.pictures.add(
+        fig,
+        name=_next_plot_name(sheet),
+        left=sheet.range((next_row, start_col)).left,
+        top=sheet.range((next_row, start_col)).top,
+    )
+
+    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
 
 
 def _run_wb_labeled(
@@ -626,7 +631,7 @@ def _run_wb_labeled(
                 sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {protein_name}"
             )
 
-    book.app.status_bar = f"Excel-Prism: WB labeled mode — {len(target_dfs)} target(s) analyzed"
+    book.app.status_bar = f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
 
 
 def _run_qpcr_labeled(
@@ -706,7 +711,7 @@ def _run_qpcr_labeled(
                 sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {gene_name}"
             )
 
-    book.app.status_bar = f"Excel-Prism: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
+    book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
 
 
 def _read_selection_auto(handler: DataHandler, book: xw.Book):
@@ -780,34 +785,25 @@ def _run_impl(book: xw.Book) -> None:
     plotter = PlotEngine(config)
     fig = plotter.plot(df_wide, stats_result)
 
-    # 5. Insert into Excel
-    insert_cell = handler.get_insertion_cell(sheet)
-    sheet.pictures.add(
-        fig,
-        name="XSTARS_Plot",
-        update=True,
-        left=sheet.range(insert_cell).left,
-        top=sheet.range(insert_cell).top,
-    )
-
-    # 6. Export figure to file if requested
+    # 5. Export figure to file if requested
     if config.export_path:
         export_figure(fig, config.export_path, config.export_dpi)
 
-    # 7. Write stats summary table below the data selection
+    # 6. Write stats summary table below the data selection
+    sel = book.selection
+    start_col = sel.column
+    next_row = sel.row + sel.rows.count + 2
+
     if config.output_stats:
-        sel = book.selection
         stats_df = stats_result.to_dataframe()
-        start_row = sel.row + sel.rows.count + 2
-        start_col = sel.column
-        dest = sheet.range((start_row, start_col))
+        dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
+        next_row += len(stats_df) + 2
 
         # Write IC50 results if CCK-8 preset was used
         preset = get_preset(config.experiment_preset)
         if isinstance(preset, CCK8Preset) and preset.last_result and preset.last_result.ic50 is not None:
-            ic50_row = start_row + len(stats_df) + 2
-            ic50_dest = sheet.range((ic50_row, start_col))
+            ic50_dest = sheet.range((next_row, start_col))
             res = preset.last_result
             ic50_data = [
                 ["IC50", res.ic50],
@@ -816,9 +812,18 @@ def _run_impl(book: xw.Book) -> None:
             if res.ic50_95ci:
                 ic50_data.append(["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"])
             ic50_dest.value = ic50_data
+            next_row += len(ic50_data) + 2
+
+    # 7. Insert chart below stats table
+    sheet.pictures.add(
+        fig,
+        name=_next_plot_name(sheet),
+        left=sheet.range((next_row, start_col)).left,
+        top=sheet.range((next_row, start_col)).top,
+    )
 
     # Show decision path in status bar
-    book.app.status_bar = f"Excel-Prism: {stats_result.decision_path}"
+    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
 
 
 def _run_quick_impl(book: xw.Book) -> None:
@@ -840,25 +845,26 @@ def _run_quick_impl(book: xw.Book) -> None:
     plotter = PlotEngine(config)
     fig = plotter.plot(df_wide, stats_result)
 
-    insert_cell = handler.get_insertion_cell(sheet)
-    sheet.pictures.add(
-        fig,
-        name="XSTARS_Plot",
-        update=True,
-        left=sheet.range(insert_cell).left,
-        top=sheet.range(insert_cell).top,
-    )
+    sel = book.selection
+    start_col = sel.column
+    next_row = sel.row + sel.rows.count + 2
 
     # Write stats summary table below the data selection
     if config.output_stats:
-        sel = book.selection
         stats_df = stats_result.to_dataframe()
-        start_row = sel.row + sel.rows.count + 2
-        start_col = sel.column
-        dest = sheet.range((start_row, start_col))
+        dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
+        next_row += len(stats_df) + 2
 
-    book.app.status_bar = f"Excel-Prism: {stats_result.decision_path}"
+    # Insert chart below stats table
+    sheet.pictures.add(
+        fig,
+        name=_next_plot_name(sheet),
+        left=sheet.range((next_row, start_col)).left,
+        top=sheet.range((next_row, start_col)).top,
+    )
+
+    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
 
 
 def run_export() -> None:
@@ -1083,7 +1089,7 @@ def _run_export_impl(book: xw.Book) -> None:
             save_path = str(p.with_stem(f"{p.stem}_{i + 1}"))
         _export_shape_highres(shape, save_path, dpi)
 
-    book.app.status_bar = f"Excel-Prism: Exported to {path} ({dpi} DPI)"
+    book.app.status_bar = f"XSTARS: Exported to {path} ({dpi} DPI)"
 
 
 def run_reset_settings() -> None:
@@ -1100,7 +1106,7 @@ def run_reset_settings() -> None:
                 "Excel-Prism",
             )
         except Exception:
-            book.app.status_bar = "Excel-Prism: Settings reset to defaults"
+            book.app.status_bar = "XSTARS: Settings reset to defaults"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1124,7 +1130,7 @@ def run_set_theme(theme_name: str) -> None:
             "jama": "JAMA",
             "bmj": "BMJ",
         }.get(theme_name, theme_name)
-        book.app.status_bar = f"Excel-Prism: Theme set to {label}"
+        book.app.status_bar = f"XSTARS: Theme set to {label}"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1138,7 +1144,7 @@ def run_set_base_theme(theme_name: str) -> None:
         config = PrismConfig.load()
         config.base_theme = theme
         config.save()
-        book.app.status_bar = f"Excel-Prism: Base theme set to {theme_name.title()}"
+        book.app.status_bar = f"XSTARS: Base theme set to {theme_name.title()}"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1155,7 +1161,7 @@ def run_set_palette(palette_name: str) -> None:
         config.palette = get_palette(preset, config.journal_palette)
         config.save()
         label = "Original" if palette_name == "default" else palette_name.title()
-        book.app.status_bar = f"Excel-Prism: Color style set to {label}"
+        book.app.status_bar = f"XSTARS: Color style set to {label}"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1172,7 +1178,7 @@ def run_set_journal_palette(palette_name: str) -> None:
         config.palette = get_palette(config.palette_preset, jp)
         config.save()
         label = "Default" if palette_name == "default" else palette_name.upper()
-        book.app.status_bar = f"Excel-Prism: Journal palette set to {label}"
+        book.app.status_bar = f"XSTARS: Journal palette set to {label}"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1364,18 +1370,16 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
         ax.legend(fontsize=8)
         fig.tight_layout()
 
-    insert_cell = handler.get_insertion_cell(sheet)
     sheet.pictures.add(
         fig,
-        name="XSTARS_StdCurve",
-        update=True,
-        left=sheet.range(insert_cell).left,
-        top=sheet.range(insert_cell).top,
+        name=_next_plot_name(sheet, "XSTARS_StdCurve"),
+        left=sheet.range((out_row, out_col)).left,
+        top=sheet.range((out_row, out_col)).top,
     )
     plt.close(fig)
 
     r2_str = f", R²={fit.r_squared:.4f}" if fit.r_squared else ""
-    book.app.status_bar = f"Excel-Prism: Standard curve fitted ({fit.method}{r2_str})"
+    book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
 def _select_sample_data(book: xw.Book, sheet) -> "pd.DataFrame | None":
@@ -1483,7 +1487,7 @@ def _run_transform_only_impl(book: xw.Book) -> None:
                 sheet, current_row, start_col, fold_df, f"Processed Data — {target_name}"
             )
         count = len(target_dfs)
-        book.app.status_bar = f"Excel-Prism: Transform only — {count} target(s) processed"
+        book.app.status_bar = f"XSTARS: Transform only — {count} target(s) processed"
         return
 
     # Single-target mode
@@ -1500,4 +1504,4 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         current_row += len(stats_df) + 2
 
     _write_transformed_data(sheet, current_row, start_col, df_wide, "Processed Data")
-    book.app.status_bar = "Excel-Prism: Transform only — data written"
+    book.app.status_bar = "XSTARS: Transform only — data written"

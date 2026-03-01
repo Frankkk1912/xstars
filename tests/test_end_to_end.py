@@ -126,14 +126,13 @@ class TestRunQuickMocked:
             run_quick()
         mock_sheet.pictures.add.assert_called_once()
 
-    def test_picture_name_and_update_flag(self, two_group_normal):
+    def test_picture_name_unique(self, two_group_normal):
         mock_book, mock_sheet = _xw_mocks(two_group_normal)
         with patch("xlwings.Book.caller", return_value=mock_book):
             from xstars.main import run_quick
             run_quick()
         _, kwargs = mock_sheet.pictures.add.call_args
-        assert kwargs["name"] == "XSTARS_Plot"
-        assert kwargs["update"] is True
+        assert kwargs["name"].startswith("XSTARS_Plot_")
 
     def test_three_groups_completes(self, three_group_normal):
         mock_book, mock_sheet = _xw_mocks(three_group_normal)
