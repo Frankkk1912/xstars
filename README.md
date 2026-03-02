@@ -11,7 +11,8 @@
 <p align="center">
   <a href="https://github.com/Frankkk1912/xstars/releases">📥 Download Installer</a> ·
   <a href="README.zh-CN.md">🇨🇳 中文文档</a> ·
-  <a href="#-quick-start">🚀 Quick Start</a>
+  <a href="#-quick-start">🚀 Quick Start</a> ·
+  <a href="https://youtu.be/RYQnUziHH7Q?si=7PG5P3-cC38gZ2YY"> 📺 Demo Video</a> ·
 </p>
 
 
