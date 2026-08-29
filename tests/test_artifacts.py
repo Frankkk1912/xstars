@@ -296,3 +296,71 @@ def test_standard_curve_round_trip_rebuild_exports_nonempty_figure(tmp_path, fra
     plt.close(fig)
 
     assert output.stat().st_size > 0
+
+
+def test_atomic_overwrite_never_exposes_half_document(tmp_path, identity, frame):
+    """Readers see the complete old artifact until the atomic replacement."""
+    first = build_payload(identity, frame, PrismConfig(title="before"))
+    save_artifact(first, tmp_path)
+    artifact_path = tmp_path / f"{identity.key}.json"
+    real_replace = os.replace
+    titles_seen_before_replace = []
+
+    def observe_then_replace(source, destination):
+        if Path(destination) == artifact_path:
+            old_document = json.loads(artifact_path.read_text(encoding="utf-8"))
+            titles_seen_before_replace.append(old_document["config"]["title"])
+        return real_replace(source, destination)
+
+    second = build_payload(identity, frame, PrismConfig(title="after"))
+    with patch("xstars.artifacts.os.replace", side_effect=observe_then_replace):
+        save_artifact(second, tmp_path)
+
+    assert titles_seen_before_replace == ["before"]
+    assert load_artifact(identity, tmp_path).config.title == "after"
+    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_manifest_path_traversal_association_is_rejected(tmp_path, identity, frame):
+    save_artifact(build_payload(identity, frame, PrismConfig()), tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][identity.key]["file"] = "../untrusted.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CorruptArtifactError, match="unsafe file association"):
+        load_artifact(identity, tmp_path)
+
+
+def test_incomplete_standard_curve_params_fail_closed(tmp_path, frame):
+    concentrations = np.array([0.0, 1.0, 2.0, 3.0])
+    od = np.array([0.1, 0.6, 1.1, 1.6])
+    fit = fit_standard_curve(concentrations, od, method="linear")
+    identity = ArtifactIdentity(
+        workbook="path:/tmp/example.xlsx",
+        sheet="Analysis",
+        picture="XSTARS_StdCurve_Incomplete",
+    )
+    payload = build_payload(
+        identity,
+        frame,
+        PrismConfig(),
+        renderer_kind=RendererKind.STANDARD_CURVE,
+        renderer_params=standard_curve_renderer_params(concentrations, od, fit),
+    )
+    save_artifact(payload, tmp_path)
+    _, document = _saved_document(tmp_path, identity)
+    document["renderer"]["params"].pop("fit")
+    unsigned = dict(document)
+    unsigned.pop("checksum")
+    document["checksum"] = artifacts._document_checksum(unsigned)
+    _rewrite_document(tmp_path, identity, document)
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][identity.key]["checksum"] = document["checksum"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CorruptArtifactError, match="parameters are incomplete"):
+        load_artifact(identity, tmp_path)

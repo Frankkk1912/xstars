@@ -162,7 +162,7 @@
 | --- | --- | --- | --- | --- |
 | M1 — Artifact 契约与生成时登记 | [x] | Plan 批准；待决事项 D1–D4 定案 | artifact round-trip、schema 拒绝、原子写入/best-effort、Figure 重建单测通过 | 先解决跨调用数据基础；不得阻断原出图 |
 | M2 — macOS Python 平台分支 | [x] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
-| M3 — 回归与平台测试 | [ ] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
+| M3 — 回归与平台测试 | [x] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
 | M4 — macOS 开发者文档 | [ ] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
 | M5 — CI、静态检查与实机验收 | [ ] | M3、M4 | macOS/Windows CI 全绿；`compileall`、`git diff --check` 通过；用户提交实机清单 | 用户实机记录前保持 Draft |
 
@@ -218,19 +218,19 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 
 ### M3 — 回归与平台测试
 
-- [ ] T3.1 增加 artifact schema、round-trip、原子写入与失败隔离单元测试
+- [x] T3.1 增加 artifact schema、round-trip、原子写入与失败隔离单元测试
   - 文件：新建 `tests/test_artifacts.py`
   - 修改：覆盖普通/专用 renderer payload、DataFrame 缺失值、config/stats 恢复、临时目录、schema version、损坏/缺失文件、PermissionError、并发/半文件可见性最低保障。
   - 验收：测试不读写真实 `~/.xstars`；失败场景可重复；重建 Figure 可由 Agg backend 导出非空文件。
   - 依赖：T1.1–T1.3；支撑 G1、G7、G10、R9。
 
-- [ ] T3.2 增加 Darwin 平台分支单元测试
+- [x] T3.2 增加 Darwin 平台分支单元测试
   - 文件：新建 `tests/test_macos_support.py`；复用 `tests/test_end_to_end.py:32-61` mock 模式
   - 修改：patch 平台与 xlwings/tkinter；覆盖 pictures fallback、artifact-only 过滤、重建导出、多图命名、payload 错误、范围输入有效/取消/非法、topmost 降级。
   - 验收：测试全程不启动 Excel、不请求 GUI、不依赖本机用户目录；每个新 Darwin 分支至少有成功与失败用例。
   - 依赖：T2.1–T2.4；支撑 G2–G8、R9。
 
-- [ ] T3.3 增加 Windows 零行为改动回归断言
+- [x] T3.3 增加 Windows 零行为改动回归断言
   - 文件：修改/新增 `tests/test_macos_support.py`；必要时仅追加 `tests/test_end_to_end.py`
   - 修改：patch 非 Darwin 平台，锁定 ShapeRange-first、现有 pictures fallback、COM high-res helper 调用、InputBox(Type=8) 参数及 RunPython 主入口；加入 `.bas` diff 作为 CI 门禁而非改写 fixture。
   - 验收：Windows mock 断言与改造前调用契约一致；所有现有测试不需改期望即可通过；`git diff origin/main...HEAD -- ribbon/*.bas` 为空。
