@@ -1,6 +1,6 @@
 # XSTARS Windows WPS 支持评估与实施计划
 
-> 状态：**已获用户批准（M0.1、M0.2 已通过，M0.3 等待实施）**
+> 状态：**已获用户批准（M0.1、M0.2 已通过；M0.3 已实现并完成服务端自测，等待实机验证）**
 > 基准：`main` @ `5f4c409`，XSTARS `v1.1.1`
 > 目标宿主：Windows 10/11 x64 + 最新稳定版 WPS 365/12.x 表格
 > 阻断验收：WPS 专业版/商业版/政企版 x64
@@ -360,6 +360,7 @@ Excel 端
   - 文件：`poc/wps/*`
   - 修改：测试 `OAAssist.ShellExecute`、真实 Origin、预检、端口冲突、Tkinter阻塞/取消。
   - 验收：服务未运行时可恢复；WPS 不冻结；失败有可诊断结果。
+  - 进展：`poc/wps/service_server.py`（3892，Tkinter 独立线程 + `SO_EXCLUSIVEADDRUSE` 单实例 + `/health`、`/dialog`、`/diagnostics`）与加载项三个 Ribbon 按钮已实现；`--self-test` 服务端自测通过（含端口冲突诊断）；加载项 11 个测试全绿；离线包 1.2.0 已构建并部署到 3890。待实机执行 README 所列步骤。
   - 依赖：M0.2。
 
 - [ ] **M0.4 验证 ELISA 二次选区与高清导出可行性**

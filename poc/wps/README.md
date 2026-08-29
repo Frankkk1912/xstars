@@ -6,6 +6,7 @@
 
 - M0.1：**企业授权实机阻断验收已通过**。
 - M0.2：**实机写回/图片持久化验收已通过**（2026-08-29，详见下文记录）。
+- M0.3：**服务端与加载项已实现并通过自测，等待实机验证**（详见下文步骤）。
 - 测试宿主：WPS 365 教育高级版 `12.1.0.28022` 64 位，完全断网。
 - 官方 `publish` 安装、Ribbon、按钮回调、完全退出后重启回调和卸载均通过；实际 Origin 为 `file://`。
 - Node.js 与 npm 可用；PoC 固定使用官方 `wpsjs 2.2.3`。
@@ -116,3 +117,33 @@ python -m http.server 3890 --bind 127.0.0.1 --directory deploy
 - PNG 嵌入在 `D1:E2` 下方，尺寸 11.29 × 6.35 厘米（宽 × 高，320×180 像素 @72 DPI 原生尺寸）。
 - 另存副本、完全退出并重开 WPS 后，写回值和图片均仍存在。
 - 全程无任何报错或异常提示。
+
+## M0.3 服务拉起/CORS/Tkinter/生命周期实机验证
+
+M0.3 使用独立端口：`3890` 提供官方安装页（升级到 `1.2.0`），`3892` 是被验证的本地服务。
+**不要预先启动 3892**——服务拉起本身就是要验证的 `OAAssist.ShellExecute` 流程。加载项会通过 `pythonw` 无窗口拉起 `poc/wps/service_server.py`（路径硬编码在 `js/ribbon.js` 的 `XSTARS_GATE0_SERVICE`，仅限本机 PoC）。
+
+服务端自测（已通过，可随时复跑）：
+
+```powershell
+cd E:\Documents\GitHub\xstars
+python poc\wps\service_server.py --self-test
+```
+
+实机步骤（保持完全断网）：
+
+1. 打开 `http://127.0.0.1:3890/publish.html`，将 `xstars-wps-poc` 从 1.1.0 升级安装到 1.2.0；
+2. 点击 `XSTARS Gate 0 → 拉起本地服务`：预期弹出「服务拉起成功」，含 PID 和服务端记录 Origin；此时不应有任何控制台窗口（pythonw 无窗口拉起）；
+3. 再次点击「拉起本地服务」：预期提示「已在运行」（幂等路径）；
+4. 点击「测试 Tkinter 对话框」：预期弹出 Tkinter 模态对话框；**对话框打开期间在 WPS 里点击单元格、切换 Sheet，确认 WPS 不冻结**；然后点击「取消」；预期 alert 显示「选择：取消」和三次健康探活延迟（非「无响应」）；
+5. 点击「端口冲突诊断」：预期原服务 PID 不变，并展示第二实例的 `PORT CONFLICT` 日志记录；
+6. 可恢复性：运行 `taskkill /IM pythonw.exe /F` 强杀服务后，再点「拉起本地服务」，预期重新拉起成功。
+
+诊断日志位于 `poc/wps/.gate0-artifacts/service.log`；服务端关键实现为 Windows `SO_EXCLUSIVEADDRUSE` 单实例绑定（`SO_REUSEADDR` 在 Windows 上会静默双开，自测已验证该陷阱）。
+
+- [ ] `OAAssist.ShellExecute` 能无窗口拉起本地服务并就绪；
+- [ ] 服务已在运行时幂等报告，不重复拉起；
+- [ ] 真实 Origin（`null`）预检和 JSON 往返成功；
+- [ ] Tkinter 对话框打开期间服务探活成功、WPS 不冻结，取消可被正确回报；
+- [ ] 第二实例端口冲突失败有诊断日志，原服务不受影响；
+- [ ] 服务被强杀后可通过 Ribbon 重新拉起。
