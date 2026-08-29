@@ -163,7 +163,7 @@
 | M1 — Artifact 契约与生成时登记 | [x] | Plan 批准；待决事项 D1–D4 定案 | artifact round-trip、schema 拒绝、原子写入/best-effort、Figure 重建单测通过 | 先解决跨调用数据基础；不得阻断原出图 |
 | M2 — macOS Python 平台分支 | [x] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
 | M3 — 回归与平台测试 | [x] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
-| M4 — macOS 开发者文档 | [ ] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
+| M4 — macOS 开发者文档 | [x] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
 | M5 — CI、静态检查与实机验收 | [ ] | M3、M4 | macOS/Windows CI 全绿；`compileall`、`git diff --check` 通过；用户提交实机清单 | 用户实机记录前保持 Draft |
 
 Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]`。
@@ -238,19 +238,19 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 
 ### M4 — macOS 开发者文档
 
-- [ ] T4.1 新增 macOS 开发者安装与故障排查文档
+- [x] T4.1 新增 macOS 开发者安装与故障排查文档
   - 文件：新建 `docs/macos-developer-setup.md`
   - 修改：写明支持矩阵、Python 3.10+、虚拟环境、editable install、`xlwings addin install`、`xlwings runpython install`、复用 `ribbon/ribbon_callbacks.bas`、Excel 宏设置、自动化权限、首次运行、artifact 目录/实验数据隐私/清理、Export 限制与常见错误。
   - 验收：一名未参与实现的开发者可按步骤完成安装；明确不提供 `.app`、不支持 WPS、旧图 payload 缺失需重新生成。
   - 依赖：T1.1–T2.4；支撑 G6、G10、R1、R7、R8、R12、R15。
 
-- [ ] T4.2 更新英文与中文入口文档的平台声明
+- [x] T4.2 更新英文与中文入口文档的平台声明
   - 文件：修改 `README.md`、`README.zh-CN.md`
   - 修改：在 Quick Start/快速开始与 Requirements/系统要求中区分 Windows installer 和 macOS developer mode；链接 macOS 文档；避免把“无需 Python”描述套用于 macOS。
   - 验收：中英文平台表述一致；所有链接为仓库相对链接；Non-goals 和最低版本无冲突。
   - 依赖：T4.1；支撑 G6、R1、R7、R8。
 
-- [ ] T4.3 更新 Ribbon 文档以明确复用现有 RunPython VBA
+- [x] T4.3 更新 Ribbon 文档以明确复用现有 RunPython VBA
   - 文件：修改 `ribbon/README.md`
   - 修改：增加 macOS 小节，说明导入现有 `ribbon_callbacks.bas`，列出 xlwings add-in/runpython 前置条件和 Mac VBA Editor 操作差异；不得修改 `.bas`。
   - 验收：文档中不出现新增 macOS `.bas` 或 Shell/AppleScriptTask 实现要求；与 `docs/macos-developer-setup.md` 互链。

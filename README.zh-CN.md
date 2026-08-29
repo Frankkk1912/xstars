@@ -14,7 +14,6 @@
   <a href="#-快速开始">🚀 快速开始</a>
 </p>
 
-
 ---
 
 ## 🤔 为什么选择 XSTARS？
@@ -30,7 +29,7 @@
 ### 😩 科研作图的痛点
 
 | 痛点 | 没有 XSTARS 时 |
-|------|-------------------|
+| ------ | ------------------- |
 | 🔀 工具切换 | 从 Excel 复制数据 → 粘贴到 Prism/R → 做图 → 再贴回论文 |
 | 🤯 统计选择焦虑 | "该用 t 检验还是 Mann-Whitney？"—— 手动检查正态性，自己判断，祈祷没选错 |
 | 💸 费用 | GraphPad Prism：学生版 ~$300/年，机构版 ~$600+。或者用盗版，承担风险 |
@@ -39,16 +38,17 @@
 ### 💡 解决方案 —— 三个零
 
 | | 含义 |
-|---|------|
+| --- | ------ |
 | 🔄 **零切换** | 在 Excel 里选中数据 → 点击 → 图表直接出现在 Excel 中，数据不需要离开 |
 | 🧠 **零门槛** | 自动检测正态性和方差齐性 → 自动选择正确的统计方法 → 自动绘制显著性标注。你不需要选 |
-| 💰 **零成本** | 免费开源，一个安装包搞定，不需要安装 Python，没有授权费 |
+| 💰 **零成本** | 免费开源；Windows 安装包无需另装 Python，也没有授权费 |
 
 ---
 
 ## 🎬 演示
 
 ### ⚡ 快速出图 — 一键生成统计图表
+
 ![快速出图演示](assets/quick_run.gif)
 
 ---
@@ -56,11 +56,11 @@
 ## ⚔️ XSTARS vs. 其他方案
 
 | | XSTARS | GraphPad Prism | R / Python |
-|---|:---:|:---:|:---:|
+| --- | :---: | :---: | :---: |
 | **💰 价格** | 🟢 免费 | 🔴 ~$300–600/年 | 🟢 免费 |
 | **📊 在 Excel 内工作** | ✅ | ❌ | ❌ |
 | **🖱️ 无需编程** | ✅ | ✅ | ❌ |
-| **📦 无需安装 Python/R** | ✅（独立 .exe） | 不适用 | ❌ |
+| **📦 无需安装 Python/R** | ✅（仅 Windows 安装包） | 不适用 | ❌ |
 | **🤖 自动选择统计方法** | ✅ | ❌ 手动 | ❌ 手动 |
 | **📐 显著性标注** | ✅ 自动 | ⚠️ 手动放置 | ❌ 需写代码 |
 | **🧪 实验预设** | ✅ WB、qPCR、CCK-8、ELISA | ❌ | ❌ 自己搭建 |
@@ -74,6 +74,7 @@
 ## 🧰 功能特性
 
 ### 📊 图表类型
+
 - **柱状散点图** — 均值柱状图 + 误差线（SEM / SD / 95% CI）+ 个体数据点
 - **小提琴图** — 分布形态 + 可选散点叠加
 - **折线图** — 各组均值连线
@@ -91,7 +92,7 @@
 ```
 
 | 条件 | 2 组 | ≥ 3 组 |
-|------|------|--------|
+| ------ | ------ | -------- |
 | 正态 + 方差齐 | t 检验 | ANOVA + Tukey HSD |
 | 正态 + 方差不齐 | Welch t 检验 | Welch's ANOVA + Games-Howell |
 | 非正态 | Mann–Whitney U | Kruskal–Wallis + Dunn |
@@ -100,7 +101,6 @@
 
 显著性标注（`*`、`**`、`***`、`****` 或精确 p 值）自动绘制。✨
 
-
 > ⚠️ **小样本（N < 5）：** 极小样本下正态性检验不可靠——XSTARS 会跳过检验并默认假设正态。
 
 ### 🧪 实验预设
@@ -108,21 +108,25 @@
 内置生物医学常用实验流程 —— 无需手动计算：
 
 🔬 **Western Blot**
+
 - 条带灰度值 → 倍数变化归一化
 - 内参蛋白校正（如 GAPDH），逐泳道计算
 - 多目标标签模式：每个蛋白独立出图，自动内参归一化
 
 🧬 **qPCR (ΔΔCt)**
+
 - 支持 ΔCt 或 Raw Ct 输入
 - 自动计算 ΔΔCt → 2^(−ΔΔCt) 倍数变化
 - 多基因标签模式，自动内参基因归一化
 
 💊 **CCK-8 细胞活力**
+
 - 空白扣除 → 活力百分比
 - 可选 IC50 拟合（四参数 Logistic 曲线）
 - 剂量-反应曲线，支持灵活坐标轴缩放
 
 🧫 **ELISA**
+
 - 标准曲线拟合（4PL/线性）
 - 样本浓度反算
 - 支持手动输入已有拟合参数
@@ -140,7 +144,7 @@
 四个独立控件，**超过 1500 种风格组合**，总有一款匹配你的目标期刊：
 
 | 控件 | 选项 |
-|------|------|
+| ------ | ------ |
 | **🖌️ Base Theme** | Classic · B&W · Minimal · Dark |
 | **📐 Layout** | 期刊排版预设 — Nature · Science · Cell · Lancet · NEJM · JAMA · BMJ（图表宽度、字体、字号） |
 | **🎨 Palette** | 期刊风格配色方案（ggsci 风格） |
@@ -154,7 +158,7 @@
 
 ## 🚀 快速开始
 
-### 方式 A：📥 安装包（推荐 —— 无需 Python）
+### Windows：📥 安装包（推荐 —— 无需 Python）
 
 1. 从 [Releases](https://github.com/Frankkk1912/excel-prism/releases) 下载 `XSTARS_Setup.exe`
 2. 运行安装程序 —— 自动配置 Excel 插件
@@ -163,16 +167,21 @@
 
 > 💡 **第一次使用？** 打开安装包附带的 `XSTARS_Templates.xlsx`，里面已预置了覆盖所有图表类型和实验预设的示例数据——在任意 Sheet 上直接点击 Run，即可看到 XSTARS 的完整效果。
 
-### 方式 B：🛠️ 开发者安装（需要 Python）
+### macOS：🛠️ 开发者模式（需要 Python）
+
+macOS 仅支持开发者模式：在 Python 3.10+ 虚拟环境中安装 XSTARS 与 xlwings 桥接，并复用现有 RunPython VBA 回调。本项目不提供独立 `.app`，也不支持 WPS for Mac。
 
 ```bash
 git clone https://github.com/Frankkk1912/xstars.git
 cd xstars
-pip install -e ".[dev]"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 xlwings addin install
+xlwings runpython install
 ```
 
-然后打开 `.xlsm` 工作簿并添加 VBA 回调 —— 参见 [ribbon/README.md](ribbon/README.md)。
+Excel VBA 导入、Python 解释器、宏与自动化权限、artifact 隐私、Export 限制和故障排查详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md)。现有回调模块说明见 [ribbon/README.md](ribbon/README.md)。
 
 ---
 
@@ -204,7 +213,7 @@ xlwings addin install
 所有选项通过选项卡式对话框配置：
 
 | 选项卡 | 内容 |
-|--------|------|
+| -------- | ------ |
 | **⚡ 常规** | 图表类型、误差线、数据点、配对模式、标注格式、比较模式 |
 | **🎨 主题** | Base Theme · Layout · Palette · Color Style（均可从功能区独立调整） |
 | **🧪 预设** | 实验类型（WB / qPCR / CCK-8 / ELISA）及专属选项 |
@@ -216,9 +225,11 @@ xlwings addin install
 
 ## 📌 系统要求
 
-- 🪟 Windows + Microsoft Excel
-- **安装包模式**：无其他要求 —— `.exe` 已打包所有依赖
-- **开发者模式**：Python ≥ 3.10
+- **Windows 安装包模式**：Windows + Microsoft Excel；`.exe` 已打包运行时，无需另装 Python
+- **macOS 开发者模式**：macOS 10.14+、Microsoft Excel for Mac 2016+、Python ≥ 3.10，支持 Intel 与 Apple Silicon；还需安装 xlwings add-in 与 RunPython 支持
+- 不支持 WPS for Mac；不提供独立 macOS `.app`
+
+macOS 版本和芯片矩阵来自上游 xlwings 支持声明；没有真实 Excel 运行记录的组合不宣称为本项目已验证。详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md)。
 
 ---
 
