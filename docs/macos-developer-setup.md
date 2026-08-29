@@ -216,6 +216,7 @@ Window focus and appearance vary by macOS and Tk version. Bring the Python dialo
 
 ## Related documentation
 
+- [Excel for Mac manual acceptance checklist](macos-manual-acceptance.md)
 - [Project README](../README.md)
 - [中文 README](../README.zh-CN.md)
 - [Ribbon installation](../ribbon/README.md)
