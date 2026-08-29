@@ -1,6 +1,6 @@
 # XSTARS Windows WPS 支持评估与实施计划
 
-> 状态：**已获用户批准（M0.1 已通过，M0.2 等待实机验证）**
+> 状态：**已获用户批准（M0.1、M0.2 已通过，M0.3 等待实施）**
 > 基准：`main` @ `5f4c409`，XSTARS `v1.1.1`
 > 目标宿主：Windows 10/11 x64 + 最新稳定版 WPS 365/12.x 表格
 > 阻断验收：WPS 专业版/商业版/政企版 x64
@@ -349,10 +349,11 @@ Excel 端
   - 证据：WPS 365 教育高级版 `12.1.0.28022` 64 位在完全断网环境通过官方 `publish` 安装、Ribbon 显示、按钮回调、完全退出后重启回调和卸载；实际 Origin 为 `file://`；记录见 Draft PR [#1](https://github.com/Frankkk1912/xstars/pull/1#issuecomment-5461289789)。
   - 依赖：M0.0；专业版和个人版测试机。
 
-- [ ] **M0.2 验证 Selection/Value2/AddPicture 垂直链路**
+- [x] **M0.2 验证 Selection/Value2/AddPicture 垂直链路**
   - 文件：`poc/wps/addin/*`、`poc/wps/probe_server.py`
   - 修改：选区二维值发往回环探针，返回矩阵和 PNG 路径，写回并嵌入图片。
   - 验收：保存并重开后数据和图片仍存在；记录坐标、缩放和错误行为。
+  - 证据：2026-08-29 完全断网实机验证，WPS 365 教育高级版 `12.1.0.28022` 64 位：官方 `publish` 安装 `1.1.0` 后，`A1:B2` 二维 `Value2` 经 Origin `null` 预检发往 `127.0.0.1:3891/probe`，JSON 往返成功；`D1:E2` 写回矩阵一致；`Shapes.AddPicture` 嵌入 320×180 PNG（11.29 × 6.35 厘米，`D1:E2` 下方）；另存副本、完全退出重开后值和图片均存在；全程无报错。
   - 依赖：M0.1。
 
 - [ ] **M0.3 验证服务拉起、CORS、Tkinter 与生命周期**
