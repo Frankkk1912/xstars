@@ -209,9 +209,12 @@ test("M0.3 launches the service via ShellExecute when health fails", async () =>
     fetchHandler: handler,
     oaAssist: {
       ShellExecute: (...args) => {
-        assert.equal(args[0], "C:\\Users\\daiyu\\miniforge3\\envs\\scrna\\pythonw.exe");
+        assert.equal(args.length, 2);
+        assert.equal(
+          args[0],
+          "C:\\Users\\daiyu\\miniforge3\\envs\\scrna\\pythonw.exe",
+        );
         assert.match(args[1], /service_server\.py" --port 3892$/);
-        assert.equal(args[3], "open");
         return 42;
       },
     },

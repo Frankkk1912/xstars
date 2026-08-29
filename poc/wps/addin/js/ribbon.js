@@ -42,7 +42,9 @@ async function fetchService(url, init) {
 
 async function checkServiceHealth() {
   const result = await fetchService(`${XSTARS_GATE0_SERVICE.baseUrl}/health`);
-  return result.ok && result.payload && result.payload.ok ? result.payload : null;
+  return result.ok && result.payload && result.payload.ok
+    ? result.payload
+    : null;
 }
 
 function launchServiceViaShellExecute() {
@@ -51,12 +53,11 @@ function launchServiceViaShellExecute() {
   if (!oaAssist || typeof oaAssist.ShellExecute !== "function") {
     throw new Error("OAAssist.ShellExecute 不可用，无法拉起本地服务");
   }
+  // 官方签名只有 2 个参数：ShellExecute(Url, Params)，非 Windows API 5 参数版。
+  // 传 5 个参数会被 WPS JSAPI 以 "too many parameters" 拒绝。
   return oaAssist.ShellExecute(
     XSTARS_GATE0_SERVICE.pythonwPath,
     `"${XSTARS_GATE0_SERVICE.scriptPath}" --port 3892`,
-    XSTARS_GATE0_SERVICE.workDir,
-    "open",
-    1,
   );
 }
 
@@ -272,7 +273,9 @@ async function runM03PortConflict() {
     );
   }
 
-  const diag = await fetchService(`${XSTARS_GATE0_SERVICE.baseUrl}/diagnostics`);
+  const diag = await fetchService(
+    `${XSTARS_GATE0_SERVICE.baseUrl}/diagnostics`,
+  );
   const conflictLines =
     diag.ok && diag.payload && Array.isArray(diag.payload.logTail)
       ? diag.payload.logTail.filter((line) => line.includes("PORT CONFLICT"))
