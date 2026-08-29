@@ -86,7 +86,10 @@ test("M0.2 sends Selection, writes Value2, and embeds the returned PNG", async (
     Areas: { Count: 1 },
     Rows: { Count: 2 },
     Columns: { Count: 2 },
-    Value2: [[1, 2], [3, 4]],
+    Value2: [
+      [1, 2],
+      [3, 4],
+    ],
     Offset: (rows, columns) => {
       assert.equal(rows, 0);
       assert.equal(columns, 3);
@@ -113,7 +116,10 @@ test("M0.2 sends Selection, writes Value2, and embeds the returned PNG", async (
     response: {
       body: {
         ok: true,
-        matrix: [[1, 2], [3, 4]],
+        matrix: [
+          [1, 2],
+          [3, 4],
+        ],
         imagePath: "C:\\Temp\\xstars-gate0-probe.png",
         imageWidth: 320,
         imageHeight: 180,
@@ -129,10 +135,16 @@ test("M0.2 sends Selection, writes Value2, and embeds the returned PNG", async (
       address: "$A$1:$B$2",
       rows: 2,
       columns: 2,
-      values: [[1, 2], [3, 4]],
+      values: [
+        [1, 2],
+        [3, 4],
+      ],
     },
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(target.Value2)), [[1, 2], [3, 4]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(target.Value2)), [
+    [1, 2],
+    [3, 4],
+  ]);
   assert.deepEqual(pictureCalls, [
     ["C:\\Temp\\xstars-gate0-probe.png", 0, -1, 480, 120, 320, 180],
   ]);

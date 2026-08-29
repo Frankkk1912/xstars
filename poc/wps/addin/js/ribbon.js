@@ -64,7 +64,11 @@ async function runM02Probe() {
 
   const rowCount = Number(selection.Rows.Count);
   const columnCount = Number(selection.Columns.Count);
-  const values = normalizeSelectionValues(selection.Value2, rowCount, columnCount);
+  const values = normalizeSelectionValues(
+    selection.Value2,
+    rowCount,
+    columnCount,
+  );
   const requestBody = {
     selection: {
       address: getRangeAddress(selection),
@@ -87,7 +91,9 @@ async function runM02Probe() {
     throw new Error(`探针返回的不是有效 JSON：${error.message}`);
   }
   if (!response.ok || !payload.ok) {
-    const detail = payload.error ? `${payload.error.code}: ${payload.error.message}` : response.status;
+    const detail = payload.error
+      ? `${payload.error.code}: ${payload.error.message}`
+      : response.status;
     throw new Error(`回环探针请求失败：${detail}`);
   }
 

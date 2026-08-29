@@ -170,7 +170,9 @@ class ProbeRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_error(self, status: int, code: str, message: str) -> None:
-        self._send_json(status, {"ok": False, "error": {"code": code, "message": message}})
+        self._send_json(
+            status, {"ok": False, "error": {"code": code, "message": message}}
+        )
 
     def do_OPTIONS(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
         if not self._request_allowed():
@@ -194,7 +196,9 @@ class ProbeRequestHandler(BaseHTTPRequestHandler):
             self._send_error(404, "not_found", "endpoint not found")
             return
         server = cast(ProbeHTTPServer, self.server)
-        self._send_json(200, {"ok": True, "service": "xstars-wps-gate0", "port": server.server_port})
+        self._send_json(
+            200, {"ok": True, "service": "xstars-wps-gate0", "port": server.server_port}
+        )
 
     def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
         if not self._request_allowed():
@@ -203,16 +207,24 @@ class ProbeRequestHandler(BaseHTTPRequestHandler):
             self._send_error(404, "not_found", "endpoint not found")
             return
         if self.headers.get_content_type() != "application/json":
-            self._send_error(415, "unsupported_media_type", "Content-Type must be application/json")
+            self._send_error(
+                415, "unsupported_media_type", "Content-Type must be application/json"
+            )
             return
 
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self._send_error(400, "invalid_content_length", "Content-Length must be an integer")
+            self._send_error(
+                400, "invalid_content_length", "Content-Length must be an integer"
+            )
             return
         if content_length <= 0 or content_length > MAX_BODY_BYTES:
-            self._send_error(413, "invalid_body_size", "request body size is outside the allowed range")
+            self._send_error(
+                413,
+                "invalid_body_size",
+                "request body size is outside the allowed range",
+            )
             return
 
         try:
