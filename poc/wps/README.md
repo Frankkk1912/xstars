@@ -5,7 +5,8 @@
 ## 当前状态
 
 - M0.1：**企业授权实机阻断验收已通过**。
-- 测试宿主：WPS 365 `12.1.0.28022` 64 位，大学组织企业授权，完全断网。
+- M0.2：**自动化、离线包和回环探针已就绪，等待实机写回/图片持久化验证**。
+- 测试宿主：WPS 365 教育高级版 `12.1.0.28022` 64 位，完全断网。
 - 官方 `publish` 安装、Ribbon、按钮回调、完全退出后重启回调和卸载均通过；实际 Origin 为 `file://`。
 - Node.js 与 npm 可用；PoC 固定使用官方 `wpsjs 2.2.3`。
 - 已用 `wpsjs create xstars-wps-poc` 生成“电子表格 + 无 UI 框架”模板，再缩减为单个 Ribbon 回调按钮。
@@ -22,9 +23,11 @@
 
 ```powershell
 cd poc/wps/addin
-npm ci
-npm run build
+npm.cmd ci
+npm.cmd run build
 ```
+
+如果 PowerShell 禁止运行 `npm.ps1`，应直接使用 `npm.cmd`，不需要放宽系统执行策略。
 
 开发调试命令为 `npm run wps:debug`。该命令会启动 WPS 和本地开发服务，只用于联机调试，不等于完全断网的 Gate 0 部署验收。
 
@@ -33,7 +36,7 @@ npm run build
 在 `poc/wps/addin` 中执行：
 
 ```powershell
-npm run wps:package:offline
+npm.cmd run wps:package:offline
 python -m http.server 3890 --bind 127.0.0.1 --directory deploy
 ```
 
@@ -43,7 +46,7 @@ python -m http.server 3890 --bind 127.0.0.1 --directory deploy
 
 - `wps-addon-build/xstars-wps-poc.7z`；
 - `wps-addon-publish/publish.html`；
-- 发布记录：`addonType=et`、`online=false`、`multiUser=false`、`version=1.0.0`；
+- 发布记录：`addonType=et`、`online=false`、`multiUser=false`、`version=1.1.0`；
 - 预期插件 URL：`http://127.0.0.1:3890/addin/xstars-wps-poc.7z`。
 
 ### `wpsjs 2.2.3` 发布注意事项
@@ -68,3 +71,37 @@ python -m http.server 3890 --bind 127.0.0.1 --directory deploy
 - [ ] 在个人版执行相同 smoke test，仅记录能力，不作为阻断结果。
 
 企业授权阻断项已全部通过；个人版 Beta smoke test 尚未执行，但不阻断 M0.2。
+
+## M0.2 Selection/Value2/AddPicture 实机验证
+
+M0.2 使用独立端口：`3890` 仅提供官方安装页，`3891` 仅提供回环 JSON 探针。探针只绑定 `127.0.0.1`，并针对已观测的 `file://` 页面严格允许 CORS Origin `null`，不使用通配符。
+
+保持完全断网，打开两个 PowerShell 窗口。
+
+窗口 A（仓库根目录）：
+
+```powershell
+cd E:\Documents\GitHub\xstars
+python poc\wps\probe_server.py --port 3891
+```
+
+窗口 B（加载项目录）：
+
+```powershell
+cd E:\Documents\GitHub\xstars\poc\wps\addin
+python -m http.server 3890 --bind 127.0.0.1 --directory deploy
+```
+
+打开 `http://127.0.0.1:3890/publish.html`，安装 `xstars-wps-poc 1.1.0`。随后：
+
+1. 在新工作表输入一个小型二维矩阵，例如 `A1:B2 = [[1, 2], [3, 4]]`；
+2. 选择 `A1:B2`，点击 `XSTARS Gate 0 → 验证选区写回/图片`；
+3. 验证探针收到 `OPTIONS` 和 `POST /probe`，WPS 在 `D1:E2` 写回同一矩阵，并在其下方插入 PNG；
+4. 将工作簿另存为测试副本，完全退出并重开 WPS；
+5. 确认写回值和图片仍存在，记录图片位置、尺寸及任何错误。
+
+- [ ] `Selection.Address()` 和二维 `Value2` 读取正确；
+- [ ] Origin `null` 的预检和 JSON 往返成功；
+- [ ] 二维 `Value2` 批量写回正确；
+- [ ] `Shapes.AddPicture(path, 0, -1, ...)` 成功嵌入 PNG；
+- [ ] 保存并重开后写回值和图片仍存在。

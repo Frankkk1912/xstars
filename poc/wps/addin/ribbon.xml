@@ -9,6 +9,12 @@
                             getImage="GetImage"
                             visible="true"
                             size="large"/>
+                    <button id="xstarsM02Probe"
+                            label="验证选区写回/图片"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
                 </group>
             </tab>
         </tabs>
