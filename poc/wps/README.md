@@ -6,7 +6,7 @@
 
 - M0.1：**企业授权实机阻断验收已通过**。
 - M0.2：**实机写回/图片持久化验收已通过**（2026-08-29，详见下文记录）。
-- M0.3：**服务端与加载项已实现并通过自测，等待实机验证**（详见下文步骤）。
+- M0.3：**实机验证完成，含关键负面发现：`OAAssist.ShellExecute` 在本宿主失效，拉起策略改为安装器自启动**（详见下文记录）。
 - 测试宿主：WPS 365 教育高级版 `12.1.0.28022` 64 位，完全断网。
 - 官方 `publish` 安装、Ribbon、按钮回调、完全退出后重启回调和卸载均通过；实际 Origin 为 `file://`。
 - Node.js 与 npm 可用；PoC 固定使用官方 `wpsjs 2.2.3`。
@@ -106,6 +106,27 @@ python -m http.server 3890 --bind 127.0.0.1 --directory deploy
 - [x] 二维 `Value2` 批量写回正确；
 - [x] `Shapes.AddPicture(path, 0, -1, ...)` 成功嵌入 PNG；
 - [x] 保存并重开后写回值和图片仍存在。
+
+## M0.3 实机验收记录（2026-08-29）
+
+宿主同前：WPS 365 教育高级版 `12.1.0.28022` 64 位，完全断网。
+
+### 关键发现：`OAAssist.ShellExecute` 失效
+
+- 实机点击「拉起本地服务」：弹出官方安全确认窗，点击「是」后 ShellExecute 返回 `null`，**目标进程从未被创建**。
+- 铁证：服务脚本入口首行写日志（`process entry argv=...`）+ 5 分钟 143 次进程/端口采样，日志始终空白、pythonw 进程从未出现；而同一命令行经 PowerShell 直接拉起 pythonw 立即成功。
+- 官方签名实为 2 参数 `ShellExecute(Url, Params)`（传 Windows API 5 参数版会被 `too many parameters` 拒绝）；修正后依然弹窗后无动作，与社区报告的接口审查下线行为一致。
+- **策略结论：加载项不能自行拉起本地服务；服务自启动由 M5.1 独立安装器负责，加载项仅做健康检查与用户引导**。该发现是 Gate 0 的核心产出之一。
+
+### 其余验证项（服务以安装器等价方式预先启动）
+
+- [x] 幂等路径：服务已运行时 `/health` 探测成功并提示「已在运行」，不重复拉起（单元测试覆盖；冲突诊断按钮的存活检查亦实时验证了 WPS→服务 JSON 往返）；
+- [x] 真实 Origin 与预检：WPS 端 fetch 实际携带 `Origin: file://`，`OPTIONS` 预检与 `/dialog` JSON 往返成功；
+- [x] Tkinter 阻塞/取消：模态对话框打开期间服务探活正常、WPS 不冻结（实机确认）；「确定」与「取消」均被正确回报（日志 `confirmed=True/False`）；
+- [x] 端口冲突可诊断：服务端自测通过；真实双开产生 `PORT CONFLICT` 日志（WinError 10048）且第二实例以退出码 2 退出，原服务不受影响（PID 不变）；实现采用 Windows `SO_EXCLUSIVEADDRUSE`（`SO_REUSEADDR` 在 Windows 上会静默双开，自测已验证该陷阱）；
+- [x] 可恢复性：服务被杀后可由外部重新拉起并立即恢复服务；加载项内拉起不可用（见上）。
+
+- 诊断链路：`/diagnostics` 返回日志尾部；日志位于 `poc/wps/.gate0-artifacts/service.log`；`/health` 上报真实 os_pid。
 
 ## M0.2 实机验收记录（2026-08-29）
 
