@@ -8,6 +8,8 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import re
+import sys
 import traceback
 from contextlib import suppress
 from typing import TYPE_CHECKING, cast
@@ -256,16 +258,19 @@ def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> 
             f"Details: {message[:300]}"
         )
     book.app.status_bar = f"Excel-Prism Error: {message}"
+    root = None
     try:
         import tkinter as tk
         from tkinter import messagebox
 
         root = tk.Tk()
         root.withdraw()
-        # Bring the message box to the front
-        root.attributes("-topmost", True)
+        # Bring the message box to the front when the window manager supports it.
+        try:
+            root.attributes("-topmost", True)
+        except Exception as exc:
+            _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
         messagebox.showerror("Excel-Prism", friendly, parent=root)
-        root.destroy()
     except Exception:
         # Last resort: try VBA MsgBox
         try:
@@ -276,6 +281,12 @@ def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> 
             )
         except Exception as exc:
             _ARTIFACT_LOGGER.debug("VBA MsgBox fallback failed: %s", exc)
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception as exc:
+                _ARTIFACT_LOGGER.debug("Tk error window cleanup failed: %s", exc)
 
 
 _USER_ERRORS = (ValueError, TypeError, KeyError)
@@ -1004,8 +1015,51 @@ def run_export() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
+def _artifact_identity_for_picture(
+    book: xw.Book, sheet, picture
+) -> artifacts.ArtifactIdentity:
+    """Build the exact persisted identity for one xlwings picture."""
+    sheet_name = getattr(sheet, "name", None)
+    picture_name = getattr(picture, "name", None)
+    if not isinstance(sheet_name, str) or not sheet_name.strip():
+        raise ValueError("Worksheet identity is unavailable for artifact export")
+    if not isinstance(picture_name, str) or not picture_name.strip():
+        raise ValueError("Picture identity is unavailable for artifact export")
+    return artifacts.ArtifactIdentity(
+        workbook=_workbook_artifact_identifier(book),
+        sheet=sheet_name,
+        picture=picture_name,
+    )
+
+
 def _get_selected_shapes(book: xw.Book) -> list:
-    """Return COM Shape objects the user has selected, or XSTARS charts as fallback."""
+    """Return export candidates using the host platform's supported mechanism."""
+    if sys.platform == "darwin":
+        # Excel for Mac exposes appscript rather than COM.  Do not touch
+        # book.app.api/ShapeRange: only validated artifact-backed pictures are
+        # eligible for the reconstruction export path.
+        sheet = book.selection.sheet
+        pictures = []
+        for picture in sheet.pictures:
+            picture_name = getattr(picture, "name", "")
+            if not isinstance(picture_name, str) or not picture_name.startswith(
+                "XSTARS_"
+            ):
+                continue
+            try:
+                identity = _artifact_identity_for_picture(book, sheet, picture)
+                artifacts.load_artifact(identity)
+            except (artifacts.ArtifactError, ValueError) as exc:
+                _ARTIFACT_LOGGER.info(
+                    "Skipping macOS picture without a valid rebuild artifact (%s): %s",
+                    picture_name,
+                    exc,
+                )
+                continue
+            pictures.append(picture)
+        return pictures
+
+    # Preserve the existing Windows ShapeRange-first behavior and fallback.
     try:
         sel = book.app.api.Selection
         _shape_type = sel.ShapeRange.Item(1).Type  # succeeds only for shape selection
@@ -1213,15 +1267,69 @@ def _show_export_dialog() -> tuple[str, int] | None:
     return None
 
 
+def _export_artifact_picture(
+    book: xw.Book, sheet, picture, save_path: str, dpi: int
+) -> None:
+    """Atomically rebuild and export one artifact-backed macOS picture."""
+    import tempfile
+    from pathlib import Path
+
+    import matplotlib.pyplot as plt
+
+    target = Path(save_path)
+    temp_path: Path | None = None
+    fig = None
+    try:
+        identity = _artifact_identity_for_picture(book, sheet, picture)
+        payload = artifacts.load_artifact(identity)
+        try:
+            fig = artifacts.rebuild_figure(payload)
+        except artifacts.ArtifactError:
+            raise
+        except Exception as exc:
+            raise artifacts.CorruptArtifactError(
+                "The chart rebuild information could not be rendered."
+            ) from exc
+
+        # Matplotlib infers the format from the suffix.  Export beside the
+        # destination and replace only after success so failures cannot expose
+        # a partial output file or overwrite an existing valid export.
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent,
+            prefix=f".{target.stem}.",
+            suffix=target.suffix,
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+        export_figure(fig, str(temp_path), dpi)
+        os.replace(temp_path, target)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            with suppress(OSError):
+                temp_path.unlink()
+        if fig is not None:
+            plt.close(fig)
+
+
 def _run_export_impl(book: xw.Book) -> None:
     """Export selected picture(s) at high resolution."""
     shapes = _get_selected_shapes(book)
+    macos_sheet = book.selection.sheet if sys.platform == "darwin" else None
     if not shapes:
-        _show_error(
-            book,
-            "No image selected.\n\n"
-            "Please click on a picture in the spreadsheet first, then run Export.",
-        )
+        if sys.platform == "darwin":
+            message = (
+                "No exportable XSTARS chart was found.\n\n"
+                "macOS export only supports charts generated by this XSTARS "
+                "version with valid rebuild information. Please regenerate the "
+                "chart and try again."
+            )
+        else:
+            message = (
+                "No image selected.\n\n"
+                "Please click on a picture in the spreadsheet first, then run Export."
+            )
+        _show_error(book, message)
         return
 
     dlg_result = _show_export_dialog()
@@ -1237,7 +1345,15 @@ def _run_export_impl(book: xw.Book) -> None:
         else:
             p = Path(path)
             save_path = str(p.with_stem(f"{p.stem}_{i + 1}"))
-        _export_shape_highres(shape, save_path, dpi)
+        if sys.platform == "darwin":
+            try:
+                _export_artifact_picture(book, macos_sheet, shape, save_path, dpi)
+            except artifacts.ArtifactError as exc:
+                _ARTIFACT_LOGGER.warning("macOS artifact export failed: %s", exc)
+                _show_error(book, exc.user_message)
+                return
+        else:
+            _export_shape_highres(shape, save_path, dpi)
 
     book.app.status_bar = f"XSTARS: Exported to {path} ({dpi} DPI)"
 
@@ -1600,12 +1716,80 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
-def _select_sample_data(book: xw.Book, sheet) -> pd.DataFrame | None:
-    """Prompt user to select a sample OD region in Excel via InputBox.
+_A1_RANGE_RE = re.compile(
+    r"^\$?[A-Za-z]{1,3}\$?[1-9]\d*(?::\$?[A-Za-z]{1,3}\$?[1-9]\d*)?$"
+)
 
-    Returns a wide DataFrame (columns = sample group names, rows = OD replicates),
-    or None if cancelled.
-    """
+
+def _select_sample_data_macos(book: xw.Book, sheet) -> pd.DataFrame | None:
+    """Prompt for an active-sheet A1 range without using Excel COM APIs."""
+    root = None
+    try:
+        import tkinter as tk
+        from tkinter import messagebox, simpledialog
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception as exc:
+            _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
+
+        while True:
+            address = simpledialog.askstring(
+                "Standard Curve — Select Sample Data",
+                "Enter the sample OD data range on the active sheet "
+                "(with headers), for example A1:C6:",
+                parent=root,
+            )
+            if address is None:
+                return None
+            address = address.strip()
+            if not _A1_RANGE_RE.fullmatch(address):
+                messagebox.showerror(
+                    "Invalid Range",
+                    "Enter an A1-style range on the active sheet, for example "
+                    "A1:C6. Cross-sheet references and named ranges are not supported.",
+                    parent=root,
+                )
+                continue
+
+            try:
+                rng = sheet.range(address)
+                raw = rng.options(pd.DataFrame, header=1, index=False).value
+                raw.columns = [str(c).strip() for c in raw.columns]
+                for col in raw.columns:
+                    raw[col] = pd.to_numeric(raw[col], errors="coerce")
+                return raw.dropna(how="all").reset_index(drop=True)
+            except Exception as exc:
+                _ARTIFACT_LOGGER.info("Invalid macOS sample range %r: %s", address, exc)
+                messagebox.showerror(
+                    "Invalid Range",
+                    "That range could not be read from the active sheet. "
+                    "Check the A1 address and try again.",
+                    parent=root,
+                )
+    except Exception as exc:
+        _ARTIFACT_LOGGER.warning("macOS sample-range dialog failed: %s", exc)
+        _show_error(
+            book,
+            "Could not open the sample range dialog. Please check your Python "
+            "tkinter installation and try again.",
+        )
+        return None
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception as exc:
+                _ARTIFACT_LOGGER.debug("Tk sample dialog cleanup failed: %s", exc)
+
+
+def _select_sample_data(book: xw.Book, sheet) -> pd.DataFrame | None:
+    """Prompt user for sample OD data and return a cleaned wide DataFrame."""
+    if sys.platform == "darwin":
+        return _select_sample_data_macos(book, sheet)
+
     try:
         # Type=8 returns a Range object; user can select with mouse
         result = book.app.api.InputBox(

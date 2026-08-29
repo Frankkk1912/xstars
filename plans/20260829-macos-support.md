@@ -161,7 +161,7 @@
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
 | M1 — Artifact 契约与生成时登记 | [x] | Plan 批准；待决事项 D1–D4 定案 | artifact round-trip、schema 拒绝、原子写入/best-effort、Figure 重建单测通过 | 先解决跨调用数据基础；不得阻断原出图 |
-| M2 — macOS Python 平台分支 | [ ] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
+| M2 — macOS Python 平台分支 | [x] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
 | M3 — 回归与平台测试 | [ ] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
 | M4 — macOS 开发者文档 | [ ] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
 | M5 — CI、静态检查与实机验收 | [ ] | M3、M4 | macOS/Windows CI 全绿；`compileall`、`git diff --check` 通过；用户提交实机清单 | 用户实机记录前保持 Draft |
@@ -192,25 +192,25 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 
 ### M2 — macOS Python 平台分支
 
-- [ ] T2.1 将图表发现逻辑按平台隔离
+- [x] T2.1 将图表发现逻辑按平台隔离
   - 文件：修改 `xstars/main.py:881-894`
   - 修改：Darwin 直接遍历活动 sheet 的 pictures，并仅返回能关联有效 artifact 的 XSTARS 图片候选；不访问 `book.app.api.Selection.ShapeRange`。非 Darwin 保留现有 ShapeRange-first 与 fallback 行为。
   - 验收：Darwin mock 断言 `.app.api` 未被访问；只返回合格 XSTARS picture；非 Darwin 测试断言 ShapeRange 访问次数、返回顺序和 fallback 与基线一致。
   - 依赖：T1.1、T1.2；支撑 G2、G3、G9、R5、R10。
 
-- [ ] T2.2 新增 macOS artifact Figure 导出分支并保留 Windows COM 实现
+- [x] T2.2 新增 macOS artifact Figure 导出分支并保留 Windows COM 实现
   - 文件：修改 `xstars/main.py:897-1092`；调用 `xstars/artifacts.py` 与现有 `xstars/plot_engine.py:21-23`
   - 修改：保留 `_export_shape_highres()` 的 Windows COM/clipboard 代码；为 Darwin 新增 load payload → rebuild Figure → `export_figure()`/`fig.savefig()` → close Figure 流程；多图命名继续沿用现有 `_1`、`_2` 规则；缺失 payload 调用统一友好错误。
   - 验收：Darwin 测试中 `CopyPicture`、ImageGrab 和 COM Shape 属性均未调用；PNG/TIFF/JPG/SVG/PDF 中现有 Export 对话框声明格式按 Matplotlib 能力输出；DPI 与多图文件名正确；非 Darwin `_export_shape_highres()` 调用契约不变。
   - 依赖：T1.1–T1.3、T2.1；支撑 G1、G2、G9、R2–R5、R10。
 
-- [ ] T2.3 为 `_select_sample_data()` 增加 Darwin tkinter 范围地址输入
+- [x] T2.3 为 `_select_sample_data()` 增加 Darwin tkinter 范围地址输入
   - 文件：修改 `xstars/main.py:1385-1413`
   - 修改：Darwin 用 tkinter `simpledialog`/等价小型输入 UI 请求活动 sheet A1 范围，使用 xlwings `sheet.range(address)` 读取；保留 DataFrame 清洗；取消返回 `None`；无效地址给出可理解反馈。非 Darwin 保留现有 `book.app.api.InputBox(Type=8)`。
   - 验收：Darwin 有效地址产生与 Windows 路径同形 DataFrame；取消返回 None；无效地址不访问 COM 且不泄露 traceback；非 Darwin mock 断言原 InputBox 调用参数不变。
   - 依赖：D5 定案；支撑 G4、G9、R6、R10。
 
-- [ ] T2.4 使 tkinter `-topmost` 失败成为非致命降级
+- [x] T2.4 使 tkinter `-topmost` 失败成为非致命降级
   - 文件：修改 `xstars/main.py:166-199`
   - 修改：把 `root.attributes("-topmost", True)` 置于局部容错中，确保该属性失败时仍尝试 messagebox；所有路径可靠销毁 root；不改变错误文案与 Excel status bar。
   - 验收：模拟 `attributes` 抛错时 `messagebox.showerror` 仍调用且 root.destroy 执行；模拟 tkinter 整体失败时保留现有 VBA MsgBox/status bar fallback。
