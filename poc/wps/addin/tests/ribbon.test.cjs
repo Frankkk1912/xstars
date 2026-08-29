@@ -14,6 +14,7 @@ function loadRibbon(workbookName = null) {
         const context = {
                 window: {
                         alert: (message) => alerts.push(message),
+                        location: { origin: "http://127.0.0.1:3890" },
                         Application: {
                                 ActiveWorkbook: workbookName
                                         ? { Name: workbookName }
@@ -40,7 +41,7 @@ test("Gate 0 button proves the callback and reports the workbook", () => {
 
         assert.equal(context.OnAction({ Id: "xstarsGate0Callback" }), true);
         assert.deepEqual(alerts, [
-                "XSTARS Gate 0 回调成功\n工作簿：gate0.xlsx",
+                "XSTARS Gate 0 回调成功\n工作簿：gate0.xlsx\nOrigin：http://127.0.0.1:3890",
         ]);
 });
 

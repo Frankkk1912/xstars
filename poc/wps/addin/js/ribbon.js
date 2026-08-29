@@ -10,7 +10,10 @@ function OnAction(control) {
 
     const workbook = window.Application.ActiveWorkbook;
     const workbookName = workbook ? workbook.Name : "（无活动工作簿）";
-    window.alert(`XSTARS Gate 0 回调成功\n工作簿：${workbookName}`);
+    const origin = window.location.origin || "（未知）";
+    window.alert(
+        `XSTARS Gate 0 回调成功\n工作簿：${workbookName}\nOrigin：${origin}`,
+    );
     return true;
 }
 
