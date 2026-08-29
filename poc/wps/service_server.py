@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import queue
 import sys
 import threading
@@ -52,7 +53,9 @@ def log_path() -> Path:
 def log_write(message: str) -> None:
     """Append a timestamped diagnostic line to the shared service log."""
 
-    entry = f"{datetime.now().isoformat(timespec='seconds')} pid={id(threading.current_thread()) % 100000} {message}"
+    entry = (
+        f"{datetime.now().isoformat(timespec='seconds')} os_pid={os.getpid()} {message}"
+    )
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -109,7 +112,9 @@ class TkDialogManager:
             except Exception as error:  # pragma: no cover - Tk runtime failure
                 result_queue.put({"confirmed": None, "error": str(error)})
 
-    def show_dialog(self, message: str, timeout: float = DIALOG_TIMEOUT_SECONDS) -> dict[str, Any]:
+    def show_dialog(
+        self, message: str, timeout: float = DIALOG_TIMEOUT_SECONDS
+    ) -> dict[str, Any]:
         if self._init_error:
             return {"confirmed": None, "error": self._init_error}
         result_queue: queue.Queue[Any] = queue.Queue()
@@ -183,7 +188,9 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_error(self, status: int, code: str, message: str) -> None:
-        self._send_json(status, {"ok": False, "error": {"code": code, "message": message}})
+        self._send_json(
+            status, {"ok": False, "error": {"code": code, "message": message}}
+        )
 
     def do_OPTIONS(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
         if not self._request_allowed():
@@ -212,7 +219,7 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "xstars-wps-gate0-service",
                     "port": server.server_address[1],
-                    "pid": id(threading.current_thread()) % 100000,
+                    "pid": os.getpid(),
                     "uptimeSeconds": round(time.monotonic() - STARTED_AT, 1),
                     "requestOrigin": self._origin_echo(),
                 },
@@ -237,16 +244,24 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
             self._send_error(404, "not_found", "endpoint not found")
             return
         if self.headers.get_content_type() != "application/json":
-            self._send_error(415, "unsupported_media_type", "Content-Type must be application/json")
+            self._send_error(
+                415, "unsupported_media_type", "Content-Type must be application/json"
+            )
             return
 
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self._send_error(400, "invalid_content_length", "Content-Length must be an integer")
+            self._send_error(
+                400, "invalid_content_length", "Content-Length must be an integer"
+            )
             return
         if content_length < 0 or content_length > MAX_BODY_BYTES:
-            self._send_error(413, "invalid_body_size", "request body size is outside the allowed range")
+            self._send_error(
+                413,
+                "invalid_body_size",
+                "request body size is outside the allowed range",
+            )
             return
 
         server = self.server
@@ -256,9 +271,17 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
         duration_ms = round((time.monotonic() - started) * 1000)
         if result.get("error"):
             log_write(f"dialog error: {result['error']}")
-            self._send_json(500, {"ok": False, "error": {"code": "dialog_failed", "message": result["error"]}})
+            self._send_json(
+                500,
+                {
+                    "ok": False,
+                    "error": {"code": "dialog_failed", "message": result["error"]},
+                },
+            )
             return
-        log_write(f"dialog resolved confirmed={result['confirmed']} durationMs={duration_ms}")
+        log_write(
+            f"dialog resolved confirmed={result['confirmed']} durationMs={duration_ms}"
+        )
         self._send_json(
             200,
             {
@@ -289,6 +312,10 @@ def run_conflict_diagnostic(port: int, error: OSError) -> None:
 
 
 def main() -> None:
+    # Entry logging: proves whether the interpreter reached the script at all
+    # (distinguishes "ShellExecute never launched" from "launched then died").
+    log_write(f"process entry argv={sys.argv!r} exe={sys.executable!r}")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=HOST, choices=[HOST])
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -315,7 +342,9 @@ def main() -> None:
         sys.exit(EXIT_PORT_CONFLICT)
 
     log_write(f"service started on {args.host}:{server.server_address[1]}")
-    print(f"XSTARS WPS Gate 0 service listening on http://{HOST}:{server.server_address[1]}")
+    print(
+        f"XSTARS WPS Gate 0 service listening on http://{HOST}:{server.server_address[1]}"
+    )
     print(f"Allowed browser origins: {', '.join(sorted(ALLOWED_ORIGINS))}")
     try:
         server.serve_forever()
@@ -345,7 +374,10 @@ def self_test(port: int) -> int:
     try:
         with opener.open(f"http://{HOST}:{bound_port}/health", timeout=5) as response:
             health = json.loads(response.read())
-        if health.get("ok") and health.get("requestOrigin") == "（浏览器未携带 Origin 头）":
+        if (
+            health.get("ok")
+            and health.get("requestOrigin") == "（浏览器未携带 Origin 头）"
+        ):
             print(f"PASS: /health ok on port {bound_port}")
         else:
             print(f"FAIL: unexpected /health payload: {health}")
@@ -370,8 +402,12 @@ def self_test(port: int) -> int:
         )
         with opener.open(req, timeout=5) as response:
             diag = json.loads(response.read())
-        if diag.get("ok") and any("PORT CONFLICT" in line for line in diag.get("logTail", [])):
-            print("PASS: /diagnostics exposes the conflict entry (Origin null accepted)")
+        if diag.get("ok") and any(
+            "PORT CONFLICT" in line for line in diag.get("logTail", [])
+        ):
+            print(
+                "PASS: /diagnostics exposes the conflict entry (Origin null accepted)"
+            )
         else:
             print(f"FAIL: /diagnostics payload unexpected: {diag}")
             failures += 1
