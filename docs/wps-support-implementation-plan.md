@@ -1,6 +1,6 @@
 # XSTARS Windows WPS 支持评估与实施计划
 
-> 状态：**已获用户批准（M0 启动中）**
+> 状态：**已获用户批准（M0.1 已通过，准备启动 M0.2）**
 > 基准：`main` @ `5f4c409`，XSTARS `v1.1.1`
 > 目标宿主：Windows 10/11 x64 + 最新稳定版 WPS 365/12.x 表格
 > 阻断验收：WPS 专业版/商业版/政企版 x64
@@ -342,10 +342,11 @@ Excel 端
   - 验收：开发不发生在 `main`；Draft PR 可见，初始 checklist、范围、风险和验证计划完整；证据：Draft PR [#1](https://github.com/Frankkk1912/xstars/pull/1)。
   - 依赖：用户明确批准本计划。
 
-- [ ] **M0.1 建立最小 WPS JS 加载项与官方离线部署 PoC**
+- [x] **M0.1 建立最小 WPS JS 加载项与官方离线部署 PoC**
   - 文件：`poc/wps/addin/*`、`poc/wps/README.md`
   - 修改：使用官方 wpsjs 工具生成 Ribbon；记录实际生成的 publish 配置和插件 Origin，不手写未经验证的格式。
   - 验收：专业版断网可安装、显示 Ribbon、执行按钮；个人版结果记录为 Beta 能力。
+  - 证据：WPS 365 `12.1.0.28022` 64 位（大学组织企业授权）在完全断网环境通过官方 `publish` 安装、Ribbon 显示、按钮回调、完全退出后重启回调和卸载；实际 Origin 为 `file://`；记录见 Draft PR [#1](https://github.com/Frankkk1912/xstars/pull/1#issuecomment-5461289789)。
   - 依赖：M0.0；专业版和个人版测试机。
 
 - [ ] **M0.2 验证 Selection/Value2/AddPicture 垂直链路**
