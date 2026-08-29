@@ -1,0 +1,22 @@
+{
+  "name": "xstars-wps-poc",
+  "addonType": "et",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3889",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 3889",
+    "test": "node --test tests/*.test.cjs",
+    "wps:debug": "wpsjs debug",
+    "wps:build": "wpsjs build",
+    "wps:publish": "wpsjs publish",
+    "wps:package:offline": "node scripts/build-publish-offline.cjs"
+  },
+  "description": "Minimal WPS Spreadsheet add-in for XSTARS Gate 0 feasibility testing.",
+  "devDependencies": {
+    "et-jsapi-declare": "2.5.0",
+    "vite": "8.2.2",
+    "wpsjs": "2.2.3"
+  }
+}

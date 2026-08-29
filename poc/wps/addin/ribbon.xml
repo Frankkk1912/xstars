@@ -1,0 +1,16 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
+    <ribbon startFromScratch="false">
+        <tabs>
+            <tab id="xstarsGate0Tab" label="XSTARS Gate 0">
+                <group id="xstarsGate0Group" label="可行性探针">
+                    <button id="xstarsGate0Callback"
+                            label="验证加载项回调"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
+            </tab>
+        </tabs>
+    </ribbon>
+</customUI>
