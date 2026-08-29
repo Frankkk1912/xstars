@@ -160,7 +160,7 @@
 
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
-| M1 — Artifact 契约与生成时登记 | [ ] | Plan 批准；待决事项 D1–D4 定案 | artifact round-trip、schema 拒绝、原子写入/best-effort、Figure 重建单测通过 | 先解决跨调用数据基础；不得阻断原出图 |
+| M1 — Artifact 契约与生成时登记 | [x] | Plan 批准；待决事项 D1–D4 定案 | artifact round-trip、schema 拒绝、原子写入/best-effort、Figure 重建单测通过 | 先解决跨调用数据基础；不得阻断原出图 |
 | M2 — macOS Python 平台分支 | [ ] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
 | M3 — 回归与平台测试 | [ ] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
 | M4 — macOS 开发者文档 | [ ] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
@@ -172,19 +172,19 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 
 ### M1 — Artifact 契约与生成时登记
 
-- [ ] T1.1 定义并实现 versioned artifact payload 与安全持久化契约
+- [x] T1.1 定义并实现 versioned artifact payload 与安全持久化契约
   - 文件：新建 `xstars/artifacts.py`
   - 修改：定义 artifact key、schema version、renderer kind、DataFrame/config/stats/专用参数的 JSON-safe DTO；实现路径安全、schema 校验、临时文件原子替换、load/save 与清晰异常；默认根目录为 `~/.xstars/artifacts/`；禁止 pickle。
   - 验收：普通图 payload round-trip 后列顺序、NaN、枚举配置、统计 pairs 均等价；未知 schema、缺字段、损坏 JSON 被拒绝并返回可诊断错误；写入测试可注入临时根目录。
   - 依赖：Plan 批准；D1–D4 定案；支撑 G1、G10、R3、R4、R11、R14。
 
-- [ ] T1.2 为所有本 PR 声明支持导出的 XSTARS 图表生成点登记可重建 payload
+- [x] T1.2 为所有本 PR 声明支持导出的 XSTARS 图表生成点登记可重建 payload
   - 文件：修改 `xstars/main.py`；调用新建 `xstars/artifacts.py`
   - 修改：在普通 Run、Quick、预设、WB/qPCR labeled、ELISA/标准曲线等合格生成路径中，以最终 picture name 关联处理后数据、实际 plot config、StatsResult 或专用曲线参数；仅在 `sheet.pictures.add()` 成功后登记；提取最小 helper，避免散落重复逻辑。
   - 验收：每个已纳入的 renderer kind 都能生成 artifact，并可重建 Figure；payload key 与 sheet/picture 一致；登记失败不改变 Excel 插图、统计输出或 status bar 成功结果。
   - 依赖：T1.1；支撑 G1、G10、R2–R4。
 
-- [ ] T1.3 实现 best-effort、缺失/陈旧/损坏 artifact 的用户可诊断行为
+- [x] T1.3 实现 best-effort、缺失/陈旧/损坏 artifact 的用户可诊断行为
   - 文件：修改 `xstars/main.py`；新建/修改 `xstars/artifacts.py`
   - 修改：生成时捕获 artifact 文件系统/序列化错误并记录非阻塞诊断；加载时区分 missing、corrupt、unsupported schema、renderer unsupported；为上层提供“重新生成图表”的友好消息。
   - 验收：模拟 PermissionError、磁盘写失败、损坏文件时生成流程仍成功；Export 不产生半成品输出，错误文本说明原因和恢复操作。
@@ -346,6 +346,7 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 | `ribbon/README.md` | 修改 | 说明 Mac 复用现有 RunPython VBA | 要求新建/修改 `.bas` |
 | `.github/workflows/macos-support.yml` | 新建 | macOS/Windows Python 3.10 测试、compileall、VBA diff gate | 打包、签名、公证、发布 job |
 | `docs/cross-platform-office-technology-strategy.md` | 新建（D8 已批准修订） | 自 `origin/feature/wps-support` 复制并添加前言（说明本文档随本 PR 首次进入主线、WPS 适配为独立 PR） | 修改正文结论；替代 WPS PR 合入 |
+| `xstars/tools/standard_curve.py` | 修改（2026-08-30 批准范围扩展） | 仅修复 `back_calculate` 对近零 OD 反算被掩码为 NaN 的预先存在缺陷，使 `TestZeroConcentration::test_back_calculate_includes_zero_range` 通过 | 改变拟合方法或统计语义；重构其他逻辑 |
 
 **明确不修改**：
 
@@ -479,3 +480,4 @@ The main risks are payload completeness, local experimental-data retention, work
 - [x] 计划明确 Windows 零行为改动及所有现有 `ribbon/*.bas` 零修改。
 - [x] 本次只新建 `plans/20260829-macos-support.md`，没有创建或覆盖源码、测试、配置、脚本或生成物。
 - [x] 2026-08-30 批准修订：用户会话确认 Plan rev 批准，D1–D7 按推荐值定案；D8 改为“复制策略文档到本 PR（带前言）”，§9.1 文件范围相应新增一行；首个提交包含 Plan 与 Explore 调研报告。
+- [x] 2026-08-30 批准范围扩展：用户批准在本 PR 内修复 `xstars/tools/standard_curve.py` 预先存在的 `back_calculate` NaN 掩码缺陷（main 基线确定性失败、相对 main 零 diff，与本 PR 无关但阻断完整回归门禁），§9.1 新增该文件行；修复仅限该缺陷。
