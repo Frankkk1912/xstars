@@ -336,10 +336,10 @@ Excel 端
 
 ## 11. Markdown task checklist
 
-- [ ] **M0.0 创建功能分支并开启 Draft PR**
+- [x] **M0.0 创建功能分支并开启 Draft PR**
   - 文件：Git 分支、Draft PR 描述、`docs/wps-support-implementation-plan.md`
   - 修改：从最新 `main` 创建 `feature/wps-support`，推送后立即创建 Draft PR；在 PR 中引用本计划和验证合同。
-  - 验收：开发不发生在 `main`；Draft PR 可见，初始 checklist、范围、风险和验证计划完整。
+  - 验收：开发不发生在 `main`；Draft PR 可见，初始 checklist、范围、风险和验证计划完整；证据：Draft PR [#1](https://github.com/Frankkk1912/xstars/pull/1)。
   - 依赖：用户明确批准本计划。
 
 - [ ] **M0.1 建立最小 WPS JS 加载项与官方离线部署 PoC**
