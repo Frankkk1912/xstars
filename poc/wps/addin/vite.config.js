@@ -1,5 +1,5 @@
-import { defineConfig } from "vite"
-import { copyFile } from "wpsjs/vite_plugins"
+import { defineConfig } from "vite";
+import { copyFile } from "wpsjs/vite_plugins";
 
 export default defineConfig({
     base: "./",
@@ -12,4 +12,4 @@ export default defineConfig({
     server: {
         host: "127.0.0.1",
     },
-})
+});
