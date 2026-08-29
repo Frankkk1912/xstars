@@ -16,6 +16,26 @@
                             visible="true"
                             size="large"/>
                 </group>
+                <group id="xstarsM03Group" label="服务生命周期">
+                    <button id="xstarsM03ServiceStart"
+                            label="拉起本地服务"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM03Dialog"
+                            label="测试 Tkinter 对话框"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM03PortConflict"
+                            label="端口冲突诊断"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
             </tab>
         </tabs>
     </ribbon>

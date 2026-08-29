@@ -1,5 +1,65 @@
 const XSTARS_GATE0_PROBE_URL = "http://127.0.0.1:3891/probe";
 
+// M0.3 PoC：本机固定路径，仅用于 Gate 0 验证，不进入正式产品。
+const XSTARS_GATE0_SERVICE = Object.freeze({
+  baseUrl: "http://127.0.0.1:3892",
+  pythonwPath: "C:\\Users\\daiyu\\miniforge3\\envs\\scrna\\pythonw.exe",
+  scriptPath: "E:\\Documents\\GitHub\\xstars\\poc\\wps\\service_server.py",
+  workDir: "E:\\Documents\\GitHub\\xstars\\poc\\wps",
+  launchPollAttempts: 30,
+  launchPollIntervalMs: 500,
+  conflictWaitMs: 2000,
+  dialogProbeCount: 3,
+  dialogProbeIntervalMs: 700,
+});
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchService(url, init) {
+  // 统一封装：永不抛出，返回可诊断的结果对象（status 0 表示连接层失败）。
+  try {
+    const response = await window.fetch(url, init);
+    const text = await response.text();
+    let payload = null;
+    try {
+      payload = JSON.parse(text);
+    } catch (parseError) {
+      return {
+        ok: false,
+        status: response.status,
+        error: `响应不是有效 JSON：${parseError.message}`,
+      };
+    }
+    return { ok: response.ok, status: response.status, payload };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+}
+
+async function checkServiceHealth() {
+  const result = await fetchService(`${XSTARS_GATE0_SERVICE.baseUrl}/health`);
+  return result.ok && result.payload && result.payload.ok ? result.payload : null;
+}
+
+function launchServiceViaShellExecute() {
+  const application = window.Application;
+  const oaAssist = application && application.OAAssist;
+  if (!oaAssist || typeof oaAssist.ShellExecute !== "function") {
+    throw new Error("OAAssist.ShellExecute 不可用，无法拉起本地服务");
+  }
+  return oaAssist.ShellExecute(
+    XSTARS_GATE0_SERVICE.pythonwPath,
+    `"${XSTARS_GATE0_SERVICE.scriptPath}" --port 3892`,
+    XSTARS_GATE0_SERVICE.workDir,
+    "open",
+    1,
+  );
+}
+
 function normalizeCellValue(value) {
   if (
     value === null ||
@@ -128,6 +188,107 @@ async function runM02Probe() {
   return { payload, requestBody, writebackAddress, picture };
 }
 
+async function runM03ServiceStart() {
+  const before = await checkServiceHealth();
+  if (before) {
+    window.alert(
+      `M0.3 本地服务已在运行\nPID：${before.pid}\n已运行：${before.uptimeSeconds} 秒\n服务端记录 Origin：${before.requestOrigin}`,
+    );
+    return { before, after: before, shellResult: null, alreadyRunning: true };
+  }
+
+  const shellResult = launchServiceViaShellExecute();
+  let launched = null;
+  for (
+    let attempt = 0;
+    attempt < XSTARS_GATE0_SERVICE.launchPollAttempts;
+    attempt += 1
+  ) {
+    await sleep(XSTARS_GATE0_SERVICE.launchPollIntervalMs);
+    launched = await checkServiceHealth();
+    if (launched) {
+      break;
+    }
+  }
+  if (!launched) {
+    throw new Error(
+      `ShellExecute 后 15 秒内服务未就绪（ShellExecute 返回：${String(shellResult)}）`,
+    );
+  }
+  window.alert(
+    `M0.3 服务拉起成功\nShellExecute 返回：${String(shellResult)}\nPID：${launched.pid}\n服务端记录 Origin：${launched.requestOrigin}`,
+  );
+  return { before: null, after: launched, shellResult, alreadyRunning: false };
+}
+
+async function runM03Dialog() {
+  const dialogPromise = fetchService(`${XSTARS_GATE0_SERVICE.baseUrl}/dialog`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "M0.3 Tkinter dialog" }),
+  });
+
+  // 对话框打开期间持续探活：服务必须保持响应，WPS 不得被阻塞。
+  const healthLatencies = [];
+  for (
+    let index = 0;
+    index < XSTARS_GATE0_SERVICE.dialogProbeCount;
+    index += 1
+  ) {
+    await sleep(XSTARS_GATE0_SERVICE.dialogProbeIntervalMs);
+    const startedAt = Date.now();
+    const health = await checkServiceHealth();
+    healthLatencies.push(health ? Date.now() - startedAt : null);
+  }
+
+  const result = await dialogPromise;
+  if (!result.ok) {
+    const detail = result.error
+      ? result.error
+      : result.payload && result.payload.error
+        ? `${result.payload.error.code}: ${result.payload.error.message}`
+        : `HTTP ${result.status}`;
+    throw new Error(`Tkinter 对话框请求失败：${detail}`);
+  }
+  const unresponsive = healthLatencies.some((latency) => latency === null);
+  window.alert(
+    `M0.3 Tkinter 对话框完成\n选择：${result.payload.confirmed ? "确定" : "取消"}\n耗时：${result.payload.durationMs} ms\n对话框期间健康探活：${healthLatencies.map((latency) => (latency === null ? "无响应" : `${latency} ms`)).join("、")}\n${unresponsive ? "警告：对话框期间服务失去响应！" : "对话框打开期间服务保持响应，WPS 不应被冻结"}`,
+  );
+  return { payload: result.payload, healthLatencies };
+}
+
+async function runM03PortConflict() {
+  const before = await checkServiceHealth();
+  if (!before) {
+    throw new Error("本地服务未运行，请先执行「拉起本地服务」");
+  }
+
+  const shellResult = launchServiceViaShellExecute();
+  await sleep(XSTARS_GATE0_SERVICE.conflictWaitMs);
+  const after = await checkServiceHealth();
+  if (!after) {
+    throw new Error(
+      "发起第二实例后原服务失去响应——端口冲突影响了原服务，需立即排查",
+    );
+  }
+
+  const diag = await fetchService(`${XSTARS_GATE0_SERVICE.baseUrl}/diagnostics`);
+  const conflictLines =
+    diag.ok && diag.payload && Array.isArray(diag.payload.logTail)
+      ? diag.payload.logTail.filter((line) => line.includes("PORT CONFLICT"))
+      : [];
+  const latestConflict =
+    conflictLines[conflictLines.length - 1] || "（未在日志中找到冲突记录）";
+  window.alert(
+    `M0.3 端口冲突诊断\n第二实例 ShellExecute 返回：${String(shellResult)}\n原服务存活：PID ${before.pid} → PID ${after.pid}\n冲突记录：${latestConflict}`,
+  );
+  return { before, after, conflictLines, shellResult };
+}
+
+function reportM03Error(title, error) {
+  window.alert(`${title}\n${error.message}`);
+}
+
 function OnAddinLoad(ribbonUI) {
   window.Application.ribbonUI = ribbonUI;
   return true;
@@ -148,6 +309,21 @@ function OnAction(control) {
       window.alert(`M0.2 垂直链路失败\n${error.message}`);
     });
   }
+  if (control.Id === "xstarsM03ServiceStart") {
+    void runM03ServiceStart().catch((error) => {
+      reportM03Error("M0.3 服务拉起失败", error);
+    });
+  }
+  if (control.Id === "xstarsM03Dialog") {
+    void runM03Dialog().catch((error) => {
+      reportM03Error("M0.3 对话框测试失败", error);
+    });
+  }
+  if (control.Id === "xstarsM03PortConflict") {
+    void runM03PortConflict().catch((error) => {
+      reportM03Error("M0.3 端口冲突诊断失败", error);
+    });
+  }
   return true;
 }
 
@@ -159,4 +335,12 @@ function GetImage() {
 window.OnAddinLoad = OnAddinLoad;
 window.OnAction = OnAction;
 window.GetImage = GetImage;
-window.XstarsGate0 = Object.freeze({ normalizeSelectionValues, runM02Probe });
+window.XstarsGate0 = Object.freeze({
+  normalizeSelectionValues,
+  runM02Probe,
+  checkServiceHealth,
+  launchServiceViaShellExecute,
+  runM03ServiceStart,
+  runM03Dialog,
+  runM03PortConflict,
+});
