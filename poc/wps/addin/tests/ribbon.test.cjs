@@ -13,10 +13,18 @@ function loadRibbon(options = {}) {
   const alerts = [];
   const fetchCalls = [];
   const shellCalls = [];
+  const promptCalls = [];
+  const promptResponses = [...(options.promptResponses || [])];
   const context = {
     setTimeout,
     window: {
       alert: (message) => alerts.push(message),
+      prompt: (message, defaultValue) => {
+        promptCalls.push({ message, defaultValue });
+        return options.promptHandler
+          ? options.promptHandler(message, defaultValue)
+          : promptResponses.shift();
+      },
       location: { origin: options.origin || "file://" },
       fetch: async (url, init) => {
         fetchCalls.push({ url, init });
@@ -38,6 +46,7 @@ function loadRibbon(options = {}) {
           : null,
         ActiveSheet: options.activeSheet || null,
         Selection: options.selection || null,
+        InputBox: options.inputBox,
         OAAssist: options.oaAssist || null,
       },
     },
@@ -45,7 +54,7 @@ function loadRibbon(options = {}) {
 
   vm.createContext(context);
   vm.runInContext(ribbonSource, context);
-  return { alerts, context, fetchCalls, shellCalls };
+  return { alerts, context, fetchCalls, shellCalls, promptCalls };
 }
 
 test("OnAddinLoad stores the WPS Ribbon object", () => {
@@ -341,4 +350,191 @@ test("M0.3 port conflict refuses to run when the service is down", async () => {
     context.window.XstarsGate0.runM03PortConflict(),
     /本地服务未运行/,
   );
+});
+
+function makeRange(address, values) {
+  return {
+    Address: () => address,
+    Rows: { Count: values.length },
+    Columns: { Count: values[0].length },
+    Value2: values,
+  };
+}
+
+function m04SelectionResponse(body) {
+  return jsonResponse({
+    ok: true,
+    source: body.source,
+    ranges: body.ranges.map((range) => ({
+      ...range,
+      rows: range.values.length,
+      columns: range.values[0].length,
+      nonEmptyCells: range.values.flat().filter((value) => value != null).length,
+    })),
+  });
+}
+
+test("M0.4 InputBox probe sends the selected Range as a bounded matrix", async () => {
+  const inputBoxCalls = [];
+  const selectedRange = makeRange("$C$2:$D$3", [
+    [1, 2],
+    [3, null],
+  ]);
+  const { alerts, context, fetchCalls } = loadRibbon({
+    inputBox: (...args) => {
+      inputBoxCalls.push(args);
+      return selectedRange;
+    },
+    fetchHandler: (_url, init) =>
+      m04SelectionResponse(JSON.parse(init.body)),
+  });
+
+  const result = await context.window.XstarsGate0.runM04InputBoxProbe();
+
+  assert.equal(inputBoxCalls.length, 1);
+  assert.equal(inputBoxCalls[0].length, 8);
+  assert.equal(inputBoxCalls[0][7], 8);
+  assert.equal(fetchCalls[0].url, "http://127.0.0.1:3892/probe/elisa-selection");
+  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
+    source: "inputbox",
+    ranges: [
+      {
+        address: "$C$2:$D$3",
+        values: [
+          [1, 2],
+          [3, null],
+        ],
+      },
+    ],
+  });
+  assert.equal(result.payload.ranges[0].nonEmptyCells, 3);
+  assert.match(alerts[0], /InputBox 选区成功/);
+});
+
+test("M0.4 InputBox cancellation is reported without a failed request", async () => {
+  const { alerts, context, fetchCalls } = loadRibbon({
+    inputBox: () => null,
+  });
+
+  const result = await context.window.XstarsGate0.runM04InputBoxProbe();
+
+  assert.equal(result.cancelled, true);
+  assert.equal(fetchCalls.length, 0);
+  assert.match(alerts[0], /用户取消选区（非错误）/);
+});
+
+test("M0.4 two-stage probe records two selections then submits on third click", async () => {
+  const standard = makeRange("$A$1:$B$2", [
+    [1, 2],
+    [3, 4],
+  ]);
+  const sample = makeRange("$D$1:$D$2", [[5], [6]]);
+  const { alerts, context, fetchCalls } = loadRibbon({
+    selection: standard,
+    fetchHandler: (_url, init) =>
+      m04SelectionResponse(JSON.parse(init.body)),
+  });
+
+  const first = await context.window.XstarsGate0.runM04TwoStageProbe();
+  context.window.Application.Selection = sample;
+  const second = await context.window.XstarsGate0.runM04TwoStageProbe();
+  const third = await context.window.XstarsGate0.runM04TwoStageProbe();
+
+  assert.equal(first.stage, "standard");
+  assert.equal(second.stage, "sample");
+  assert.equal(third.stage, "submitted");
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
+    source: "two-stage",
+    ranges: [
+      { address: "$A$1:$B$2", values: [[1, 2], [3, 4]] },
+      { address: "$D$1:$D$2", values: [[5], [6]] },
+    ],
+  });
+  assert.match(alerts[0], /（1\/3）/);
+  assert.match(alerts[1], /（2\/3）/);
+  assert.match(alerts[2], /（3\/3）提交成功/);
+});
+
+test("M0.4 address fallback reads a valid A1 range", async () => {
+  const requestedAddresses = [];
+  const range = makeRange("$C$2:$F$3", [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+  ]);
+  const { context, fetchCalls } = loadRibbon({
+    activeSheet: {
+      Range: (address) => {
+        requestedAddresses.push(address);
+        return range;
+      },
+    },
+    promptResponses: ["C2:F3"],
+    fetchHandler: (_url, init) =>
+      m04SelectionResponse(JSON.parse(init.body)),
+  });
+
+  const result = await context.window.XstarsGate0.runM04AddressFallback();
+
+  assert.deepEqual(requestedAddresses, ["C2:F3"]);
+  assert.equal(JSON.parse(fetchCalls[0].init.body).source, "address");
+  assert.equal(result.range.address, "$C$2:$F$3");
+});
+
+test("M0.4 address fallback rejects an invalid address without reading the sheet", async () => {
+  const rangeCalls = [];
+  const { alerts, context, fetchCalls } = loadRibbon({
+    activeSheet: { Range: (...args) => rangeCalls.push(args) },
+    promptResponses: ["not an address"],
+  });
+
+  const result = await context.window.XstarsGate0.runM04AddressFallback();
+
+  assert.equal(result.invalid, true);
+  assert.equal(rangeCalls.length, 0);
+  assert.equal(fetchCalls.length, 0);
+  assert.match(alerts[0], /地址格式无效/);
+});
+
+test("M0.4 Shape export uses printer-picture copy and probes COM", async () => {
+  const copyCalls = [];
+  const shape = { CopyPicture: (...args) => copyCalls.push(args) };
+  const selection = {
+    Type: "ShapeRange",
+    ShapeRange: { Item: (index) => (index === 1 ? shape : null) },
+  };
+  const handler = (url, init) => {
+    if (url.endsWith("/probe/shape-export")) {
+      assert.deepEqual(JSON.parse(init.body), { format: "png", dpi: 300 });
+      return jsonResponse({
+        ok: true,
+        outputPath: "C:\\Temp\\shape.png",
+        width: 1200,
+        height: 800,
+        dpi: 300,
+      });
+    }
+    if (url.endsWith("/probe/com-probe")) {
+      return jsonResponse({
+        ok: true,
+        progId: "Ket.Application",
+        version: "12.1.0",
+      });
+    }
+    return jsonResponse({ ok: false }, false, 404);
+  };
+  const { alerts, context, fetchCalls } = loadRibbon({
+    selection,
+    promptResponses: ["png", "300"],
+    fetchHandler: handler,
+  });
+
+  const result = await context.window.XstarsGate0.runM04ShapeExportProbe();
+
+  assert.deepEqual(copyCalls, [[2, -4147]]);
+  assert.equal(fetchCalls.length, 2);
+  assert.equal(result.copyMode, "xlPrinter/xlPicture");
+  assert.equal(result.com.ok, true);
+  assert.match(alerts[0], /Selection\.Type：ShapeRange/);
+  assert.match(alerts[0], /COM Ket\.Application：可用/);
 });

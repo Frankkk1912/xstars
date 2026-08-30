@@ -1,4 +1,20 @@
 const XSTARS_GATE0_PROBE_URL = "http://127.0.0.1:3891/probe";
+const XSTARS_M04_ELISA_URL =
+  "http://127.0.0.1:3892/probe/elisa-selection";
+const XSTARS_M04_SHAPE_EXPORT_URL =
+  "http://127.0.0.1:3892/probe/shape-export";
+const XSTARS_M04_COM_PROBE_URL =
+  "http://127.0.0.1:3892/probe/com-probe";
+const XSTARS_M04_EXPORT_FORMATS = Object.freeze([
+  "png",
+  "tiff",
+  "jpg",
+  "pdf",
+]);
+const M04_TWO_STAGE_STATE = {
+  standard: null,
+  sample: null,
+};
 
 // M0.3 PoC：本机固定路径，仅用于 Gate 0 验证，不进入正式产品。
 const XSTARS_GATE0_SERVICE = Object.freeze({
@@ -288,6 +304,254 @@ async function runM03PortConflict() {
   return { before, after, conflictLines, shellResult };
 }
 
+function rangeToM04Payload(range) {
+  if (!range || !range.Rows || !range.Columns) {
+    throw new Error("返回对象不是可读取的连续 Range");
+  }
+  const rows = Number(range.Rows.Count);
+  const columns = Number(range.Columns.Count);
+  return {
+    address: getRangeAddress(range),
+    values: normalizeSelectionValues(range.Value2, rows, columns),
+  };
+}
+
+function m04ErrorDetail(result) {
+  if (result.error) {
+    return result.error;
+  }
+  if (result.payload && result.payload.error) {
+    const error = result.payload.error;
+    return `${error.code}: ${error.message}`;
+  }
+  if (result.payload && result.payload.code) {
+    return `${result.payload.code}: ${result.payload.detail || "无详细信息"}`;
+  }
+  return `HTTP ${result.status}`;
+}
+
+async function postM04Selection(source, ranges) {
+  const result = await fetchService(XSTARS_M04_ELISA_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source, ranges }),
+  });
+  if (!result.ok || !result.payload || !result.payload.ok) {
+    throw new Error(`ELISA 选区探针失败：${m04ErrorDetail(result)}`);
+  }
+  return result.payload;
+}
+
+async function runM04InputBoxProbe() {
+  const application = window.Application;
+  if (!application || typeof application.InputBox !== "function") {
+    window.alert("M0.4 InputBox 探针不可用：Application.InputBox 不存在");
+    return { unavailable: true };
+  }
+
+  let selectedRange;
+  try {
+    selectedRange = application.InputBox(
+      "请用鼠标框选 ELISA 样本数据区域",
+      "XSTARS M0.4 ELISA 选区探针",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      8,
+    );
+  } catch (error) {
+    window.alert(`M0.4 InputBox 探针异常：${error.message}`);
+    return { error: error.message };
+  }
+  if (!selectedRange) {
+    window.alert("M0.4 InputBox 探针：用户取消选区（非错误）");
+    return { cancelled: true };
+  }
+
+  try {
+    const range = rangeToM04Payload(selectedRange);
+    const payload = await postM04Selection("inputbox", [range]);
+    window.alert(
+      `M0.4 InputBox 选区成功\n地址：${range.address}\n行列：${payload.ranges[0].rows} × ${payload.ranges[0].columns}\n非空：${payload.ranges[0].nonEmptyCells}`,
+    );
+    return { payload, range };
+  } catch (error) {
+    window.alert(`M0.4 InputBox 选区处理失败：${error.message}`);
+    return { error: error.message };
+  }
+}
+
+async function runM04TwoStageProbe() {
+  try {
+    if (!M04_TWO_STAGE_STATE.standard) {
+      M04_TWO_STAGE_STATE.standard = rangeToM04Payload(
+        window.Application.Selection,
+      );
+      window.alert(
+        `M0.4 两阶段（1/3）：已记录标准品选区 ${M04_TWO_STAGE_STATE.standard.address}\n请框选样本区域后再次点击。`,
+      );
+      return { stage: "standard", range: M04_TWO_STAGE_STATE.standard };
+    }
+    if (!M04_TWO_STAGE_STATE.sample) {
+      M04_TWO_STAGE_STATE.sample = rangeToM04Payload(
+        window.Application.Selection,
+      );
+      window.alert(
+        `M0.4 两阶段（2/3）：已记录样本选区 ${M04_TWO_STAGE_STATE.sample.address}\n再次点击以提交两个选区。`,
+      );
+      return { stage: "sample", range: M04_TWO_STAGE_STATE.sample };
+    }
+
+    const ranges = [M04_TWO_STAGE_STATE.standard, M04_TWO_STAGE_STATE.sample];
+    const payload = await postM04Selection("two-stage", ranges);
+    M04_TWO_STAGE_STATE.standard = null;
+    M04_TWO_STAGE_STATE.sample = null;
+    window.alert(
+      `M0.4 两阶段（3/3）提交成功\n标准品：${ranges[0].address}\n样本：${ranges[1].address}`,
+    );
+    return { stage: "submitted", payload, ranges };
+  } catch (error) {
+    window.alert(`M0.4 两阶段选区失败：${error.message}`);
+    return { error: error.message };
+  }
+}
+
+async function runM04AddressFallback() {
+  const addressInput = window.prompt(
+    "请输入活动工作表中的 A1 地址（例如 C2:F10）",
+    "",
+  );
+  if (addressInput === null) {
+    window.alert("M0.4 地址兜底：用户取消（非错误）");
+    return { cancelled: true };
+  }
+  const address = addressInput.trim();
+  const addressPattern = /^\$?[A-Za-z]{1,3}\$?\d+(?::\$?[A-Za-z]{1,3}\$?\d+)?$/;
+  if (!addressPattern.test(address)) {
+    window.alert("M0.4 地址兜底：地址格式无效，请使用例如 C2:F10 的 A1 地址");
+    return { invalid: true };
+  }
+
+  try {
+    const sheet = window.Application.ActiveSheet;
+    if (!sheet || typeof sheet.Range !== "function") {
+      throw new Error("活动工作表不支持 Range(address)");
+    }
+    const range = rangeToM04Payload(sheet.Range(address));
+    const payload = await postM04Selection("address", [range]);
+    window.alert(`M0.4 地址兜底提交成功\n地址：${range.address}`);
+    return { payload, range };
+  } catch (error) {
+    window.alert(`M0.4 地址兜底失败：${error.message}`);
+    return { error: error.message };
+  }
+}
+
+function selectedShape(selection) {
+  if (!selection) {
+    throw new Error("请先选择一张图片或 Shape");
+  }
+  let shapeRange = null;
+  try {
+    shapeRange = selection.ShapeRange || null;
+  } catch {
+    shapeRange = null;
+  }
+  if (shapeRange) {
+    if (typeof shapeRange.Item === "function") {
+      return shapeRange.Item(1);
+    }
+    if (typeof shapeRange.CopyPicture === "function") {
+      return shapeRange;
+    }
+  }
+  if (typeof selection.CopyPicture === "function") {
+    return selection;
+  }
+  throw new Error("当前 Selection 不包含可复制的 ShapeRange");
+}
+
+async function runM04ShapeExportProbe() {
+  const selection = window.Application.Selection;
+  let shape;
+  try {
+    shape = selectedShape(selection);
+  } catch (error) {
+    window.alert(`M0.4 Shape 导出失败：${error.message}`);
+    return { error: error.message };
+  }
+
+  const formatInput = window.prompt("导出格式：png/tiff/jpg/pdf", "png");
+  if (formatInput === null) {
+    window.alert("M0.4 Shape 导出：用户取消（非错误）");
+    return { cancelled: true };
+  }
+  const format = (formatInput.trim() || "png").toLowerCase();
+  const dpiInput = window.prompt("目标 DPI（72-1200）", "300");
+  if (dpiInput === null) {
+    window.alert("M0.4 Shape 导出：用户取消（非错误）");
+    return { cancelled: true };
+  }
+  const dpi = Number(dpiInput.trim() || "300");
+  if (!XSTARS_M04_EXPORT_FORMATS.includes(format)) {
+    window.alert(`M0.4 Shape 导出失败：不支持格式 ${format}`);
+    return { invalid: true };
+  }
+  if (!Number.isInteger(dpi) || dpi < 72 || dpi > 1200) {
+    window.alert("M0.4 Shape 导出失败：DPI 必须是 72-1200 的整数");
+    return { invalid: true };
+  }
+
+  let copyMode = "xlPrinter/xlPicture";
+  try {
+    shape.CopyPicture(2, -4147);
+  } catch {
+    try {
+      shape.CopyPicture(1, 2);
+      copyMode = "xlScreen/xlBitmap fallback";
+    } catch (error) {
+      window.alert(`M0.4 Shape CopyPicture 失败：${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  // WPS CopyPicture returns synchronously, but the Windows clipboard can lag
+  // briefly before the DIB/EMF becomes visible to another process.
+  await sleep(150);
+  const exportResult = await fetchService(XSTARS_M04_SHAPE_EXPORT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ format, dpi }),
+  });
+  if (!exportResult.ok || !exportResult.payload || !exportResult.payload.ok) {
+    const detail = m04ErrorDetail(exportResult);
+    window.alert(`M0.4 Shape 导出失败：${detail}`);
+    return { error: detail };
+  }
+
+  const comResult = await fetchService(XSTARS_M04_COM_PROBE_URL);
+  const comSummary =
+    comResult.payload && comResult.payload.ok
+      ? `可用（${comResult.payload.progId} ${comResult.payload.version || ""}）`
+      : `不可用（${m04ErrorDetail(comResult)}）`;
+  const payload = exportResult.payload;
+  const selectionType =
+    selection && selection.Type !== undefined
+      ? String(selection.Type)
+      : "（未暴露 Type）";
+  window.alert(
+    `M0.4 Shape 导出成功\nSelection.Type：${selectionType}\nCopyPicture：${copyMode}\n文件：${payload.outputPath}\n像素：${payload.width} × ${payload.height}\nDPI：${payload.dpi}\nCOM Ket.Application：${comSummary}`,
+  );
+  return {
+    payload,
+    copyMode,
+    com: comResult.payload,
+    selectionType,
+  };
+}
+
 function reportM03Error(title, error) {
   window.alert(`${title}\n${error.message}`);
 }
@@ -327,6 +591,15 @@ function OnAction(control) {
       reportM03Error("M0.3 端口冲突诊断失败", error);
     });
   }
+  if (control.Id === "xstarsM04InputBox") {
+    void runM04InputBoxProbe();
+  }
+  if (control.Id === "xstarsM04TwoStage") {
+    void runM04TwoStageProbe();
+  }
+  if (control.Id === "xstarsM04ShapeExport") {
+    void runM04ShapeExportProbe();
+  }
   return true;
 }
 
@@ -346,4 +619,8 @@ window.XstarsGate0 = Object.freeze({
   runM03ServiceStart,
   runM03Dialog,
   runM03PortConflict,
+  runM04InputBoxProbe,
+  runM04TwoStageProbe,
+  runM04AddressFallback,
+  runM04ShapeExportProbe,
 });

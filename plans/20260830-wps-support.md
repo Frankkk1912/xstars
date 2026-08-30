@@ -188,31 +188,31 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M1 — Gate 0 收尾
 
-- [ ] **T1.1 更新 Draft PR #1 body：勾选 M0.2/M0.3、替换 checklist、链接新 Plan**
+- [x] **T1.1 更新 Draft PR #1 body：勾选 M0.2/M0.3、替换 checklist、链接新 Plan**
   - 文件：Draft PR #1 body（GitHub，非仓库文件）
   - 修改：勾选 M0.2/M0.3；把旧 checklist 替换为本 Plan 的 M1–M7 结构；链接 `plans/20260830-wps-support.md`；从 PR #1 记录回填 M0.2/M0.3 的精确 commit SHA。
   - 验收：PR body 反映真实进度；checklist 与新 Plan 一致；新 Plan 链接可达。
   - 依赖：本 Plan rev 1 批准；支撑 G11。
 
-- [ ] **T1.2 给旧文档顶部加 superseded 横幅**
+- [x] **T1.2 给旧文档顶部加 superseded 横幅**
   - 文件：`docs/wps-support-implementation-plan.md`（修改）
   - 修改：顶部加横幅「已被 `plans/20260830-wps-support.md` 取代，保留为历史证据」，指向新 Plan 路径。
   - 验收：横幅可见；旧文档正文保留；无内容删除。
   - 依赖：本 Plan rev 1 批准；支撑 G11、R12。
 
-- [ ] **T1.3 扩展 poc/wps 前端：M0.4 ELISA 选区探针（InputBox 主 + 两阶段对照 + 地址输入兜底代码）**
+- [x] **T1.3 扩展 poc/wps 前端：M0.4 ELISA 选区探针（InputBox 主 + 两阶段对照 + 地址输入兜底代码）**
   - 文件：`poc/wps/addin/ribbon.xml`、`poc/wps/addin/js/ribbon.js`（修改）
   - 修改：新增 `<group id="xstarsM04Group">` 与按钮；新增 `runM04InputBoxProbe`（Ribbon 回调中 `window.Application.InputBox(..., 8)` 取 Range）、`runM04TwoStageProbe`（两阶段按钮记录标准品/样本选区，内存暂存 + 状态回显）、地址输入兜底函数（仅代码，不重复实机验证）；复用 `normalizeSelectionValues`/`fetchService`/`OnAction` 分发模式。
   - 验收：`node --test` 新增用例覆盖 InputBox mock 返回 Range、两阶段状态机、地址兜底函数可解析；既有 M0.2/M0.3 用例不回归。
   - 依赖：T1.1；支撑 G1、G12、R8。
 
-- [ ] **T1.4 扩展 poc/wps 后端：ELISA 选区端点 + Shape/剪贴板导出端点 + COM 一次性探测**
+- [x] **T1.4 扩展 poc/wps 后端：ELISA 选区端点 + Shape/剪贴板导出端点 + COM 一次性探测**
   - 文件：`poc/wps/service_server.py`（修改；复用候选路径 1，替代旧计划的独立 `elisa_selection.py`/`shape_export.py`）
   - 修改：新增 `/probe/elisa-selection`（复用 `probe_server.validate_selection` 的矩形/边界校验，接收两阶段或 InputBox 的选区 payload）；新增 `/probe/shape-export`（JS `CopyPicture(2,-4147)` 后，服务端用 `PIL.ImageGrab.grabclipboard()`/`win32clipboard` 读 DIB/EMF，按 `{format, dpi}` 重编码 PNG/TIFF/JPG/PDF）；新增 `/probe/com-probe`（一次性 `win32com.client.GetActiveObject("Ket.Application")`，记录成功/失败码）；严格沿用 `ALLOWED_ORIGINS`/`SO_EXCLUSIVEADDRUSE`/JSON 错误码。
   - 验收：`service_server.py --self-test` 扩展通过；`pytest` 覆盖端点契约与错误码；COM 探测在无 WPS 环境返回可诊断错误而非崩溃。
   - 依赖：T1.1；支撑 G1、G2、G12、R9。
 
-- [ ] **T1.5 双栈自动化测试扩展（pytest + node:test）**
+- [x] **T1.5 双栈自动化测试扩展（pytest + node:test）**
   - 文件：`tests/test_wps_probe.py`（修改/扩展）、`poc/wps/addin/tests/ribbon.test.cjs`（修改/扩展）；必要时新建 `tests/test_wps_export_probe.py`
   - 修改：Python 覆盖 `/probe/elisa-selection` 边界、`/probe/shape-export` 格式/DPI 参数校验与剪贴板不可用时的错误、`/probe/com-probe` 容错；JS 覆盖 InputBox/两阶段/地址兜底 mock。
   - 验收：`python -m pytest -q` 与 `node --test` 全绿；测试不依赖真实 WPS/剪贴板/COM。

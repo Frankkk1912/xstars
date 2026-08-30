@@ -1,5 +1,7 @@
 # XSTARS Windows WPS 支持评估与实施计划
 
+> ⚠️ **SUPERSEDED（2026-08-30）**：本计划已被 [`plans/20260830-wps-support.md`](../plans/20260830-wps-support.md)（9 段式重梳 rev 1，已批准）取代。本文保留为 M0.0–M0.3 的历史证据与原始评估记录，不再作为实施契约。
+
 > 状态：**已获用户批准（M0.1–M0.3 已通过；M0.3 关键发现：ShellExecute 失效，服务拉起改由安装器自启动）**
 > 基准：`main` @ `5f4c409`，XSTARS `v1.1.1`
 > 目标宿主：Windows 10/11 x64 + 最新稳定版 WPS 365/12.x 表格

@@ -38,6 +38,11 @@ ALLOWED_ORIGINS = frozenset(
 )
 LOG_TAIL_LINES = 40
 EXIT_PORT_CONFLICT = 2
+EXPORT_FORMATS = frozenset({"png", "tiff", "jpg", "pdf"})
+MIN_EXPORT_DPI = 72
+MAX_EXPORT_DPI = 1200
+BASE_CLIPBOARD_DPI = 96
+MAX_EXPORT_PIXELS = 100_000_000
 
 STARTED_AT = time.monotonic()
 
@@ -129,6 +134,266 @@ class ServiceValidationError(ValueError):
     """Raised when a service payload violates the bounded PoC contract."""
 
 
+class ServiceEndpointError(ServiceValidationError):
+    """A bounded endpoint failure with a stable client-facing error code."""
+
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+
+
+def validate_matrix(values: Any) -> tuple[int, int, int]:
+    """Validate a bounded rectangular 2-D matrix and return its statistics."""
+
+    if not isinstance(values, list) or not values:
+        raise ServiceEndpointError(
+            400, "INVALID_VALUES", "values must be a non-empty 2-D array"
+        )
+    if not all(isinstance(row, list) and row for row in values):
+        raise ServiceEndpointError(
+            400, "INVALID_VALUES", "each values row must be a non-empty array"
+        )
+    columns = len(values[0])
+    if any(len(row) != columns for row in values):
+        raise ServiceEndpointError(
+            400, "NON_RECTANGULAR_VALUES", "values must be rectangular"
+        )
+    rows = len(values)
+    if rows > 200 or columns > 200:
+        raise ServiceEndpointError(
+            400, "SELECTION_TOO_LARGE", "each range is limited to 200 x 200 cells"
+        )
+    non_empty = 0
+    for row in values:
+        for value in row:
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ServiceEndpointError(
+                    400, "NON_FINITE_VALUE", "non-finite numeric cells are not supported"
+                )
+            if value is not None and not isinstance(value, (str, int, float, bool)):
+                raise ServiceEndpointError(
+                    400,
+                    "INVALID_CELL_VALUE",
+                    f"unsupported cell value type: {type(value).__name__}",
+                )
+            if value is not None and value != "":
+                non_empty += 1
+    return rows, columns, non_empty
+
+
+def validate_elisa_selection(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ServiceEndpointError(400, "INVALID_REQUEST", "request must be an object")
+    source = payload.get("source")
+    if source not in {"inputbox", "two-stage", "address"}:
+        raise ServiceEndpointError(
+            400,
+            "INVALID_SOURCE",
+            "source must be inputbox, two-stage, or address",
+        )
+    ranges = payload.get("ranges")
+    if not isinstance(ranges, list) or not ranges:
+        raise ServiceEndpointError(
+            400, "MISSING_RANGES", "ranges must be a non-empty array"
+        )
+    if source == "two-stage" and len(ranges) != 2:
+        raise ServiceEndpointError(
+            400, "INVALID_RANGE_COUNT", "two-stage requests require exactly 2 ranges"
+        )
+
+    response_ranges = []
+    for index, item in enumerate(ranges):
+        if not isinstance(item, dict):
+            raise ServiceEndpointError(
+                400, "INVALID_RANGE", f"ranges[{index}] must be an object"
+            )
+        address = item.get("address")
+        if (
+            not isinstance(address, str)
+            or not address.strip()
+            or len(address) > 256
+        ):
+            raise ServiceEndpointError(
+                400,
+                "INVALID_ADDRESS",
+                f"ranges[{index}].address must contain 1-256 characters",
+            )
+        rows, columns, non_empty = validate_matrix(item.get("values"))
+        response_ranges.append(
+            {
+                "address": address,
+                "values": item["values"],
+                "rows": rows,
+                "columns": columns,
+                "nonEmptyCells": non_empty,
+            }
+        )
+    return {"ok": True, "source": source, "ranges": response_ranges}
+
+
+def validate_shape_export(payload: Any) -> tuple[str, int]:
+    if not isinstance(payload, dict):
+        raise ServiceEndpointError(400, "INVALID_REQUEST", "request must be an object")
+    image_format = payload.get("format")
+    if not isinstance(image_format, str) or image_format.lower() not in EXPORT_FORMATS:
+        raise ServiceEndpointError(
+            400, "INVALID_FORMAT", "format must be png, tiff, jpg, or pdf"
+        )
+    dpi = payload.get("dpi")
+    if isinstance(dpi, bool) or not isinstance(dpi, int):
+        raise ServiceEndpointError(
+            400, "INVALID_DPI", "dpi must be an integer from 72 through 1200"
+        )
+    if dpi < MIN_EXPORT_DPI or dpi > MAX_EXPORT_DPI:
+        raise ServiceEndpointError(
+            400, "INVALID_DPI", "dpi must be an integer from 72 through 1200"
+        )
+    return image_format.lower(), dpi
+
+
+def clipboard_format_diagnostics() -> str:
+    """Best-effort Win32 format inventory when Pillow cannot read the clipboard."""
+
+    try:
+        import win32clipboard  # type: ignore[import-not-found]
+
+        formats = []
+        win32clipboard.OpenClipboard()
+        try:
+            current = 0
+            while True:
+                current = win32clipboard.EnumClipboardFormats(current)
+                if not current:
+                    break
+                try:
+                    name = win32clipboard.GetClipboardFormatName(current)
+                except Exception:
+                    name = str(current)
+                formats.append(name)
+        finally:
+            win32clipboard.CloseClipboard()
+        return ", ".join(formats) if formats else "none"
+    except Exception as error:
+        return f"unavailable ({error})"
+
+
+def export_clipboard_image(image_format: str, dpi: int) -> dict[str, Any]:
+    """Read the current clipboard image and persist a bounded PoC export."""
+
+    try:
+        from PIL import Image, ImageGrab
+    except Exception as error:
+        raise ServiceEndpointError(
+            503, "PIL_UNAVAILABLE", f"Pillow clipboard support is unavailable: {error}"
+        ) from error
+
+    try:
+        image: Any = ImageGrab.grabclipboard()
+    except Exception as error:
+        formats = clipboard_format_diagnostics()
+        raise ServiceEndpointError(
+            500,
+            "CLIPBOARD_READ_FAILED",
+            f"clipboard read failed: {error}; formats: {formats}",
+        ) from error
+    if image is None:
+        formats = clipboard_format_diagnostics()
+        raise ServiceEndpointError(
+            422,
+            "CLIPBOARD_EMPTY",
+            f"clipboard does not contain a Pillow-readable image; formats: {formats}",
+        )
+    if not all(hasattr(image, member) for member in ("size", "resize", "convert", "save")):
+        raise ServiceEndpointError(
+            422, "CLIPBOARD_NOT_IMAGE", "clipboard content is not an image"
+        )
+
+    width, height = image.size
+    if not isinstance(width, int) or not isinstance(height, int) or width < 1 or height < 1:
+        raise ServiceEndpointError(
+            422, "CLIPBOARD_NOT_IMAGE", "clipboard image dimensions are invalid"
+        )
+    scale = dpi / BASE_CLIPBOARD_DPI
+    target_size = (
+        max(1, round(width * scale)),
+        max(1, round(height * scale)),
+    )
+    if target_size[0] * target_size[1] > MAX_EXPORT_PIXELS:
+        raise ServiceEndpointError(
+            413,
+            "EXPORT_TOO_LARGE",
+            f"target image exceeds {MAX_EXPORT_PIXELS} pixels",
+        )
+    resampling = getattr(Image, "Resampling", Image)
+    lanczos = getattr(resampling, "LANCZOS", 1)
+    exported = image.resize(target_size, lanczos)
+
+    if image_format in {"jpg", "pdf"}:
+        if getattr(exported, "mode", "RGB") in {"RGBA", "LA"}:
+            rgba = exported.convert("RGBA")
+            background = Image.new("RGB", rgba.size, "white")
+            background.paste(rgba, mask=rgba.getchannel("A"))
+            exported = background
+        else:
+            exported = exported.convert("RGB")
+
+    output_dir = artifact_root() / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    output_path = output_dir / f"shape-{timestamp}-{dpi}dpi.{image_format}"
+    save_kwargs: dict[str, Any] = {"dpi": (dpi, dpi)}
+    if image_format == "tiff":
+        save_kwargs["compression"] = "tiff_lzw"
+    elif image_format == "jpg":
+        save_kwargs["quality"] = 95
+    elif image_format == "pdf":
+        save_kwargs = {"resolution": dpi}
+    exported.save(output_path, **save_kwargs)
+    actual_dpi = [float(dpi), float(dpi)]
+    if image_format != "pdf":
+        try:
+            with Image.open(output_path) as persisted:
+                stored_dpi = persisted.info.get("dpi")
+            if stored_dpi and len(stored_dpi) >= 2:
+                actual_dpi = [round(float(stored_dpi[0]), 3), round(float(stored_dpi[1]), 3)]
+        except Exception as error:
+            log_write(f"M0.4 DPI metadata readback failed for {output_path}: {error}")
+    return {
+        "ok": True,
+        "outputPath": str(output_path.resolve()),
+        "format": image_format,
+        "dpi": dpi,
+        "actualDpi": actual_dpi,
+        "sourceWidth": width,
+        "sourceHeight": height,
+        "width": target_size[0],
+        "height": target_size[1],
+    }
+
+
+def probe_wps_com() -> dict[str, Any]:
+    """Probe the running WPS ET COM server without making it a dependency."""
+
+    try:
+        import win32com.client  # type: ignore[import-not-found]
+
+        application = win32com.client.GetActiveObject("Ket.Application")
+        version = getattr(application, "Version", None)
+        return {
+            "ok": True,
+            "progId": "Ket.Application",
+            "version": None if version is None else str(version),
+        }
+    except Exception as error:
+        return {
+            "ok": False,
+            "code": "COM_UNAVAILABLE",
+            "detail": f"{error.__class__.__name__}: {error}",
+        }
+
+
 class Gate0ServiceServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -195,7 +460,11 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
         if not self._request_allowed():
             return
-        if self.path != "/dialog":
+        if self.path not in {
+            "/dialog",
+            "/probe/elisa-selection",
+            "/probe/shape-export",
+        }:
             self._send_error(404, "not_found", "endpoint not found")
             return
 
@@ -235,39 +504,95 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/probe/com-probe":
+            self._send_json(200, probe_wps_com())
+            return
         self._send_error(404, "not_found", "endpoint not found")
 
-    def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
-        if not self._request_allowed():
-            return
-        if self.path != "/dialog":
-            self._send_error(404, "not_found", "endpoint not found")
-            return
+    def _read_json_body(self) -> dict[str, Any] | None:
         if self.headers.get_content_type() != "application/json":
             self._send_error(
                 415, "unsupported_media_type", "Content-Type must be application/json"
             )
-            return
-
+            return None
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             self._send_error(
                 400, "invalid_content_length", "Content-Length must be an integer"
             )
-            return
+            return None
         if content_length < 0 or content_length > MAX_BODY_BYTES:
             self._send_error(
                 413,
                 "invalid_body_size",
                 "request body size is outside the allowed range",
             )
+            return None
+        try:
+            payload = json.loads(self.rfile.read(content_length))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            self._send_error(400, "invalid_json", f"request is not valid JSON: {error}")
+            return None
+        if not isinstance(payload, dict):
+            self._send_error(400, "invalid_request", "request must be a JSON object")
+            return None
+        return payload
+
+    def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler.
+        if not self._request_allowed():
+            return
+        if self.path not in {
+            "/dialog",
+            "/probe/elisa-selection",
+            "/probe/shape-export",
+        }:
+            self._send_error(404, "not_found", "endpoint not found")
+            return
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        if self.path == "/probe/elisa-selection":
+            try:
+                response = validate_elisa_selection(payload)
+            except ServiceEndpointError as error:
+                self._send_error(error.status, error.code, error.message)
+                return
+            log_write(
+                f"M0.4 ELISA selection source={response['source']} "
+                f"ranges={len(response['ranges'])}"
+            )
+            response["requestOrigin"] = self._origin_echo()
+            self._send_json(200, response)
+            return
+
+        if self.path == "/probe/shape-export":
+            try:
+                image_format, dpi = validate_shape_export(payload)
+                response = export_clipboard_image(image_format, dpi)
+            except ServiceEndpointError as error:
+                log_write(f"M0.4 shape export error code={error.code}: {error.message}")
+                self._send_error(error.status, error.code, error.message)
+                return
+            except Exception as error:  # Defensive PoC boundary: never kill service.
+                log_write(f"M0.4 shape export unexpected error: {error}")
+                self._send_error(
+                    500, "EXPORT_FAILED", f"unexpected export failure: {error}"
+                )
+                return
+            response["requestOrigin"] = self._origin_echo()
+            log_write(
+                f"M0.4 shape export ok format={image_format} dpi={dpi} "
+                f"path={response['outputPath']}"
+            )
+            self._send_json(200, response)
             return
 
         server = self.server
         assert isinstance(server, Gate0ServiceServer)
         started = time.monotonic()
-        result = server.dialogs.show_dialog("M0.3 Tkinter dialog")
+        result = server.dialogs.show_dialog(str(payload.get("message", "M0.3 Tkinter dialog")))
         duration_ms = round((time.monotonic() - started) * 1000)
         if result.get("error"):
             log_write(f"dialog error: {result['error']}")
@@ -363,6 +688,24 @@ def self_test(port: int) -> int:
     import urllib.request
 
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def self_test_post(
+        port_number: int, path: str, payload: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]]:
+        if path not in {"/probe/elisa-selection", "/probe/shape-export"}:
+            raise ValueError("self-test POST path is not allowed")
+        encoded = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port_number}{path}",
+            data=encoded,
+            headers={"Content-Type": "application/json", "Origin": "null"},
+        )
+        try:
+            with opener.open(request, timeout=5) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+
     try:
         server = create_server(HOST, port)
     except OSError as error:
@@ -410,6 +753,38 @@ def self_test(port: int) -> int:
             )
         else:
             print(f"FAIL: /diagnostics payload unexpected: {diag}")
+            failures += 1
+
+        status, elisa = self_test_post(
+            bound_port,
+            "/probe/elisa-selection",
+            {
+                "source": "inputbox",
+                "ranges": [{"address": "$A$1:$B$2", "values": [[1, 2], [3, None]]}],
+            },
+        )
+        if (
+            status == 200
+            and elisa.get("ok")
+            and elisa.get("ranges", [{}])[0].get("nonEmptyCells") == 3
+        ):
+            print("PASS: /probe/elisa-selection validates and summarizes a matrix")
+        else:
+            print(f"FAIL: ELISA selection self-test unexpected: {status} {elisa}")
+            failures += 1
+
+        status, shape_error = self_test_post(
+            bound_port,
+            "/probe/shape-export",
+            {"format": "bmp", "dpi": 300},
+        )
+        if (
+            status == 400
+            and shape_error.get("error", {}).get("code") == "INVALID_FORMAT"
+        ):
+            print("PASS: /probe/shape-export rejects an unsupported format")
+        else:
+            print(f"FAIL: shape export self-test unexpected: {status} {shape_error}")
             failures += 1
     except urllib.error.URLError as error:
         print(f"FAIL: HTTP request failed: {error}")

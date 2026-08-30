@@ -36,6 +36,26 @@
                             visible="true"
                             size="large"/>
                 </group>
+                <group id="xstarsM04Group" label="M0.4 探针">
+                    <button id="xstarsM04InputBox"
+                            label="InputBox 选区探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM04TwoStage"
+                            label="两阶段选区探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM04ShapeExport"
+                            label="Shape 导出探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
             </tab>
         </tabs>
     </ribbon>
