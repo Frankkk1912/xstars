@@ -113,7 +113,7 @@ Record output size and attach or link the resulting files.
 | E-05 | **Blocker** | Ordinary XSTARS chart | PDF | 600 | Non-empty PDF opens and reflects the generated chart. | | |
 | E-06 | **Blocker** | Standard-curve or ELISA fit chart | PNG | 300 | Rebuilt fit chart exports with curve, labels, and parameters intact. | | |
 | E-07 | **Blocker** | Standard-curve or ELISA fit chart | PDF | 600 | Rebuilt specialized chart exports as a non-empty PDF. | | |
-| E-08 | **Blocker** | Select multiple artifact-backed XSTARS pictures and export. | Every file is created using the expected `_1`, `_2`, ... naming without overwriting another output. | | |
+| E-08 | **Blocker** | Place multiple valid artifact-backed XSTARS pictures on the active sheet, then run Export (picture selection is not consulted on macOS). | Every valid artifact-backed XSTARS picture on the active sheet is exported using the expected `_1`, `_2`, ... naming without overwriting another output. | | |
 
 ### 5.2 Fail-closed and recovery checks
 

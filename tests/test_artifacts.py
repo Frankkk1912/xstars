@@ -2,6 +2,8 @@
 
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -298,38 +300,139 @@ def test_standard_curve_round_trip_rebuild_exports_nonempty_figure(tmp_path, fra
     assert output.stat().st_size > 0
 
 
-def test_atomic_overwrite_never_exposes_half_document(tmp_path, identity, frame):
-    """Readers see the complete old artifact until the atomic replacement."""
+def test_replacement_invalidates_old_payload_before_atomic_write(
+    tmp_path, identity, frame
+):
+    """A reused identity is missing, never stale, until replacement succeeds."""
     first = build_payload(identity, frame, PrismConfig(title="before"))
     save_artifact(first, tmp_path)
     artifact_path = tmp_path / f"{identity.key}.json"
     real_replace = os.replace
-    titles_seen_before_replace = []
+    existed_before_payload_replace = []
 
     def observe_then_replace(source, destination):
         if Path(destination) == artifact_path:
-            old_document = json.loads(artifact_path.read_text(encoding="utf-8"))
-            titles_seen_before_replace.append(old_document["config"]["title"])
+            existed_before_payload_replace.append(artifact_path.exists())
         return real_replace(source, destination)
 
     second = build_payload(identity, frame, PrismConfig(title="after"))
     with patch("xstars.artifacts.os.replace", side_effect=observe_then_replace):
         save_artifact(second, tmp_path)
 
-    assert titles_seen_before_replace == ["before"]
+    assert existed_before_payload_replace == [False]
     assert load_artifact(identity, tmp_path).config.title == "after"
     assert not list(tmp_path.glob("*.tmp"))
     assert not list(tmp_path.glob(".*.tmp"))
 
 
-def test_manifest_path_traversal_association_is_rejected(tmp_path, identity, frame):
-    save_artifact(build_payload(identity, frame, PrismConfig()), tmp_path)
+def test_manifest_is_diagnostic_and_missing_or_stale_manifest_does_not_block_load(
+    tmp_path, identity, frame
+):
+    save_artifact(
+        build_payload(identity, frame, PrismConfig(title="payload")), tmp_path
+    )
     manifest_path = tmp_path / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["artifacts"][identity.key]["file"] = "../untrusted.json"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest_path.unlink()
+    assert load_artifact(identity, tmp_path).config.title == "payload"
 
-    with pytest.raises(CorruptArtifactError, match="unsafe file association"):
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": artifacts.SCHEMA_VERSION,
+                "artifacts": {
+                    identity.key: {
+                        "file": "../untrusted.json",
+                        "identity": {"workbook": "wrong"},
+                        "renderer_kind": "wrong",
+                        "checksum": "0" * 64,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_artifact(identity, tmp_path).config.title == "payload"
+
+
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", None])
+def test_payload_schema_version_requires_a_strict_integer(
+    tmp_path, identity, frame, version
+):
+    save_artifact(build_payload(identity, frame, PrismConfig()), tmp_path)
+    _, document = _saved_document(tmp_path, identity)
+    document["schema_version"] = version
+    _rewrite_document(tmp_path, identity, document)
+
+    with pytest.raises(CorruptArtifactError, match="schema version is invalid"):
+        load_artifact(identity, tmp_path)
+
+
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", None])
+def test_manifest_schema_version_requires_a_strict_integer(tmp_path, version):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({"schema_version": version, "artifacts": {}}), encoding="utf-8"
+    )
+
+    with pytest.raises(CorruptArtifactError, match="manifest schema is invalid"):
+        artifacts._read_manifest_for_update(tmp_path)
+
+
+def test_concurrent_different_identity_writes_load_without_manifest_index(
+    tmp_path, frame
+):
+    identities = [
+        ArtifactIdentity("path:/tmp/a.xlsx", "Analysis", "XSTARS_Plot_1"),
+        ArtifactIdentity("path:/tmp/b.xlsx", "Analysis", "XSTARS_Plot_1"),
+    ]
+    barrier = threading.Barrier(2)
+    real_read = artifacts._read_manifest_for_update
+
+    def synchronized_manifest_read(root):
+        manifest = real_read(root)
+        barrier.wait(timeout=5)
+        return manifest
+
+    def write(index):
+        payload = build_payload(
+            identities[index], frame, PrismConfig(title=f"chart-{index}")
+        )
+        return save_artifact(payload, tmp_path)
+
+    with (
+        patch(
+            "xstars.artifacts._read_manifest_for_update",
+            side_effect=synchronized_manifest_read,
+        ),
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        paths = list(executor.map(write, range(2)))
+
+    assert all(path.exists() for path in paths)
+    assert [load_artifact(item, tmp_path).config.title for item in identities] == [
+        "chart-0",
+        "chart-1",
+    ]
+
+
+def test_failed_replacement_cannot_load_old_payload(tmp_path, identity, frame):
+    save_artifact(build_payload(identity, frame, PrismConfig(title="old")), tmp_path)
+    real_write = artifacts._atomic_write_json
+
+    def fail_payload_write(path, document):
+        if Path(path).name == f"{identity.key}.json":
+            raise PermissionError("replacement denied")
+        return real_write(path, document)
+
+    with (
+        patch("xstars.artifacts._atomic_write_json", side_effect=fail_payload_write),
+        pytest.raises(ArtifactWriteError, match="replacement denied"),
+    ):
+        save_artifact(
+            build_payload(identity, frame, PrismConfig(title="new")), tmp_path
+        )
+
+    with pytest.raises(MissingArtifactError):
         load_artifact(identity, tmp_path)
 
 

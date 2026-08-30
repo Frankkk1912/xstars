@@ -30,6 +30,13 @@ Install:
 3. Git, to clone the repository.
 4. A macro-enabled Excel workbook (`.xlsm`) that contains the XSTARS Ribbon XML. See the [Ribbon installation guide](../ribbon/README.md).
 
+> **Ribbon workbook prerequisite:** this repository does not include a prebuilt
+> `.xlsm`. Before moving to macOS, embed `ribbon/customUI14.xml` into a workbook
+> on Windows (or another environment with a working Office RibbonX Editor),
+> save it as `.xlsm`, and copy that workbook to the Mac. The supported macOS
+> workflow imports the VBA callbacks but does not provide a from-scratch Ribbon
+> XML embedding tool.
+
 Keep the repository in a stable location. The editable Python installation refers back to this checkout.
 
 ## 2. Create the Python environment
@@ -137,6 +144,7 @@ Not supported:
 
 - arbitrary Excel Shapes, user-created Excel charts, ranges, or clipboard screenshots;
 - legacy XSTARS pictures that were never registered in `~/.xstars/artifacts/`;
+- pictures in an unsaved workbook (save the workbook, then regenerate them);
 - pictures whose artifact is missing, corrupt, incompatible, or belongs to a different workbook/sheet/picture identity;
 - WPS for Mac.
 
@@ -146,7 +154,7 @@ Moving or renaming a workbook, worksheet, or registered picture can change its a
 
 ## 8. Artifact storage, privacy, and cleanup
 
-XSTARS stores rebuild data under:
+Chart generation on **both Windows and macOS** stores rebuild data under:
 
 ```text
 ~/.xstars/artifacts/
@@ -202,9 +210,9 @@ chmod 700 "$HOME/.xstars/artifacts"
 
 Then regenerate the chart. Missing, corrupt, unsupported-schema, unsupported-renderer, and identity-mismatch artifacts are rejected rather than exported.
 
-### A legacy or moved-workbook chart cannot be exported
+### An unsaved, legacy, or moved-workbook chart cannot be exported
 
-This is expected for charts without a current matching artifact. Reopen the source data, regenerate the chart in its current workbook and worksheet, then export the new picture.
+Unsaved workbooks have no stable cross-RunPython identity, so artifact registration is skipped without blocking chart generation. Save the workbook and regenerate the chart. For legacy, moved, or Save-As workbooks, reopen the source data and regenerate the chart in its current workbook and worksheet before exporting.
 
 ### The sample-range dialog rejects an address
 

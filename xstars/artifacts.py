@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -46,6 +47,7 @@ SCHEMA_VERSION = 1
 DEFAULT_ARTIFACT_ROOT = Path.home() / ".xstars" / "artifacts"
 _MANIFEST_NAME = "manifest.json"
 _SAFE_KEY = re.compile(r"^[0-9a-f]{64}$")
+_LOGGER = logging.getLogger(__name__)
 
 
 class RendererKind(str, Enum):
@@ -172,14 +174,37 @@ def build_payload(
     )
 
 
+def invalidate_artifact(
+    identity: ArtifactIdentity,
+    root: Path | str | None = None,
+) -> None:
+    """Fail-closed invalidation before an identity is reused.
+
+    The payload file is authoritative and is unlinked first.  The manifest is
+    diagnostic metadata only, so a failed or racing manifest update cannot make
+    an invalidated payload loadable again.
+    """
+    root_path = Path(root) if root is not None else DEFAULT_ARTIFACT_ROOT
+    artifact_path = _artifact_path(root_path, identity.key)
+    try:
+        artifact_path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise ArtifactWriteError(
+            f"Could not invalidate the previous chart rebuild artifact: {exc}"
+        ) from exc
+    if (root_path / _MANIFEST_NAME).exists():
+        _update_manifest_best_effort(root_path, identity.key, None)
+
+
 def save_artifact(
     payload: ArtifactPayload,
     root: Path | str | None = None,
 ) -> Path:
-    """Atomically save a payload and update its manifest entry.
+    """Atomically replace a payload and best-effort diagnostic manifest entry.
 
-    The artifact file is replaced before the manifest.  If the manifest update
-    fails, readers fail closed because its checksum does not match the new file.
+    Any prior payload for the same identity is invalidated before serialization
+    or writing.  Therefore a failed replacement cannot leave stale chart data
+    loadable under a reused Excel picture name.
     """
     root_path = Path(root) if root is not None else DEFAULT_ARTIFACT_ROOT
     try:
@@ -188,6 +213,7 @@ def save_artifact(
         with suppress(OSError):
             root_path.chmod(0o700)
 
+        invalidate_artifact(payload.identity, root_path)
         document = _payload_to_document(payload)
         checksum = _document_checksum(document)
         document["checksum"] = checksum
@@ -195,15 +221,16 @@ def save_artifact(
 
         artifact_path = _artifact_path(root_path, payload.artifact_key)
         _atomic_write_json(artifact_path, document)
-
-        manifest = _read_manifest_for_update(root_path)
-        manifest["artifacts"][payload.artifact_key] = {
-            "file": artifact_path.name,
-            "identity": payload.identity.to_dict(),
-            "renderer_kind": payload.renderer_kind.value,
-            "checksum": checksum,
-        }
-        _atomic_write_json(root_path / _MANIFEST_NAME, manifest)
+        _update_manifest_best_effort(
+            root_path,
+            payload.artifact_key,
+            {
+                "file": artifact_path.name,
+                "identity": payload.identity.to_dict(),
+                "renderer_kind": payload.renderer_kind.value,
+                "checksum": checksum,
+            },
+        )
         return artifact_path
     except ArtifactError:
         raise
@@ -217,49 +244,19 @@ def load_artifact(
     identity: ArtifactIdentity,
     root: Path | str | None = None,
 ) -> ArtifactPayload:
-    """Load and fully validate the artifact associated with *identity*."""
+    """Load by deterministic key and validate the authoritative payload.
+
+    ``manifest.json`` is intentionally not consulted: it is best-effort
+    diagnostic metadata and may be missing or stale after concurrent writers.
+    """
     root_path = Path(root) if root is not None else DEFAULT_ARTIFACT_ROOT
-    manifest_path = root_path / _MANIFEST_NAME
-    if not manifest_path.exists():
-        raise MissingArtifactError(
-            "No rebuild information is registered for this chart."
-        )
-
-    manifest = _read_json(manifest_path, "artifact manifest")
-    _validate_manifest(manifest)
-    entry = manifest["artifacts"].get(identity.key)
-    if entry is None:
-        raise MissingArtifactError(
-            "No rebuild information is registered for this chart."
-        )
-    if not isinstance(entry, dict):
-        raise CorruptArtifactError("The artifact manifest entry is invalid.")
-
-    expected_name = f"{identity.key}.json"
-    if entry.get("file") != expected_name:
-        raise CorruptArtifactError(
-            "The artifact manifest contains an unsafe file association."
-        )
-    if entry.get("identity") != identity.to_dict():
-        raise ArtifactIdentityError(
-            "The artifact manifest identity does not match this chart."
-        )
-
     artifact_path = _artifact_path(root_path, identity.key)
     if not artifact_path.exists():
-        raise MissingArtifactError("The registered chart rebuild file is missing.")
+        raise MissingArtifactError(
+            "No rebuild information is registered for this chart."
+        )
     document = _read_json(artifact_path, "chart rebuild artifact")
-    payload = _document_to_payload(document, expected_identity=identity)
-
-    if entry.get("checksum") != payload.checksum:
-        raise CorruptArtifactError(
-            "The artifact manifest checksum does not match the payload."
-        )
-    if entry.get("renderer_kind") != payload.renderer_kind.value:
-        raise CorruptArtifactError(
-            "The artifact manifest renderer does not match the payload."
-        )
-    return payload
+    return _document_to_payload(document, expected_identity=identity)
 
 
 def has_artifact(identity: ArtifactIdentity, root: Path | str | None = None) -> bool:
@@ -525,7 +522,7 @@ def _validate_document_structure(document: Any, *, check_checksum: bool) -> None
         raise CorruptArtifactError(
             f"The chart rebuild artifact is missing fields: {', '.join(missing)}."
         )
-    if not isinstance(document["schema_version"], int):
+    if type(document["schema_version"]) is not int:
         raise CorruptArtifactError("The artifact schema version is invalid.")
     if document["schema_version"] != SCHEMA_VERSION:
         raise UnsupportedSchemaError(
@@ -847,16 +844,33 @@ def _read_manifest_for_update(root: Path) -> dict[str, Any]:
     return manifest
 
 
+def _update_manifest_best_effort(
+    root: Path, key: str, entry: dict[str, Any] | None
+) -> None:
+    """Update diagnostic metadata without affecting payload availability."""
+    try:
+        manifest = _read_manifest_for_update(root)
+        if entry is None:
+            if key not in manifest["artifacts"]:
+                return
+            manifest["artifacts"].pop(key)
+        else:
+            manifest["artifacts"][key] = entry
+        _atomic_write_json(root / _MANIFEST_NAME, manifest)
+    except Exception as exc:
+        _LOGGER.warning("Artifact manifest update failed (payload unaffected): %s", exc)
+
+
 def _validate_manifest(manifest: Any) -> None:
     if not isinstance(manifest, dict):
         raise CorruptArtifactError("The artifact manifest must be a JSON object.")
-    if manifest.get("schema_version") != SCHEMA_VERSION:
-        version = manifest.get("schema_version")
-        if isinstance(version, int):
-            raise UnsupportedSchemaError(
-                f"Artifact manifest schema {version} is not supported."
-            )
+    version = manifest.get("schema_version")
+    if type(version) is not int:
         raise CorruptArtifactError("The artifact manifest schema is invalid.")
+    if version != SCHEMA_VERSION:
+        raise UnsupportedSchemaError(
+            f"Artifact manifest schema {version} is not supported."
+        )
     if not isinstance(manifest.get("artifacts"), dict):
         raise CorruptArtifactError("The artifact manifest entries are invalid.")
 

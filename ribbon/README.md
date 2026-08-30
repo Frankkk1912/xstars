@@ -7,6 +7,8 @@ The XSTARS Ribbon requires two workbook components:
 
 Use a macro-enabled workbook (`.xlsm`). The macOS developer mode reuses the same `ribbon_callbacks.bas`; do not create or modify a separate Mac `.bas` file.
 
+This repository does **not** ship a prebuilt `.xlsm`. Prepare the Ribbon-enabled workbook first on Windows (or another environment with a working Office RibbonX Editor): embed `customUI14.xml`, save as `.xlsm`, and then copy the workbook to macOS. Importing the `.bas` file on a Mac does not embed the Ribbon XML.
+
 ## Windows
 
 1. **Install Office RibbonX Editor**
@@ -43,7 +45,7 @@ See the full [macOS developer-mode setup guide](../docs/macos-developer-setup.md
 
 To install the callbacks in Excel for Mac:
 
-1. Open the macro-enabled XSTARS workbook in Excel for Mac. Its Ribbon XML must already contain the contents of `customUI14.xml`; use Office RibbonX Editor on a supported host if the XML still needs to be embedded.
+1. Open the macro-enabled XSTARS workbook prepared in advance as described above. Its Ribbon XML must already contain the contents of `customUI14.xml`; the supported setup uses Office RibbonX Editor on Windows (or another host where that editor works) before copying the `.xlsm` to the Mac.
 2. Open **Tools → Macro → Visual Basic Editor**. Depending on the keyboard and Excel version, `Fn+Option+F11` may also work; `Alt+F11` is the Windows shortcut.
 3. In the workbook project, choose **File → Import File…** (or use the project context menu).
 4. Select the existing [`ribbon_callbacks.bas`](ribbon_callbacks.bas) from this directory. Confirm that the imported module is named `RibbonCallbacks`.

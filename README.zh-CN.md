@@ -221,6 +221,10 @@ Excel VBA 导入、Python 解释器、宏与自动化权限、artifact 隐私、
 
 设置跨会话持久化，保存在 `~/.xstars/settings.json`。💾
 
+### 本地图表重建数据与隐私
+
+在 **Windows 和 macOS** 上生成图表时，XSTARS 还会在 `~/.xstars/artifacts/` 写入带版本的 JSON 重建 payload。这些本地文件可能包含处理后的实验数据、绘图配置和统计结果；XSTARS 不会上传它们，也不会自动到期清理。请按实验数据保留策略管理该目录。若只需清理派生缓存，请先退出 Excel/XSTARS，再删除 `~/.xstars/artifacts/`；除非同时要重置设置，否则不要删除 `~/.xstars/settings.json`。macOS 清理缓存后需重新生成图表才能再次导出。详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md#8-artifact-storage-privacy-and-cleanup)。
+
 ---
 
 ## 📌 系统要求

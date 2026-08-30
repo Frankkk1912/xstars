@@ -222,6 +222,10 @@ All options are in a tabbed dialog:
 
 Settings persist across sessions in `~/.xstars/settings.json`. 💾
 
+### Local chart rebuild artifacts and privacy
+
+Chart generation on **Windows and macOS** also writes versioned JSON rebuild payloads under `~/.xstars/artifacts/`. These local files can contain processed experimental data, plotting configuration, and statistical results. They are not uploaded by XSTARS and are not automatically expired. Apply your normal experimental-data retention policy. To clear only this derived cache, quit Excel/XSTARS and delete `~/.xstars/artifacts/`; do not delete `~/.xstars/settings.json` unless you also want to reset settings. On macOS, clearing the cache requires regenerating a chart before exporting it again. See [macOS Developer-Mode Setup](docs/macos-developer-setup.md#8-artifact-storage-privacy-and-cleanup) for details.
+
 ---
 
 ## 📌 Requirements

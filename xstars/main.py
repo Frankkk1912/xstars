@@ -40,6 +40,11 @@ except ImportError:
 
 _ARTIFACT_LOGGER = logging.getLogger(f"{__name__}.artifacts")
 _LAST_ARTIFACT_DIAGNOSTIC: str | None = None
+_LAST_ARTIFACT_DISCOVERY_ERRORS: list[artifacts.ArtifactError] = []
+_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE = (
+    "This workbook has not been saved. Save the workbook, then regenerate "
+    "the chart to enable macOS export."
+)
 
 
 def get_last_artifact_diagnostic() -> str | None:
@@ -48,15 +53,11 @@ def get_last_artifact_diagnostic() -> str | None:
 
 
 def _workbook_artifact_identifier(book: xw.Book) -> str:
-    """Return a Save-As-sensitive identifier without touching Excel COM APIs."""
-    path = getattr(book, "path", None)
+    """Return a Save-As-sensitive path identity or fail closed if unsaved."""
     fullname = getattr(book, "fullname", None)
-    if isinstance(path, str) and path.strip() and isinstance(fullname, str):
-        return f"path:{os.path.abspath(os.path.expanduser(fullname))}"
-    name = getattr(book, "name", None)
-    if isinstance(name, str) and name.strip():
-        return f"unsaved:{name.strip()}"
-    raise ValueError("Workbook identity is unavailable for artifact registration")
+    if isinstance(fullname, str) and fullname.strip():
+        return f"path:{os.path.abspath(os.path.expanduser(fullname.strip()))}"
+    raise artifacts.ArtifactIdentityError(_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE)
 
 
 def _register_artifact_best_effort(
@@ -120,14 +121,34 @@ def _write_transformed_data(
     return row
 
 
-def _next_plot_name(sheet, base: str = "XSTARS_Plot") -> str:
-    """Return the next unused picture name (e.g. XSTARS_Plot_1, XSTARS_Plot_2...)."""
+def _next_plot_name(
+    sheet, base: str = "XSTARS_Plot", *, book: xw.Book | None = None
+) -> str:
+    """Return a name unused by pictures or a valid persisted artifact."""
     existing = {p.name for p in sheet.pictures}
+    workbook_identifier: str | None = None
+    raw_sheet_name = getattr(sheet, "name", None)
+    sheet_name = (
+        raw_sheet_name.strip()
+        if isinstance(raw_sheet_name, str) and raw_sheet_name.strip()
+        else None
+    )
+    if sys.platform == "darwin" and book is not None and sheet_name is not None:
+        # Unsaved workbooks do not register artifacts, so only Excel names can
+        # reserve a candidate. Non-Darwin name allocation remains unchanged.
+        with suppress(artifacts.ArtifactIdentityError):
+            workbook_identifier = _workbook_artifact_identifier(book)
     i = 1
     while True:
         name = f"{base}_{i}"
         if name not in existing:
-            return name
+            if workbook_identifier is None or sheet_name is None:
+                return name
+            identity = artifacts.ArtifactIdentity(
+                workbook=workbook_identifier, sheet=sheet_name, picture=name
+            )
+            if not artifacts.has_artifact(identity):
+                return name
         i += 1
 
 
@@ -465,7 +486,7 @@ def _run_elisa_impl(book: xw.Book) -> None:
     # 7. Insert analysis chart below tables
     insert_left = sheet.range((out_row, out_col)).left
     insert_top = sheet.range((out_row, out_col)).top
-    pic_name = _next_plot_name(sheet)
+    pic_name = _next_plot_name(sheet, book=book)
     pic = sheet.pictures.add(
         fig,
         name=pic_name,
@@ -483,7 +504,7 @@ def _run_elisa_impl(book: xw.Book) -> None:
         fig_std = artifacts.build_standard_curve_figure(
             conc, od, renderer_params["fit"], config
         )
-        std_name = _next_plot_name(sheet, "XSTARS_ELISA_StdCurve")
+        std_name = _next_plot_name(sheet, "XSTARS_ELISA_StdCurve", book=book)
         std_pic = sheet.pictures.add(
             fig_std,
             name=std_name,
@@ -639,7 +660,7 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
         )
 
     # Insert chart below stats/data tables
-    pic_name = _next_plot_name(sheet)
+    pic_name = _next_plot_name(sheet, book=book)
     pic = sheet.pictures.add(
         fig,
         name=pic_name,
@@ -944,7 +965,7 @@ def _run_impl(book: xw.Book) -> None:
             next_row += len(ic50_data) + 2
 
     # 7. Insert chart below stats table
-    pic_name = _next_plot_name(sheet)
+    pic_name = _next_plot_name(sheet, book=book)
     pic = sheet.pictures.add(
         fig,
         name=pic_name,
@@ -990,7 +1011,7 @@ def _run_quick_impl(book: xw.Book) -> None:
         next_row += len(stats_df) + 2
 
     # Insert chart below stats table
-    pic_name = _next_plot_name(sheet)
+    pic_name = _next_plot_name(sheet, book=book)
     pic = sheet.pictures.add(
         fig,
         name=pic_name,
@@ -1005,7 +1026,7 @@ def _run_quick_impl(book: xw.Book) -> None:
 
 
 def run_export() -> None:
-    """Export the selected picture (or XSTARS charts) as a high-resolution image."""
+    """Export every valid artifact-backed XSTARS picture on the active sheet."""
     book = xw.Book.caller()
     try:
         _run_export_impl(book)
@@ -1033,7 +1054,13 @@ def _artifact_identity_for_picture(
 
 
 def _get_selected_shapes(book: xw.Book) -> list:
-    """Return export candidates using the host platform's supported mechanism."""
+    """Return host export candidates.
+
+    On macOS this means every valid artifact-backed XSTARS picture on the
+    active sheet; Excel picture selection is intentionally not consulted.
+    """
+    global _LAST_ARTIFACT_DISCOVERY_ERRORS
+    _LAST_ARTIFACT_DISCOVERY_ERRORS = []
     if sys.platform == "darwin":
         # Excel for Mac exposes appscript rather than COM.  Do not touch
         # book.app.api/ShapeRange: only validated artifact-backed pictures are
@@ -1049,9 +1076,19 @@ def _get_selected_shapes(book: xw.Book) -> list:
             try:
                 identity = _artifact_identity_for_picture(book, sheet, picture)
                 artifacts.load_artifact(identity)
-            except (artifacts.ArtifactError, ValueError) as exc:
+            except artifacts.ArtifactError as exc:
+                _LAST_ARTIFACT_DISCOVERY_ERRORS.append(exc)
                 _ARTIFACT_LOGGER.info(
                     "Skipping macOS picture without a valid rebuild artifact (%s): %s",
+                    picture_name,
+                    exc,
+                )
+                continue
+            except ValueError as exc:
+                identity_error = artifacts.ArtifactIdentityError(str(exc))
+                _LAST_ARTIFACT_DISCOVERY_ERRORS.append(identity_error)
+                _ARTIFACT_LOGGER.info(
+                    "Skipping macOS picture with an invalid identity (%s): %s",
                     picture_name,
                     exc,
                 )
@@ -1313,17 +1350,22 @@ def _export_artifact_picture(
 
 
 def _run_export_impl(book: xw.Book) -> None:
-    """Export selected picture(s) at high resolution."""
+    """Export all valid active-sheet artifacts on macOS, or selected Windows shapes."""
+    global _LAST_ARTIFACT_DISCOVERY_ERRORS
+    _LAST_ARTIFACT_DISCOVERY_ERRORS = []
     shapes = _get_selected_shapes(book)
     macos_sheet = book.selection.sheet if sys.platform == "darwin" else None
     if not shapes:
         if sys.platform == "darwin":
-            message = (
-                "No exportable XSTARS chart was found.\n\n"
-                "macOS export only supports charts generated by this XSTARS "
-                "version with valid rebuild information. Please regenerate the "
-                "chart and try again."
-            )
+            if _LAST_ARTIFACT_DISCOVERY_ERRORS:
+                message = _LAST_ARTIFACT_DISCOVERY_ERRORS[0].user_message
+            else:
+                message = (
+                    "No exportable XSTARS chart was found.\n\n"
+                    "macOS export only supports charts generated by this XSTARS "
+                    "version with valid rebuild information. Please regenerate the "
+                    "chart and try again."
+                )
         else:
             message = (
                 "No image selected.\n\n"
@@ -1693,7 +1735,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     cfg = PrismConfig.load()
     renderer_params = artifacts.standard_curve_renderer_params(conc, od, fit)
     fig = artifacts.build_standard_curve_figure(conc, od, renderer_params["fit"], cfg)
-    pic_name = _next_plot_name(sheet, "XSTARS_StdCurve")
+    pic_name = _next_plot_name(sheet, "XSTARS_StdCurve", book=book)
     pic = sheet.pictures.add(
         fig,
         name=pic_name,
