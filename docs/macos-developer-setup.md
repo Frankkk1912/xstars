@@ -160,7 +160,7 @@ Chart generation on **both Windows and macOS** stores rebuild data under:
 ~/.xstars/artifacts/
 ```
 
-The directory contains a manifest and versioned JSON payloads (the current implementation uses schema version 1). A payload can include processed experimental data, workbook/sheet/picture identity, plotting configuration, statistical results, and renderer parameters. SHA-256 checksums detect corruption; they do **not** encrypt the data. XSTARS attempts owner-only directory/file permissions where the filesystem supports them and does not upload these artifacts, but normal device backup or synchronization software may copy them.
+The directory contains versioned JSON payloads (the current implementation uses schema version 1) plus an optional `manifest.json`. Payloads are the authoritative data: loading validates a payload's checksum and embedded identity directly, so a missing, stale, or damaged manifest never makes a valid payload unloadable — the manifest is best-effort diagnostic metadata only. A payload can include processed experimental data, workbook/sheet/picture identity, plotting configuration, statistical results, and renderer parameters. SHA-256 checksums detect corruption; they do **not** encrypt the data. XSTARS attempts owner-only directory/file permissions where the filesystem supports them and does not upload these artifacts, but normal device backup or synchronization software may copy them.
 
 The MVP does not automatically expire or delete artifacts. Treat the directory as experimental data and apply your organization's retention and device-access policies.
 
@@ -171,6 +171,8 @@ rm -rf "$HOME/.xstars/artifacts"
 ```
 
 Do **not** delete `~/.xstars/settings.json` unless you also intend to reset XSTARS settings. Removing artifacts does not alter workbook source data, but macOS Export will require you to regenerate each chart before exporting it again. XSTARS recreates the artifact directory when it next saves a chart successfully.
+
+**Save As caution:** artifact identity is derived from the workbook path, sheet name, and picture name. If you save the workbook to a different path, generate charts there, and later save it back to a path where charts were generated before (A → B → A), the current pictures can pair with payloads that were produced by an earlier generation. XSTARS does not rebind or fingerprint workbooks. After such a Save As round trip, regenerate the charts you intend to export before using macOS Export.
 
 ## 9. Troubleshooting
 

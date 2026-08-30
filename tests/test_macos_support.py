@@ -5,6 +5,7 @@
 
 import json
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -140,10 +141,16 @@ def test_darwin_picture_discovery_returns_empty_for_legacy_or_unsupported(tmp_pa
 
 
 def test_unsaved_workbook_registration_is_skipped_with_diagnostic(tmp_path):
-    book = SimpleNamespace(fullname="", name="Book1")
+    book = SimpleNamespace(fullname="Book1", path="", name="Book1")
     sheet = SimpleNamespace(name="Analysis")
     picture = SimpleNamespace(name="XSTARS_Plot_1")
     frame = pd.DataFrame({"Control": [1.0], "Drug": [2.0]})
+
+    with (
+        patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path),
+        pytest.raises(artifacts.ArtifactIdentityError, match="Save the workbook"),
+    ):
+        main._workbook_artifact_identifier(book)
 
     with patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path):
         assert not main._register_artifact_best_effort(
@@ -159,7 +166,8 @@ def test_unsaved_workbook_registration_is_skipped_with_diagnostic(tmp_path):
 def test_darwin_unsaved_workbook_export_reports_save_and_regenerate(tmp_path):
     picture = StrictPicture("XSTARS_Plot_1")
     book, _ = _darwin_book(tmp_path, [picture])
-    book.fullname = ""
+    book.fullname = "Book1"
+    book.path = ""
     book.name = "Book1"
 
     with (
@@ -608,23 +616,41 @@ def test_windows_picture_fallback_keeps_xstars_plot_filter():
     shape_range.Item.assert_called_once_with(1)
 
 
+class RecordingShape:
+    """COM Shape double that snapshots dimensions when CopyPicture runs."""
+
+    def __init__(self):
+        self.Width = 96.0
+        self.Height = 48.0
+        self.Left = 12.0
+        self.Top = 24.0
+        self.LockAspectRatio = 1
+        self.copy_calls = []
+
+    def CopyPicture(self, appearance, picture_format):
+        self.copy_calls.append(
+            (
+                appearance,
+                picture_format,
+                self.Width,
+                self.Height,
+                self.LockAspectRatio,
+            )
+        )
+
+
 @pytest.mark.parametrize(
-    ("suffix", "expected_format", "expected_kwargs"),
+    ("suffix", "dpi", "expected_format", "expected_kwargs"),
     [
-        ("png", "PNG", {"dpi": (300, 300)}),
-        ("tif", "TIFF", {"dpi": (300, 300), "compression": "tiff_lzw"}),
-        ("pdf", "PDF", {"resolution": 300}),
+        ("png", 300, "PNG", {"dpi": (300, 300)}),
+        ("tif", 600, "TIFF", {"dpi": (600, 600), "compression": "tiff_lzw"}),
+        ("pdf", 300, "PDF", {"resolution": 300}),
     ],
 )
 def test_windows_highres_helper_preserves_com_contract_and_restores_shape(
-    tmp_path, suffix, expected_format, expected_kwargs
+    tmp_path, suffix, dpi, expected_format, expected_kwargs
 ):
-    shape = MagicMock()
-    shape.Width = 96.0
-    shape.Height = 48.0
-    shape.Left = 12.0
-    shape.Top = 24.0
-    shape.LockAspectRatio = 1
+    shape = RecordingShape()
     image = MagicMock()
     target = tmp_path / f"chart.{suffix}"
 
@@ -632,9 +658,9 @@ def test_windows_highres_helper_preserves_com_contract_and_restores_shape(
         patch("time.sleep"),
         patch("PIL.ImageGrab.grabclipboard", return_value=image) as clipboard,
     ):
-        main._export_shape_highres(shape, str(target), 300)
+        main._export_shape_highres(shape, str(target), dpi)
 
-    shape.CopyPicture.assert_called_once_with(1, 2)
+    assert shape.copy_calls == [(1, 2, dpi, dpi / 2, 0)]
     clipboard.assert_called_once_with()
     image.save.assert_called_once_with(str(target), expected_format, **expected_kwargs)
     assert shape.Width == 96.0
@@ -645,9 +671,7 @@ def test_windows_highres_helper_preserves_com_contract_and_restores_shape(
 
 
 def test_windows_highres_jpeg_converts_rgb_and_restores_on_save_failure(tmp_path):
-    shape = MagicMock()
-    shape.Width, shape.Height = 96.0, 48.0
-    shape.Left, shape.Top, shape.LockAspectRatio = 12.0, 24.0, 1
+    shape = RecordingShape()
     image = MagicMock()
     rgb = image.convert.return_value
     rgb.save.side_effect = OSError("disk full")
@@ -660,7 +684,7 @@ def test_windows_highres_jpeg_converts_rgb_and_restores_on_save_failure(tmp_path
     ):
         main._export_shape_highres(shape, str(target), 600)
 
-    shape.CopyPicture.assert_called_once_with(1, 2)
+    assert shape.copy_calls == [(1, 2, 600.0, 300.0, 0)]
     image.convert.assert_called_once_with("RGB")
     rgb.save.assert_called_once_with(str(target), "JPEG", dpi=(600, 600), quality=95)
     assert (shape.Width, shape.Height, shape.Left, shape.Top) == (
@@ -731,15 +755,19 @@ def test_windows_sample_inputbox_cancel_returns_none():
 
 def _generation_host(tmp_path, frame, events):
     pictures = MagicMock()
-    pictures.__iter__.return_value = iter([])
+    created_pictures = []
+    pictures.__iter__.side_effect = lambda: iter(created_pictures)
 
     def add_picture(_figure, **kwargs):
         # Model Excel assigning a final name that differs from the request.
         actual_name = f"{kwargs['name']}_Final"
         events.append(("add", actual_name))
-        return SimpleNamespace(name=actual_name, height=100)
+        picture = SimpleNamespace(name=actual_name, height=100)
+        created_pictures.append(picture)
+        return picture
 
     pictures.add.side_effect = add_picture
+    pictures.created_pictures = created_pictures
     cell = MagicMock(left=10.0, top=20.0)
     sheet = MagicMock(name="Analysis", pictures=pictures)
     sheet.name = "Analysis"
@@ -758,18 +786,161 @@ def _generation_host(tmp_path, frame, events):
     return book, sheet, pictures
 
 
+def test_darwin_labeled_invalidation_failure_uses_fresh_identity(tmp_path):
+    frame = pd.DataFrame({"Control": [2.0, 2.2], "Drug": [4.0, 4.2]})
+    old_frame = pd.DataFrame({"Control": [1.0], "Drug": [1.5]})
+    events = []
+    book, sheet, pictures = _generation_host(tmp_path, frame, events)
+    fixed_name = "XSTARS_Plot_Target"
+    old_picture = SimpleNamespace(name=fixed_name, height=100)
+    pictures.created_pictures.append(old_picture)
+    old_identity = ArtifactIdentity(
+        workbook=f"path:{book.fullname}", sheet="Analysis", picture=fixed_name
+    )
+    save_artifact(build_payload(old_identity, old_frame, PrismConfig()), tmp_path)
+    old_path = tmp_path / f"{old_identity.key}.json"
+    real_unlink = Path.unlink
+
+    def fail_only_old_identity(path, *args, **kwargs):
+        if path == old_path:
+            raise PermissionError("old payload is immutable")
+        return real_unlink(path, *args, **kwargs)
+
+    handler = MagicMock()
+    handler.get_insertion_cell.return_value = (5, 1)
+    stats = StatsResult(decision_path="test", normality_test="none")
+    figure = plt.figure()
+    plotter = MagicMock()
+    plotter.plot.return_value = figure
+    analyzer = MagicMock()
+    analyzer.analyze.return_value = stats
+
+    with (
+        patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path),
+        patch("xstars.main.sys.platform", "darwin"),
+        patch("pathlib.Path.unlink", autospec=True, side_effect=fail_only_old_identity),
+        patch(
+            "xstars.presets.wb.WBPreset.transform_labeled",
+            return_value=[("Target", frame)],
+        ),
+        patch("xstars.main.StatsEngine", return_value=analyzer),
+        patch("xstars.main.PlotEngine", return_value=plotter),
+        patch("xstars.main.DataHandler.validate"),
+    ):
+        main._run_wb_labeled(
+            book,
+            sheet,
+            handler,
+            pd.Series(["target", "reference"]),
+            frame,
+            PrismConfig(output_stats=False, output_data=False),
+        )
+
+    add_kwargs = pictures.add.call_args.kwargs
+    assert add_kwargs["name"].startswith(f"{fixed_name}_")
+    assert add_kwargs["name"] != fixed_name
+    assert add_kwargs["update"] is False
+    new_picture = pictures.created_pictures[-1]
+    new_identity = ArtifactIdentity(
+        workbook=f"path:{book.fullname}",
+        sheet="Analysis",
+        picture=new_picture.name,
+    )
+    assert load_artifact(old_identity, tmp_path).dataframe.equals(old_frame)
+    assert load_artifact(new_identity, tmp_path).dataframe.equals(frame)
+
+    pictures.created_pictures[:] = [new_picture]
+    with (
+        patch("xstars.main.sys.platform", "darwin"),
+        patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path),
+    ):
+        assert main._get_selected_shapes(book) == [new_picture]
+    plt.close(figure)
+
+
 @pytest.mark.parametrize(
-    "entry",
-    ["run", "quick", "preset", "wb_labeled", "qpcr_labeled", "elisa", "standard"],
+    ("runner", "transform_path"),
+    [
+        (main._run_wb_labeled, "xstars.presets.wb.WBPreset.transform_labeled"),
+        (main._run_qpcr_labeled, "xstars.presets.qpcr.QPCRPreset.transform_labeled"),
+    ],
 )
-def test_generation_entries_register_after_add_and_rebuild(tmp_path, entry):
+def test_windows_labeled_generation_keeps_fixed_name_and_update(
+    tmp_path, runner, transform_path
+):
+    frame = pd.DataFrame({"Control": [1.0], "Drug": [2.0]})
+    book, sheet, pictures = _generation_host(tmp_path, frame, [])
+    handler = MagicMock()
+    handler.get_insertion_cell.return_value = (5, 1)
+    figure = plt.figure()
+    analyzer = MagicMock()
+    analyzer.analyze.return_value = StatsResult(
+        decision_path="test", normality_test="none"
+    )
+    plotter = MagicMock()
+    plotter.plot.return_value = figure
+
+    with (
+        patch("xstars.main.sys.platform", "win32"),
+        patch(transform_path, return_value=[("Target", frame)]),
+        patch("xstars.main.StatsEngine", return_value=analyzer),
+        patch("xstars.main.PlotEngine", return_value=plotter),
+        patch("xstars.main.DataHandler.validate"),
+        patch("xstars.main._register_artifact_best_effort"),
+    ):
+        runner(
+            book,
+            sheet,
+            handler,
+            pd.Series(["target", "reference"]),
+            frame,
+            PrismConfig(output_stats=False, output_data=False),
+        )
+
+    assert pictures.add.call_args.kwargs["name"] == "XSTARS_Plot_Target"
+    assert pictures.add.call_args.kwargs["update"] is True
+    plt.close(figure)
+
+
+_GENERATION_EXPECTATIONS = {
+    "run": (1, ("XSTARS_Plot",), (artifacts.RendererKind.PLOT_ENGINE,)),
+    "quick": (1, ("XSTARS_Plot",), (artifacts.RendererKind.PLOT_ENGINE,)),
+    "preset": (1, ("XSTARS_Plot",), (artifacts.RendererKind.PLOT_ENGINE,)),
+    "wb_labeled": (
+        1,
+        ("XSTARS_Plot_Target",),
+        (artifacts.RendererKind.PLOT_ENGINE,),
+    ),
+    "qpcr_labeled": (
+        1,
+        ("XSTARS_Plot_Target",),
+        (artifacts.RendererKind.PLOT_ENGINE,),
+    ),
+    "elisa": (
+        2,
+        ("XSTARS_Plot", "XSTARS_ELISA_StdCurve"),
+        (
+            artifacts.RendererKind.PLOT_ENGINE,
+            artifacts.RendererKind.STANDARD_CURVE,
+        ),
+    ),
+    "standard": (
+        1,
+        ("XSTARS_StdCurve",),
+        (artifacts.RendererKind.STANDARD_CURVE,),
+    ),
+}
+
+
+def _exercise_generation_entry(tmp_path, entry, *, fail_artifact_writes=False):
     frame = pd.DataFrame({"Control": [1.0, 1.2], "Drug": [2.0, 2.2]})
     std_frame = pd.DataFrame({"0": [0.1, 0.11], "1": [0.4, 0.41]})
     events = []
+    registration_results = []
     book, sheet, pictures = _generation_host(
         tmp_path, std_frame if entry in {"elisa", "standard"} else frame, events
     )
-    config = PrismConfig(output_stats=False, output_data=False)
+    config = PrismConfig(output_stats=True, output_data=True)
     stats = StatsResult(decision_path="test", normality_test="none")
     fit = fit_standard_curve(
         np.array([0.0, 0.0, 1.0, 1.0]),
@@ -779,59 +950,80 @@ def test_generation_entries_register_after_add_and_rebuild(tmp_path, entry):
     source_figures = []
 
     def new_figure(*_args, **_kwargs):
-        fig = plt.figure()
-        source_figures.append(fig)
-        return fig
+        figure = plt.figure()
+        source_figures.append(figure)
+        return figure
 
     original_register = main._register_artifact_best_effort
 
     def register_after_add(*args, **kwargs):
         picture = args[2]
         events.append(("register", picture.name))
-        return original_register(*args, **kwargs)
+        result = original_register(*args, **kwargs)
+        registration_results.append(result)
+        return result
 
     plotter = MagicMock()
     plotter.plot.side_effect = new_figure
     analyzer = MagicMock()
     analyzer.analyze.return_value = stats
-    common = [
-        patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path),
-        patch(
-            "xstars.main._register_artifact_best_effort", side_effect=register_after_add
-        ),
-        patch("xstars.main.StatsEngine", return_value=analyzer),
-        patch("xstars.main.PlotEngine", return_value=plotter),
-        patch("xstars.main.DataHandler.validate"),
-    ]
-    for item in common:
-        item.start()
-    try:
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path))
+        stack.enter_context(patch("xstars.main.sys.platform", "darwin"))
+        stack.enter_context(
+            patch(
+                "xstars.main._register_artifact_best_effort",
+                side_effect=register_after_add,
+            )
+        )
+        stack.enter_context(patch("xstars.main.StatsEngine", return_value=analyzer))
+        stack.enter_context(patch("xstars.main.PlotEngine", return_value=plotter))
+        stack.enter_context(patch("xstars.main.DataHandler.validate"))
+        write_data = stack.enter_context(
+            patch(
+                "xstars.main._write_transformed_data",
+                wraps=main._write_transformed_data,
+            )
+        )
+        if fail_artifact_writes:
+            stack.enter_context(
+                patch(
+                    "xstars.artifacts._atomic_write_json",
+                    side_effect=PermissionError("read-only artifact directory"),
+                )
+            )
+
         if entry == "run":
-            with (
-                patch("xstars.main._read_selection_auto", return_value=(None, frame)),
-                patch("xstars.main.SettingsDialog") as dialog,
-                patch("xstars.main._apply_preset", return_value=frame),
-            ):
-                dialog.return_value.show.return_value = config
-                main._run_impl(book)
+            stack.enter_context(
+                patch("xstars.main._read_selection_auto", return_value=(None, frame))
+            )
+            dialog = stack.enter_context(patch("xstars.main.SettingsDialog"))
+            stack.enter_context(patch("xstars.main._apply_preset", return_value=frame))
+            dialog.return_value.show.return_value = config
+            main._run_impl(book)
         elif entry == "quick":
-            with (
-                patch("xstars.main.PrismConfig.load", return_value=config),
-                patch("xstars.main._read_selection_auto", return_value=(None, frame)),
-                patch("xstars.main._apply_preset", return_value=frame),
-            ):
-                main._run_quick_impl(book)
+            stack.enter_context(
+                patch("xstars.main.PrismConfig.load", return_value=config)
+            )
+            stack.enter_context(
+                patch("xstars.main._read_selection_auto", return_value=(None, frame))
+            )
+            stack.enter_context(patch("xstars.main._apply_preset", return_value=frame))
+            main._run_quick_impl(book)
         elif entry == "preset":
             config.experiment_preset = ExperimentPreset.WB
-            with (
-                patch("xstars.main._read_selection_auto", return_value=(None, frame)),
-                patch("xstars.main.PrismConfig.load", return_value=PrismConfig()),
-                patch("xstars.main.SettingsDialog") as dialog,
-                patch("xstars.main._apply_preset", return_value=frame),
-                patch("xstars.main.get_preset", return_value=object()),
-            ):
-                dialog.return_value.show.return_value = config
-                main._run_preset_impl(book, ExperimentPreset.WB)
+            stack.enter_context(
+                patch("xstars.main._read_selection_auto", return_value=(None, frame))
+            )
+            stack.enter_context(
+                patch("xstars.main.PrismConfig.load", return_value=PrismConfig())
+            )
+            dialog = stack.enter_context(patch("xstars.main.SettingsDialog"))
+            stack.enter_context(patch("xstars.main._apply_preset", return_value=frame))
+            stack.enter_context(patch("xstars.main.get_preset", return_value=object()))
+            dialog.return_value.show.return_value = config
+            main._run_preset_impl(book, ExperimentPreset.WB)
         elif entry in {"wb_labeled", "qpcr_labeled"}:
             handler = MagicMock()
             handler.get_insertion_cell.return_value = (5, 1)
@@ -846,66 +1038,120 @@ def test_generation_entries_register_after_add_and_rebuild(tmp_path, entry):
                 if entry == "wb_labeled"
                 else main._run_qpcr_labeled
             )
-            with patch(transform_path, return_value=[("Target", frame)]):
-                runner(book, sheet, handler, labels, frame, config)
+            stack.enter_context(patch(transform_path, return_value=[("Target", frame)]))
+            runner(book, sheet, handler, labels, frame, config)
         elif entry == "elisa":
             config.experiment_preset = ExperimentPreset.ELISA
             result = SimpleNamespace(fit_result=fit, config=config, show_fit_curve=True)
-            with (
-                patch("xstars.presets.elisa_dialog.ELISADialog") as dialog,
-                patch("xstars.main._select_sample_data", return_value=frame),
+            dialog = stack.enter_context(
+                patch("xstars.presets.elisa_dialog.ELISADialog")
+            )
+            stack.enter_context(
+                patch("xstars.main._select_sample_data", return_value=frame)
+            )
+            stack.enter_context(
                 patch(
                     "xstars.main.artifacts.build_standard_curve_figure",
                     side_effect=lambda *_args, **_kwargs: new_figure(),
-                ),
-            ):
-                dialog.return_value.show.return_value = result
-                main._run_elisa_impl(book)
+                )
+            )
+            dialog.return_value.show.return_value = result
+            main._run_elisa_impl(book)
         else:
             result = SimpleNamespace(fit_result=fit, back_calculate=False)
-            with (
-                patch(
-                    "xstars.tools.standard_curve_dialog.StandardCurveDialog"
-                ) as dialog,
-                patch("xstars.main.PrismConfig.load", return_value=config),
+            dialog = stack.enter_context(
+                patch("xstars.tools.standard_curve_dialog.StandardCurveDialog")
+            )
+            stack.enter_context(
+                patch("xstars.main.PrismConfig.load", return_value=config)
+            )
+            stack.enter_context(
                 patch(
                     "xstars.main.artifacts.build_standard_curve_figure",
                     side_effect=lambda *_args, **_kwargs: new_figure(),
-                ),
-            ):
-                dialog.return_value.show.return_value = result
-                main._run_standard_curve_impl(book)
-    finally:
-        for item in reversed(common):
-            item.stop()
+                )
+            )
+            dialog.return_value.show.return_value = result
+            main._run_standard_curve_impl(book)
 
-    assert events
-    assert len(events) % 2 == 0
-    assert all(
-        events[index][0] == "add"
-        and events[index + 1] == ("register", events[index][1])
-        for index in range(0, len(events), 2)
+    return SimpleNamespace(
+        book=book,
+        sheet=sheet,
+        pictures=pictures,
+        events=events,
+        registration_results=registration_results,
+        source_figures=source_figures,
+        write_data=write_data,
     )
-    payload_files = [
-        path for path in tmp_path.glob("*.json") if path.name != "manifest.json"
+
+
+@pytest.mark.parametrize("entry", _GENERATION_EXPECTATIONS)
+def test_generation_entries_register_after_add_and_rebuild(tmp_path, entry):
+    result = _exercise_generation_entry(tmp_path, entry)
+    expected_count, expected_prefixes, expected_kinds = _GENERATION_EXPECTATIONS[entry]
+
+    assert result.pictures.add.call_count == expected_count
+    assert len(result.events) == expected_count * 2
+    assert all(result.registration_results)
+    assert all(
+        result.events[index][0] == "add"
+        and result.events[index + 1] == ("register", result.events[index][1])
+        for index in range(0, len(result.events), 2)
+    )
+    requested_names = [
+        call.kwargs["name"] for call in result.pictures.add.call_args_list
     ]
-    assert len(payload_files) == len(events) // 2
-    for _, picture_name in events[::2]:
+    assert all(
+        requested.startswith(prefix)
+        for requested, prefix in zip(requested_names, expected_prefixes, strict=True)
+    )
+
+    payloads = []
+    for _, picture_name in result.events[::2]:
         identity = ArtifactIdentity(
-            workbook=f"path:{book.fullname}", sheet="Analysis", picture=picture_name
+            workbook=f"path:{result.book.fullname}",
+            sheet="Analysis",
+            picture=picture_name,
         )
         payload = load_artifact(identity, tmp_path)
+        payloads.append(payload)
         rebuilt = artifacts.rebuild_figure(payload)
         plt.close(rebuilt)
-    for figure in source_figures:
-        plt.close(figure)
-    assert pictures.add.call_count == len(events) // 2
-    assert all(
-        add_call.kwargs["name"] != actual_name
-        for add_call, (_, actual_name) in zip(
-            pictures.add.call_args_list, events[::2], strict=True
-        )
+    assert tuple(payload.renderer_kind for payload in payloads) == expected_kinds
+    assert (
+        len([path for path in tmp_path.glob("*.json") if path.name != "manifest.json"])
+        == expected_count
     )
+    for figure in result.source_figures:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize("entry", _GENERATION_EXPECTATIONS)
+def test_generation_entries_isolate_permission_error(tmp_path, entry):
+    result = _exercise_generation_entry(tmp_path, entry, fail_artifact_writes=True)
+    expected_count, _, _ = _GENERATION_EXPECTATIONS[entry]
+
+    assert result.pictures.add.call_count == expected_count
+    assert result.registration_results == [False] * expected_count
+    assert isinstance(result.book.app.status_bar, str)
+    assert result.book.app.status_bar.startswith("XSTARS:")
+    assert result.sheet.range.call_count > 0
+    if entry in {"preset", "wb_labeled", "qpcr_labeled", "elisa"}:
+        assert result.write_data.called
+    else:
+        # Run/Quick only write the stats summary table below the selection;
+        # processed-data sheets are written by the preset/labeled/ELISA
+        # entries. This mirrors the baseline contract on every platform.
+        assert not result.write_data.called
+    diagnostic = main.get_last_artifact_diagnostic()
+    assert diagnostic is not None
+    assert "ArtifactWriteError" in diagnostic
+    assert "read-only artifact directory" in diagnostic
+    assert not [
+        path for path in tmp_path.glob("*.json") if path.name != "manifest.json"
+    ]
+    for figure in result.source_figures:
+        plt.close(figure)
 
 
 def test_full_preset_registration_failure_preserves_outputs_picture_and_status(

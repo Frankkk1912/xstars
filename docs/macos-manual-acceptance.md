@@ -75,7 +75,7 @@ screenshots needed to reproduce each result.
 | G-04 | **Blocker** | Run a WB or qPCR labeled workflow if available in the workbook. | The labeled chart is inserted and remains associated with a rebuild artifact. | | |
 | G-05 | **Blocker** | Run the standard-curve workflow and enter a valid active-sheet A1 sample range. | Range data is accepted; fit/output and fit-curve picture are produced without a COM `InputBox` error. | | |
 | G-06 | **Blocker** | Run the ELISA workflow and enter a valid active-sheet A1 sample range. | Range data is accepted; ELISA output and fit-curve picture are produced. | | |
-| G-07 | **Blocker** | After generating ordinary and specialized charts, inspect `~/.xstars/artifacts/`. | A manifest and matching JSON artifact payloads exist for the newly inserted pictures. | | |
+| G-07 | **Blocker** | After generating ordinary and specialized charts, inspect `~/.xstars/artifacts/` and load one payload per inserted picture (any script that calls `xstars.artifacts.load_artifact` with the recorded workbook/sheet/picture identity). | Each inserted picture has a directly loadable JSON payload whose identity matches the workbook/sheet/picture. `manifest.json` is optional diagnostic metadata: record whether it exists/is current, but a missing or stale manifest is **not** a blocker. | | |
 | G-08 | **Blocker** | Change a visible XSTARS setting, save it, then reopen the settings/workflow (restart Excel if required). | The setting remains persisted and normal chart generation still succeeds. | | |
 | G-09 | Non-blocking | Observe picture appearance and fonts in Excel, including dark-mode use if applicable. | Chart remains readable; record cosmetic differences that do not affect data or export correctness. | | |
 

@@ -54,8 +54,14 @@ def get_last_artifact_diagnostic() -> str | None:
 
 def _workbook_artifact_identifier(book: xw.Book) -> str:
     """Return a Save-As-sensitive path identity or fail closed if unsaved."""
+    path = getattr(book, "path", None)
     fullname = getattr(book, "fullname", None)
-    if isinstance(fullname, str) and fullname.strip():
+    if (
+        isinstance(path, str)
+        and path.strip()
+        and isinstance(fullname, str)
+        and fullname.strip()
+    ):
         return f"path:{os.path.abspath(os.path.expanduser(fullname.strip()))}"
     raise artifacts.ArtifactIdentityError(_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE)
 
@@ -150,6 +156,35 @@ def _next_plot_name(
             if not artifacts.has_artifact(identity):
                 return name
         i += 1
+
+
+def _labeled_picture_target(book: xw.Book, sheet, fixed_name: str) -> tuple[str, bool]:
+    """Choose a labeled-picture name without exposing stale Darwin payloads."""
+    if sys.platform != "darwin":
+        return fixed_name, True
+
+    try:
+        sheet_name = getattr(sheet, "name", None)
+        if not isinstance(sheet_name, str) or not sheet_name.strip():
+            raise artifacts.ArtifactIdentityError(
+                "Worksheet identity is unavailable for artifact invalidation"
+            )
+        identity = artifacts.ArtifactIdentity(
+            workbook=_workbook_artifact_identifier(book),
+            sheet=sheet_name.strip(),
+            picture=fixed_name,
+        )
+        # Invalidate before Excel replaces the fixed-name picture. If this
+        # fails, use a fresh identity so the new picture cannot load stale data.
+        artifacts.invalidate_artifact(identity)
+    except (artifacts.ArtifactError, OSError, ValueError) as exc:
+        _ARTIFACT_LOGGER.warning(
+            "Could not safely reuse labeled chart identity %s; using a new name: %s",
+            fixed_name,
+            exc,
+        )
+        return _next_plot_name(sheet, fixed_name, book=book), False
+    return fixed_name, True
 
 
 def _guess_control(groups: list[str]) -> str:
@@ -719,11 +754,12 @@ def _run_wb_labeled(
         plotter = PlotEngine(plot_config)
         fig = plotter.plot(fold_df, stats_result)
 
-        pic_name = f"XSTARS_Plot_{protein_name}"
+        fixed_name = f"XSTARS_Plot_{protein_name}"
+        pic_name, update_picture = _labeled_picture_target(book, sheet, fixed_name)
         pic = sheet.pictures.add(
             fig,
             name=pic_name,
-            update=True,
+            update=update_picture,
             left=base_left,
             top=current_top,
         )
@@ -811,11 +847,12 @@ def _run_qpcr_labeled(
         plotter = PlotEngine(plot_config)
         fig = plotter.plot(fold_df, stats_result)
 
-        pic_name = f"XSTARS_Plot_{gene_name}"
+        fixed_name = f"XSTARS_Plot_{gene_name}"
+        pic_name, update_picture = _labeled_picture_target(book, sheet, fixed_name)
         pic = sheet.pictures.add(
             fig,
             name=pic_name,
-            update=True,
+            update=update_picture,
             left=base_left,
             top=current_top,
         )
