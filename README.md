@@ -15,7 +15,6 @@
   <a href="https://youtu.be/RYQnUziHH7Q?si=7PG5P3-cC38gZ2YY"> 📺 Demo Video</a> ·
 </p>
 
-
 ---
 
 ## 🤔 Why XSTARS?
@@ -29,7 +28,7 @@
 ### 😩 The Problem
 
 | Pain point | Before XSTARS |
-|---|---|
+| --- | --- |
 | 🔀 Tool switching | Copy data from Excel → paste into Prism/R → make figure → paste back into manuscript |
 | 🤯 Choosing statistics | "Should I use t-test or Mann-Whitney?" — manually check normality, decide, hope it's right |
 | 💸 Cost | GraphPad Prism: ~$300/year (student), ~$600+ (academic). Or use a pirated copy and worry |
@@ -38,16 +37,17 @@
 ### 💡 The Solution — Three Zeros
 
 | | What it means |
-|---|---|
+| --- | --- |
 | 🔄 **Zero Switching** | Select data in Excel → click → figure appears in Excel. Your data never leaves |
 | 🧠 **Zero Barrier** | Auto-detects normality & variance → picks the right test → draws significance brackets. You don't choose |
-| 💰 **Zero Cost** | Free and open-source. One installer, no Python required, no license fees |
+| 💰 **Zero Cost** | Free and open-source. The Windows installer requires no Python and there are no license fees |
 
 ---
 
 ## 🎬 Demo
 
 ### ⚡ Quick Run — One click, instant figure
+
 ![Quick Run Demo](assets/quick_run.gif)
 
 ---
@@ -55,11 +55,11 @@
 ## ⚔️ XSTARS vs. Alternatives
 
 | | XSTARS | GraphPad Prism | R / Python |
-|---|:---:|:---:|:---:|
+| --- | :---: | :---: | :---: |
 | **💰 Price** | 🟢 Free | 🔴 ~$300–600/yr | 🟢 Free |
 | **📊 Works inside Excel** | ✅ | ❌ | ❌ |
 | **🖱️ No coding required** | ✅ | ✅ | ❌ |
-| **📦 No Python/R install** | ✅ (standalone .exe) | N/A | ❌ |
+| **📦 No Python/R install** | ✅ (Windows installer only) | N/A | ❌ |
 | **🤖 Auto stat test selection** | ✅ | ❌ Manual | ❌ Manual |
 | **📐 Significance brackets** | ✅ Automatic | ⚠️ Manual placement | ❌ Code required |
 | **🧪 Experiment presets** | ✅ WB, qPCR, CCK-8, ELISA | ❌ | ❌ Build your own |
@@ -73,6 +73,7 @@
 ## 🧰 Features
 
 ### 📊 Chart Types
+
 - **Bar + Scatter** — Mean bars with error bars (SEM / SD / 95% CI) and individual data points
 - **Violin** — Distribution shape with optional scatter overlay
 - **Line** — Group means connected by lines
@@ -90,7 +91,7 @@ Auto-select the appropriate test:
 ```
 
 | Condition | 2 Groups | ≥ 3 Groups |
-|-----------|----------|------------|
+| ----------- | ---------- | ------------ |
 | Normal + Equal variance | t-test | ANOVA + Tukey HSD |
 | Normal + Unequal variance | Welch's t-test | Welch's ANOVA + Games-Howell |
 | Non-normal | Mann–Whitney U | Kruskal–Wallis + Dunn |
@@ -99,7 +100,6 @@ Auto-select the appropriate test:
 
 Significance brackets (`*`, `**`, `***`, `****`, or exact p-values) are drawn automatically. ✨
 
-
 > ⚠️ **Small samples (N < 5):** Normality tests are unreliable at very small N — XSTARS skips the test and assumes normality.
 
 ### 🧪 Experiment Presets
@@ -107,21 +107,25 @@ Significance brackets (`*`, `**`, `***`, `****`, or exact p-values) are drawn au
 Built-in workflows for common lab assays — no manual calculation needed:
 
 🔬 **Western Blot**
+
 - Normalize band intensities → fold change
 - Reference protein correction (e.g., GAPDH) per lane
 - Multi-target labeled mode: one figure per protein, automatic reference normalization
 
 🧬 **qPCR (ΔΔCt)**
+
 - Accepts ΔCt or raw Ct input
 - Automatic ΔΔCt → 2^(−ΔΔCt) fold change calculation
 - Multi-gene labeled mode with reference gene normalization
 
 💊 **CCK-8 Cell Viability**
+
 - Blank subtraction → viability %
 - Optional IC50 fitting (4-parameter logistic curve)
 - Dose-response curve with flexible axis scaling
 
 🧫 **ELISA**
+
 - Standard curve fitting (4PL/linear)
 - Sample concentration back-calculation
 - Supports manual parameter input for existing curves
@@ -139,7 +143,7 @@ Built-in workflows for common lab assays — no manual calculation needed:
 Four independent controls — **1,500+ style combinations** to match any journal, any aesthetic:
 
 | Control | Options |
-|---------|---------|
+| --------- | --------- |
 | **🖌️ Base Theme** | Classic · B&W · Minimal · Dark |
 | **📐 Layout** | Journal typography presets — Nature · Science · Cell · Lancet · NEJM · JAMA · BMJ (figure width, font, size) |
 | **🎨 Palette** | Journal-inspired color palettes (ggsci-style) |
@@ -155,7 +159,7 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 
 ## 🚀 Quick Start
 
-### Option A: 📥 Installer (Recommended — no Python needed)
+### Windows: 📥 Installer (Recommended — no Python needed)
 
 1. Download `XSTARS_Setup.exe` from [Releases](https://github.com/Frankkk1912/excel-prism/releases)
 2. Run the installer — it sets up the Excel add-in automatically
@@ -164,16 +168,21 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 
 > 💡 **New to XSTARS?** Open `XSTARS_Templates.xlsx` (included in the installer) for ready-to-run example datasets covering every chart type and experiment preset — just click Run on any sheet to see XSTARS in action.
 
-### Option B: 🛠️ Developer Setup (Python required)
+### macOS: 🛠️ Developer Mode (Python required)
+
+macOS support is developer mode only: install XSTARS and the xlwings bridge in a Python 3.10+ virtual environment, then reuse the existing RunPython VBA callbacks. It does not provide a standalone `.app` and does not support WPS for Mac.
 
 ```bash
 git clone https://github.com/Frankkk1912/xstars.git
 cd xstars
-pip install -e ".[dev]"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 xlwings addin install
+xlwings runpython install
 ```
 
-Then open your `.xlsm` workbook and add the VBA callbacks — see [ribbon/README.md](ribbon/README.md).
+Follow the complete [macOS developer-mode setup guide](docs/macos-developer-setup.md) for the Excel VBA import, Python interpreter, macro and Automation permissions, artifact privacy, Export limits, and troubleshooting. The existing callback module is documented in [ribbon/README.md](ribbon/README.md).
 
 ---
 
@@ -205,7 +214,7 @@ Select the range (including headers) → click Run. That's it. ✅
 All options are in a tabbed dialog:
 
 | Tab | Options |
-|-----|---------|
+| ----- | --------- |
 | **⚡ General** | Chart type, error bars, data points, paired mode, annotation format, comparison mode |
 | **🎨 Theme** | Base Theme · Layout · Palette · Color Style (each independently adjustable from the ribbon) |
 | **🧪 Preset** | Experiment type (WB / qPCR / CCK-8 / ELISA) and specific options |
@@ -213,13 +222,19 @@ All options are in a tabbed dialog:
 
 Settings persist across sessions in `~/.xstars/settings.json`. 💾
 
+### Local chart rebuild artifacts and privacy
+
+Chart generation on **Windows and macOS** also writes versioned JSON rebuild payloads under `~/.xstars/artifacts/`. These local files can contain processed experimental data, plotting configuration, and statistical results. They are not uploaded by XSTARS and are not automatically expired. Apply your normal experimental-data retention policy. To clear only this derived cache, quit Excel/XSTARS and delete `~/.xstars/artifacts/`; do not delete `~/.xstars/settings.json` unless you also want to reset settings. On macOS, clearing the cache requires regenerating a chart before exporting it again. See [macOS Developer-Mode Setup](docs/macos-developer-setup.md#8-artifact-storage-privacy-and-cleanup) for details.
+
 ---
 
 ## 📌 Requirements
 
-- 🪟 Windows with Microsoft Excel
-- **Installer mode**: Nothing else — the `.exe` bundles everything
-- **Dev mode**: Python ≥ 3.10
+- **Windows installer mode**: Windows with Microsoft Excel; no separate Python installation is required because the `.exe` bundles the runtime
+- **macOS developer mode**: macOS 10.14+, Microsoft Excel for Mac 2016+, Python ≥ 3.10, Intel or Apple Silicon, plus the xlwings add-in and RunPython setup
+- WPS for Mac is not supported; no standalone macOS `.app` is provided
+
+The macOS version and processor matrix is declared from upstream xlwings support information; combinations without a recorded real-Excel run are not claimed as project-verified. See [macOS Developer-Mode Setup](docs/macos-developer-setup.md).
 
 ---
 
