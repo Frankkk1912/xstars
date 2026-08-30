@@ -164,7 +164,7 @@
 | M2 — macOS Python 平台分支 | [x] | M1 | Darwin Export、pictures fallback、tkinter 范围输入、错误窗降级测试通过；Windows 路径断言通过 | 不修改 VBA；COM 函数保留 |
 | M3 — 回归与平台测试 | [x] | M1、M2 | 新增测试文件通过，完整 `pytest` 通过，Windows mock 行为与 `.bas` 零 diff | 测试采用 mock，不需要 Excel |
 | M4 — macOS 开发者文档 | [x] | M2；安装命令已由调研确认 | 文档链接有效、步骤和 Non-goals 一致、英文/中文入口可发现 | 明确仅开发者模式 |
-| M5 — CI、静态检查与实机验收 | [ ] | M3、M4 | macOS/Windows CI 全绿；`compileall`、`git diff --check` 通过；用户提交实机清单 | 用户实机记录前保持 Draft |
+| M5 — CI、静态检查与实机验收（T5.2 用户实机执行与 T5.3 待完成） | [ ] | M3、M4 | macOS/Windows CI 全绿；`compileall`、`git diff --check` 通过；用户提交实机清单 | 用户实机记录前保持 Draft |
 
 Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]`。
 
@@ -258,7 +258,7 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 
 ### M5 — CI、静态检查与实机验收
 
-- [ ] T5.1 新增 macOS/Windows 自动化验证工作流
+- [x] T5.1 新增 macOS/Windows 自动化验证工作流
   - 文件：新建 `.github/workflows/macos-support.yml`
   - 修改：在 `macos-latest` 与 `windows-latest`、Python 3.10 上安装 `.[dev]`，执行专项目标测试、完整 pytest、`compileall`；增加 `ribbon/*.bas` 相对基线零 diff 检查（可在独立 Linux job 执行）。
   - 验收：PR workflow 两个平台全绿；无需 Excel/GUI；任何 `.bas` 变更使门禁失败；不新增生产依赖。
