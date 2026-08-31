@@ -175,7 +175,7 @@
 | --- | --- | --- | --- | --- |
 | M1 — Gate 0 收尾：M0.4 ELISA 二次选区 + 高清导出可行性 PoC + 治理 | [x] | 旧计划 M0.0–M0.3（已完成）；本 Plan rev 1 批准 | 自动化：`pytest -q` 全绿、`node --test` 全绿、`service_server.py --self-test` 通过、`git diff --check`；实机：用户执行 M0.4 清单（InputBox / 两阶段 / CopyPicture / 剪贴板 / 4 格式×96/300/600 DPI / 125%·150% 缩放 / 保存重开 / COM 探测 / EMF 评估）并记录 | 产出 M0.4 结论（选定交互与导出路径）；T1.1/T1.2 治理收尾；验证通过才进入 M2 |
 | M2 — Excel characterization + application 契约 | [x] | M1 通过 | 自动化：142 基线 + 新契约/刻画/抽取测试全绿；实机：真实 Excel 模板 smoke test 无回归 | 先锁行为再抽取；对应旧 M1.1–M1.3 |
-| M3 — 本地 broker + worker | [ ] | M2 | 自动化：HTTP/安全/生命周期/worker 取消超时崩溃测试全绿；证明未暴露 `0.0.0.0`；旧 CLI 语法测试通过 | 服务自启动归安装器（T6.1）；对应旧 M2.1–M2.2 |
+| M3 — 本地 broker + worker | [x] | M2 | 自动化：HTTP/安全/生命周期/worker 取消超时崩溃测试全绿；证明未暴露 `0.0.0.0`；旧 CLI 语法测试通过 | 服务自启动归安装器（T6.1）；对应旧 M2.1–M2.2 |
 | M4 — WPS Ribbon + Run/Quick 垂直切片 | [ ] | M3 | 自动化：`node --test` 全绿；实机：真实 Ribbon + Data Sheet Run/Quick + 保存重开 | 首个垂直切片；对应旧 M3.1–M3.2 |
 | M5 — 预设/ELISA 落地/主题设置/高分辨率导出 | [ ] | M4；M0.4 选定路径 | 自动化：预设/导出/设置测试全绿；实机：模板对应 Sheet 逐项 + 设置持久化 + 导出矩阵 | 采用 M0.4 选定交互与导出路径；对应旧 M4.1–M4.4 |
 | M6 — 独立安装器/用户文档/离线加固 | [ ] | M5 | 自动化：`build.ps1` 可复现；实机：干净 Win10/11 x64 安装/升级/卸载 | 服务自启动在此落地；对应旧 M5.1–M5.2 |
@@ -247,13 +247,13 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M3 — 本地 broker + worker
 
-- [ ] **T3.1 实现本地 broker 安全边界**
+- [x] **T3.1 实现本地 broker 安全边界**
   - 文件：`xstars/wps_service.py`（新建）、`tests/test_wps_service.py`（新建）
   - 修改：仅 `127.0.0.1` 监听（测试证明未暴露 `0.0.0.0`）；每安装实例密钥；Origin 白名单；命令白名单；请求体大小/并发限制；`/health`；单实例（`SO_EXCLUSIVEADDRUSE`）与端口范围；服务不负责自启动（归 T6.1）。
   - 验收：安全/错误/端口/并发/鉴权测试全绿。
   - 依赖：M2 通过；支撑 G3、G7、G12、R6、R7。
 
-- [ ] **T3.2 实现单任务 worker 与 GUI 主线程模型**
+- [x] **T3.2 实现单任务 worker 与 GUI 主线程模型**
   - 文件：`xstars/application/worker.py`（新建）、`xstars/cli.py`（修改，新增受限 `serve`/`worker` 模式）、相关测试
   - 修改：broker 启动受控 worker 子进程；worker 在主线程跑 Tkinter；原子写请求/结果文件；取消、超时、崩溃恢复、临时文件清理；旧 CLI 语法 `<command> <workbook_path>` 不变。
   - 验收：Run/Quick mock E2E；Tkinter 取消无残留；旧 CLI 语法回归通过。
