@@ -173,7 +173,7 @@
 
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
-| M1 — Gate 0 收尾：M0.4 ELISA 二次选区 + 高清导出可行性 PoC + 治理 | [ ] | 旧计划 M0.0–M0.3（已完成）；本 Plan rev 1 批准 | 自动化：`pytest -q` 全绿、`node --test` 全绿、`service_server.py --self-test` 通过、`git diff --check`；实机：用户执行 M0.4 清单（InputBox / 两阶段 / CopyPicture / 剪贴板 / 4 格式×96/300/600 DPI / 125%·150% 缩放 / 保存重开 / COM 探测 / EMF 评估）并记录 | 产出 M0.4 结论（选定交互与导出路径）；T1.1/T1.2 治理收尾；验证通过才进入 M2 |
+| M1 — Gate 0 收尾：M0.4 ELISA 二次选区 + 高清导出可行性 PoC + 治理 | [x] | 旧计划 M0.0–M0.3（已完成）；本 Plan rev 1 批准 | 自动化：`pytest -q` 全绿、`node --test` 全绿、`service_server.py --self-test` 通过、`git diff --check`；实机：用户执行 M0.4 清单（InputBox / 两阶段 / CopyPicture / 剪贴板 / 4 格式×96/300/600 DPI / 125%·150% 缩放 / 保存重开 / COM 探测 / EMF 评估）并记录 | 产出 M0.4 结论（选定交互与导出路径）；T1.1/T1.2 治理收尾；验证通过才进入 M2 |
 | M2 — Excel characterization + application 契约 | [ ] | M1 通过 | 自动化：142 基线 + 新契约/刻画/抽取测试全绿；实机：真实 Excel 模板 smoke test 无回归 | 先锁行为再抽取；对应旧 M1.1–M1.3 |
 | M3 — 本地 broker + worker | [ ] | M2 | 自动化：HTTP/安全/生命周期/worker 取消超时崩溃测试全绿；证明未暴露 `0.0.0.0`；旧 CLI 语法测试通过 | 服务自启动归安装器（T6.1）；对应旧 M2.1–M2.2 |
 | M4 — WPS Ribbon + Run/Quick 垂直切片 | [ ] | M3 | 自动化：`node --test` 全绿；实机：真实 Ribbon + Data Sheet Run/Quick + 保存重开 | 首个垂直切片；对应旧 M3.1–M3.2 |
@@ -219,7 +219,7 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
   - 验收：`python -m pytest -q` 与 `node --test` 全绿；测试不依赖真实 WPS/剪贴板/COM。
   - 依赖：T1.3、T1.4；支撑 G1、G2、G12。
 
-- [ ] **T1.6 实机执行 M0.4 验证清单并回填证据（责任人：用户）**
+- [x] **T1.6 实机执行 M0.4 验证清单并回填证据（责任人：用户）**
   - 文件：`poc/wps/README.md`（追加 M0.4 记录）、Draft PR #1（评论/body）
   - 修改：执行 M0.4 清单——InputBox(Type=8) 返区/取消；两阶段 Ribbon 对照；地址兜底仅确认代码存在；选中 Shape 的 `Selection` 对象类型；`CopyPicture` → 剪贴板 → Python 重编码；PNG/TIFF/JPG/PDF × 96/300/600 DPI；125%/150% 显示缩放观察；保存重开；`Ket.Application` COM 探测；`CF_ENHMETAFILE` 矢量质量评估。
   - 验收：产出明确结论（ELISA 选定交互路径；导出选定路径或触发 O3 fallback 决策）；全部证据（版本/截图/文件哈希）回填 PR。
