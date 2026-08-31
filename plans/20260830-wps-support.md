@@ -296,7 +296,7 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 - [ ] **T5.3 完成主题/设置与错误诊断**
   - 文件：`wps-addon/ribbon.xml`、`wps-addon/main.js`（修改）、`xstars/config.py`（修改，仅向后兼容字段）、`xstars/wps_service.py`（修改）
-  - 修改：主题命令、设置共享、稳定错误码、脱敏日志与诊断包。
+  - 修改：主题命令、设置共享、稳定错误码、脱敏日志与诊断包；`serve` 启动时将 port 持久化到 `~/.xstars/wps_service.json`，inject-config 默认从该文件读取端口（T4.3 实机发现：注入端口与 broker 实际端口错位导致连接失败）
   - 验收：设置跨 WPS 重启持久化；故障用例不崩溃且日志可定位。
   - 依赖：T5.1；支撑 G6、R5、R6。
 
