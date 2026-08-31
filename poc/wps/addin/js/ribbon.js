@@ -473,6 +473,33 @@ function selectedShape(selection) {
   throw new Error("当前 Selection 不包含可复制的 ShapeRange");
 }
 
+// WPS 内嵌浏览器不支持 window.prompt（静默返回 null）；宿主原生 InputBox（Type=2 文本）
+// 已在 M0.4 实机步骤 1 验证可用，故优先使用；window.prompt 仅作为非 WPS 环境回退。
+function m04PromptText(message, title, defaultValue) {
+  try {
+    const application = window.Application;
+    if (application && typeof application.InputBox === "function") {
+      const result = application.InputBox(message, title, defaultValue, undefined, undefined, undefined, undefined, 2);
+      if (result === null || result === false) {
+        return { cancelled: true, value: null };
+      }
+      const text = String(result).trim();
+      return { cancelled: false, value: text === "" ? defaultValue : text };
+    }
+  } catch (error) {
+    // fall through to window.prompt
+  }
+  if (typeof window.prompt === "function") {
+    const result = window.prompt(message, defaultValue);
+    if (result === null) {
+      return { cancelled: true, value: null };
+    }
+    const text = String(result).trim();
+    return { cancelled: false, value: text === "" ? defaultValue : text };
+  }
+  return { cancelled: false, value: defaultValue };
+}
+
 async function runM04ShapeExportProbe() {
   const selection = window.Application.Selection;
   let shape;
@@ -483,18 +510,18 @@ async function runM04ShapeExportProbe() {
     return { error: error.message };
   }
 
-  const formatInput = window.prompt("导出格式：png/tiff/jpg/pdf", "png");
-  if (formatInput === null) {
+  const formatResult = m04PromptText("导出格式：png/tiff/jpg/pdf", "M0.4 Shape 导出", "png");
+  if (formatResult.cancelled) {
     window.alert("M0.4 Shape 导出：用户取消（非错误）");
     return { cancelled: true };
   }
-  const format = (formatInput.trim() || "png").toLowerCase();
-  const dpiInput = window.prompt("目标 DPI（72-1200）", "300");
-  if (dpiInput === null) {
+  const format = formatResult.value.toLowerCase();
+  const dpiResult = m04PromptText("目标 DPI（72-1200）", "M0.4 Shape 导出", "300");
+  if (dpiResult.cancelled) {
     window.alert("M0.4 Shape 导出：用户取消（非错误）");
     return { cancelled: true };
   }
-  const dpi = Number(dpiInput.trim() || "300");
+  const dpi = Number(dpiResult.value);
   if (!XSTARS_M04_EXPORT_FORMATS.includes(format)) {
     window.alert(`M0.4 Shape 导出失败：不支持格式 ${format}`);
     return { invalid: true };

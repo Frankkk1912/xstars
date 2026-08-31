@@ -538,3 +538,70 @@ test("M0.4 Shape export uses printer-picture copy and probes COM", async () => {
   assert.match(alerts[0], /Selection\.Type：ShapeRange/);
   assert.match(alerts[0], /COM Ket\.Application：可用/);
 });
+
+test("M0.4 Shape export prefers the host InputBox over window.prompt for format/DPI", async () => {
+  const shape = { CopyPicture: () => {} };
+  const selection = {
+    Type: "ShapeRange",
+    ShapeRange: { Item: (index) => (index === 1 ? shape : null) },
+  };
+  const handler = (url, init) => {
+    if (url.endsWith("/probe/shape-export")) {
+      assert.deepEqual(JSON.parse(init.body), { format: "png", dpi: 600 });
+      return jsonResponse({
+        ok: true,
+        outputPath: "C:\\Temp\\shape600.png",
+        width: 2400,
+        height: 1600,
+        dpi: 600,
+      });
+    }
+    if (url.endsWith("/probe/com-probe")) {
+      return jsonResponse(
+        { ok: false, error: { code: "COM_UNAVAILABLE", message: "无效的类字符串" } },
+        false,
+        200,
+      );
+    }
+    return jsonResponse({ ok: false }, false, 404);
+  };
+  const inputBoxCalls = [];
+  const inputBox = (...args) => {
+    inputBoxCalls.push(args);
+    return inputBoxCalls.length === 1 ? "png" : "600";
+  };
+  const { alerts, fetchCalls, context } = loadRibbon({
+    selection,
+    inputBox,
+    fetchHandler: handler,
+  });
+
+  const result = await context.window.XstarsGate0.runM04ShapeExportProbe();
+
+  assert.equal(inputBoxCalls.length, 2);
+  assert.equal(inputBoxCalls[0][0], "导出格式：png/tiff/jpg/pdf");
+  assert.equal(inputBoxCalls[0][7], 2);
+  assert.equal(inputBoxCalls[1][0], "目标 DPI（72-1200）");
+  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), { format: "png", dpi: 600 });
+  assert.equal(result.copyMode, "xlPrinter/xlPicture");
+  assert.match(alerts[0], /COM Ket\.Application：不可用/);
+});
+
+test("M0.4 Shape export treats host InputBox cancellation as non-error", async () => {
+  const shape = { CopyPicture: () => {} };
+  const selection = {
+    Type: "ShapeRange",
+    ShapeRange: { Item: (index) => (index === 1 ? shape : null) },
+  };
+  const { alerts, fetchCalls, context } = loadRibbon({
+    selection,
+    inputBox: () => null,
+    fetchHandler: () => jsonResponse({ ok: false }, false, 404),
+  });
+
+  const result = await context.window.XstarsGate0.runM04ShapeExportProbe();
+
+  assert.equal(result.cancelled, true);
+  assert.equal(fetchCalls.length, 0);
+  assert.match(alerts[0], /用户取消（非错误）/);
+});
