@@ -15,6 +15,7 @@
 | rev 1 | 2026-08-30 | 由旧文档 `docs/wps-support-implementation-plan.md` 重梳而来：继承 M0.0–M0.3 已完成项与实机证据；记录 2026-08-30 访谈决策 D-A..D-H；将 M0.4+旧 M1–M6 重组为 7 个 Milestone；沿用 mac-support PR 的 9 段式风格与 feature-impl PR 模板。 |
 | rev 1（批准） | 2026-08-30 | 用户对本精确 rev 明确回复「批准」；进入 `/feature-impl` 实施，从 M1（Gate 0 收尾）开始，每 Milestone 验证闸门通过后才进入下一个。 |
 | rev 1（白名单扩展） | 2026-08-31 | 用户批准将 `poc/wps/addin/package.json` 纳入 T1.3 文件白名单，仅限 PoC 版本号随 Milestone 递增（本次 1.2.2→1.2.3）；背景：M0.4 实机步骤 4 发现 WPS 内嵌浏览器不支持 `window.prompt`（返回 null 被误判为取消，commit `97820ce` 已改用宿主原生 `InputBox(Type=2)`），且同版本重装会跳过解压，需版本递增触发重新提取。 |
+| rev 1（白名单扩展二） | 2026-08-31 | M4 实施中发现 §9.1 未列 `wps-addon/` 的官方 wpsjs 壳文件（index.html/manifest.xml/vite.config.js/scripts/inject-config.cjs）；编排器据旧计划「官方脚手架实际文件名可微调」条款批准补入 §9.1 新建表（零业务逻辑壳，否则 T4.3 无法打包实机验证），待用户确认。 |
 
 ---
 
@@ -423,6 +424,7 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 | `xstars/application/worker.py` | 受控请求文件执行、Tkinter 主线程、原子写结果 |
 | `xstars/wps_service.py` | 127.0.0.1 broker、鉴权、CORS、单实例、worker 管理、健康检查 |
 | `wps-addon/ribbon.xml`、`wps-addon/main.js`、`wps-addon/service-client.js`、`wps-addon/spreadsheet.js`、`wps-addon/config.template.js`、`wps-addon/assets/*`、`wps-addon/package.json`、`wps-addon/tests/*` | 正式 WPS 加载项 |
+| `wps-addon/index.html`、`wps-addon/manifest.xml`、`wps-addon/vite.config.js`、`wps-addon/scripts/inject-config.cjs`（2026-08-31 批准范围扩展） | 官方 wpsjs 加载项壳（loader/清单/构建/配置注入），零业务逻辑；缺失则无法打包安装进行 T4.3 实机验证 |
 | `installer/wps/xstars-wps.spec`、`installer/wps/XSTARS_WPS.iss`、`installer/wps/build.ps1` | WPS 独立安装包 |
 | `docs/wps-installation.md`、`docs/wps-validation.md` | 用户文档 + 实机矩阵模板 |
 
