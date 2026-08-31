@@ -1,16 +1,8 @@
 const XSTARS_GATE0_PROBE_URL = "http://127.0.0.1:3891/probe";
-const XSTARS_M04_ELISA_URL =
-  "http://127.0.0.1:3892/probe/elisa-selection";
-const XSTARS_M04_SHAPE_EXPORT_URL =
-  "http://127.0.0.1:3892/probe/shape-export";
-const XSTARS_M04_COM_PROBE_URL =
-  "http://127.0.0.1:3892/probe/com-probe";
-const XSTARS_M04_EXPORT_FORMATS = Object.freeze([
-  "png",
-  "tiff",
-  "jpg",
-  "pdf",
-]);
+const XSTARS_M04_ELISA_URL = "http://127.0.0.1:3892/probe/elisa-selection";
+const XSTARS_M04_SHAPE_EXPORT_URL = "http://127.0.0.1:3892/probe/shape-export";
+const XSTARS_M04_COM_PROBE_URL = "http://127.0.0.1:3892/probe/com-probe";
+const XSTARS_M04_EXPORT_FORMATS = Object.freeze(["png", "tiff", "jpg", "pdf"]);
 const M04_TWO_STAGE_STATE = {
   standard: null,
   sample: null,
@@ -479,7 +471,16 @@ function m04PromptText(message, title, defaultValue) {
   try {
     const application = window.Application;
     if (application && typeof application.InputBox === "function") {
-      const result = application.InputBox(message, title, defaultValue, undefined, undefined, undefined, undefined, 2);
+      const result = application.InputBox(
+        message,
+        title,
+        defaultValue,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        2,
+      );
       if (result === null || result === false) {
         return { cancelled: true, value: null };
       }
@@ -510,13 +511,21 @@ async function runM04ShapeExportProbe() {
     return { error: error.message };
   }
 
-  const formatResult = m04PromptText("导出格式：png/tiff/jpg/pdf", "M0.4 Shape 导出", "png");
+  const formatResult = m04PromptText(
+    "导出格式：png/tiff/jpg/pdf",
+    "M0.4 Shape 导出",
+    "png",
+  );
   if (formatResult.cancelled) {
     window.alert("M0.4 Shape 导出：用户取消（非错误）");
     return { cancelled: true };
   }
   const format = formatResult.value.toLowerCase();
-  const dpiResult = m04PromptText("目标 DPI（72-1200）", "M0.4 Shape 导出", "300");
+  const dpiResult = m04PromptText(
+    "目标 DPI（72-1200）",
+    "M0.4 Shape 导出",
+    "300",
+  );
   if (dpiResult.cancelled) {
     window.alert("M0.4 Shape 导出：用户取消（非错误）");
     return { cancelled: true };

@@ -369,7 +369,8 @@ function m04SelectionResponse(body) {
       ...range,
       rows: range.values.length,
       columns: range.values[0].length,
-      nonEmptyCells: range.values.flat().filter((value) => value != null).length,
+      nonEmptyCells: range.values.flat().filter((value) => value != null)
+        .length,
     })),
   });
 }
@@ -385,8 +386,7 @@ test("M0.4 InputBox probe sends the selected Range as a bounded matrix", async (
       inputBoxCalls.push(args);
       return selectedRange;
     },
-    fetchHandler: (_url, init) =>
-      m04SelectionResponse(JSON.parse(init.body)),
+    fetchHandler: (_url, init) => m04SelectionResponse(JSON.parse(init.body)),
   });
 
   const result = await context.window.XstarsGate0.runM04InputBoxProbe();
@@ -394,7 +394,10 @@ test("M0.4 InputBox probe sends the selected Range as a bounded matrix", async (
   assert.equal(inputBoxCalls.length, 1);
   assert.equal(inputBoxCalls[0].length, 8);
   assert.equal(inputBoxCalls[0][7], 8);
-  assert.equal(fetchCalls[0].url, "http://127.0.0.1:3892/probe/elisa-selection");
+  assert.equal(
+    fetchCalls[0].url,
+    "http://127.0.0.1:3892/probe/elisa-selection",
+  );
   assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
     source: "inputbox",
     ranges: [
@@ -431,8 +434,7 @@ test("M0.4 two-stage probe records two selections then submits on third click", 
   const sample = makeRange("$D$1:$D$2", [[5], [6]]);
   const { alerts, context, fetchCalls } = loadRibbon({
     selection: standard,
-    fetchHandler: (_url, init) =>
-      m04SelectionResponse(JSON.parse(init.body)),
+    fetchHandler: (_url, init) => m04SelectionResponse(JSON.parse(init.body)),
   });
 
   const first = await context.window.XstarsGate0.runM04TwoStageProbe();
@@ -447,7 +449,13 @@ test("M0.4 two-stage probe records two selections then submits on third click", 
   assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
     source: "two-stage",
     ranges: [
-      { address: "$A$1:$B$2", values: [[1, 2], [3, 4]] },
+      {
+        address: "$A$1:$B$2",
+        values: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
       { address: "$D$1:$D$2", values: [[5], [6]] },
     ],
   });
@@ -470,8 +478,7 @@ test("M0.4 address fallback reads a valid A1 range", async () => {
       },
     },
     promptResponses: ["C2:F3"],
-    fetchHandler: (_url, init) =>
-      m04SelectionResponse(JSON.parse(init.body)),
+    fetchHandler: (_url, init) => m04SelectionResponse(JSON.parse(init.body)),
   });
 
   const result = await context.window.XstarsGate0.runM04AddressFallback();
@@ -558,7 +565,10 @@ test("M0.4 Shape export prefers the host InputBox over window.prompt for format/
     }
     if (url.endsWith("/probe/com-probe")) {
       return jsonResponse(
-        { ok: false, error: { code: "COM_UNAVAILABLE", message: "无效的类字符串" } },
+        {
+          ok: false,
+          error: { code: "COM_UNAVAILABLE", message: "无效的类字符串" },
+        },
         false,
         200,
       );
@@ -582,7 +592,10 @@ test("M0.4 Shape export prefers the host InputBox over window.prompt for format/
   assert.equal(inputBoxCalls[0][0], "导出格式：png/tiff/jpg/pdf");
   assert.equal(inputBoxCalls[0][7], 2);
   assert.equal(inputBoxCalls[1][0], "目标 DPI（72-1200）");
-  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), { format: "png", dpi: 600 });
+  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
+    format: "png",
+    dpi: 600,
+  });
   assert.equal(result.copyMode, "xlPrinter/xlPicture");
   assert.match(alerts[0], /COM Ket\.Application：不可用/);
 });
