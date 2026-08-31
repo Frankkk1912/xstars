@@ -228,9 +228,12 @@ def test_preset_elisa_export_and_setting_commands_are_shape_validated():
     runner = FakeRunner()
     with _running_server(runner=runner) as service:
         preset = _payload("run_wb")
-        assert _request(
-            service, "/command", method="POST", payload=preset, headers=_auth()
-        )[0] == 200
+        assert (
+            _request(
+                service, "/command", method="POST", payload=preset, headers=_auth()
+            )[0]
+            == 200
+        )
 
         elisa = _payload("run_elisa")
         elisa["sampleSelection"] = {
@@ -239,9 +242,12 @@ def test_preset_elisa_export_and_setting_commands_are_shape_validated():
             "address": "E1:F3",
             "sheet": "Data",
         }
-        assert _request(
-            service, "/command", method="POST", payload=elisa, headers=_auth()
-        )[0] == 200
+        assert (
+            _request(
+                service, "/command", method="POST", payload=elisa, headers=_auth()
+            )[0]
+            == 200
+        )
         assert runner.calls[-1]["sampleSelection"]["address"] == "E1:F3"
 
         export = {
@@ -255,9 +261,12 @@ def test_preset_elisa_export_and_setting_commands_are_shape_validated():
                 "clipboard": False,
             },
         }
-        assert _request(
-            service, "/command", method="POST", payload=export, headers=_auth()
-        )[0] == 200
+        assert (
+            _request(
+                service, "/command", method="POST", payload=export, headers=_auth()
+            )[0]
+            == 200
+        )
         assert "selection" not in runner.calls[-1]
 
         setting = {
@@ -265,9 +274,12 @@ def test_preset_elisa_export_and_setting_commands_are_shape_validated():
             "command": "run_set_theme_nature",
             "config": {},
         }
-        assert _request(
-            service, "/command", method="POST", payload=setting, headers=_auth()
-        )[0] == 200
+        assert (
+            _request(
+                service, "/command", method="POST", payload=setting, headers=_auth()
+            )[0]
+            == 200
+        )
         assert runner.calls[-1]["command"] == "run_set_theme_nature"
 
 
@@ -410,7 +422,9 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
         )
     assert preset_result["ok"] is True
     assert observed == [ExperimentPreset.WB]
-    assert preset_result["writebackPlan"]["images"][0]["pictureId"].startswith("XSTARS_")
+    assert preset_result["writebackPlan"]["images"][0]["pictureId"].startswith(
+        "XSTARS_"
+    )
 
     setting_request = {
         "version": SCHEMA_VERSION,
@@ -433,7 +447,9 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
         "dpi": 300,
         "source": "render_payload",
     }
-    fake_export = SimpleNamespace(render_payload_export=mock.Mock(return_value=exported))
+    fake_export = SimpleNamespace(
+        render_payload_export=mock.Mock(return_value=exported)
+    )
     export_request = {
         "version": SCHEMA_VERSION,
         "command": "run_export",
@@ -506,7 +522,11 @@ def test_worker_labeled_wb_persists_one_artifact_and_render_payload_per_target(
 
     def choose(_selection, config):
         observed.append(
-            (config.experiment_preset, config.preset_has_reference, config.preset_control_group)
+            (
+                config.experiment_preset,
+                config.preset_has_reference,
+                config.preset_control_group,
+            )
         )
         return config
 
@@ -535,7 +555,9 @@ def test_worker_labeled_wb_persists_one_artifact_and_render_payload_per_target(
     ]
     assert all(Path(image["artifact"]["path"]).is_file() for image in images)
     payloads = [
-        json.loads((artifacts_root / f"{image['pictureId']}.json").read_text(encoding="utf-8"))
+        json.loads(
+            (artifacts_root / f"{image['pictureId']}.json").read_text(encoding="utf-8")
+        )
         for image in images
     ]
     assert [payload["config"]["title"] for payload in payloads] == [
@@ -546,6 +568,77 @@ def test_worker_labeled_wb_persists_one_artifact_and_render_payload_per_target(
         payload["data"]["columns"] == ["Control", "Treatment_A", "Treatment_B"]
         for payload in payloads
     )
+
+
+def _run_fake_completed_job(tmp_path, result_factory):
+    jobs_root = tmp_path / "jobs"
+
+    class CompletedProcess:
+        returncode = 0
+
+        def wait(self, timeout):
+            job_directory = next(jobs_root.iterdir())
+            result = result_factory(job_directory)
+            (job_directory / "result.json").write_text(
+                json.dumps(result), encoding="utf-8"
+            )
+            return self.returncode
+
+    runner = SubprocessJobRunner(jobs_root, timeout=1)
+    with mock.patch.object(
+        _service.subprocess, "Popen", return_value=CompletedProcess()
+    ):
+        result = runner.run(_payload())
+    return jobs_root, result
+
+
+@pytest.mark.parametrize("artifact_name", ["chart.png", "chart_1.png"])
+def test_job_directory_is_preserved_for_referenced_internal_image(
+    tmp_path, artifact_name
+):
+    def result_with_image(job_directory):
+        artifact = job_directory / artifact_name
+        artifact.write_bytes(b"image")
+        return {"writebackPlan": {"images": [{"artifact": {"path": str(artifact)}}]}}
+
+    jobs_root, result = _run_fake_completed_job(tmp_path, result_with_image)
+    job_directory = jobs_root / result["jobId"]
+    artifact = job_directory / artifact_name
+
+    assert _service._should_preserve_job_directory(result, job_directory) is True
+    assert job_directory.is_dir()
+    assert artifact.is_file()
+    assert not (job_directory / "request.json").exists()
+    assert not (job_directory / "result.json").exists()
+
+
+def test_job_directory_without_images_is_removed(tmp_path):
+    jobs_root, result = _run_fake_completed_job(
+        tmp_path, lambda _job_directory: {"writebackPlan": {"images": []}}
+    )
+    job_directory = jobs_root / result["jobId"]
+
+    assert _service._should_preserve_job_directory(result, job_directory) is False
+    assert not job_directory.exists()
+
+
+def test_external_image_artifact_does_not_preserve_job_directory(tmp_path):
+    external_artifact = tmp_path / "external.png"
+    external_artifact.write_bytes(b"external image")
+
+    def result_with_external_image(_job_directory):
+        return {
+            "writebackPlan": {
+                "images": [{"artifact": {"path": str(external_artifact)}}]
+            }
+        }
+
+    jobs_root, result = _run_fake_completed_job(tmp_path, result_with_external_image)
+    job_directory = jobs_root / result["jobId"]
+
+    assert _service._should_preserve_job_directory(result, job_directory) is False
+    assert not job_directory.exists()
+    assert external_artifact.is_file()
 
 
 def test_worker_timeout_signals_cancel_kills_process_and_cleans_job(tmp_path):

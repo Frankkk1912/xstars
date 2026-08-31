@@ -202,6 +202,35 @@ def _atomic_write_request(path: Path, payload: Mapping[str, Any]) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _should_preserve_job_directory(result: dict[str, Any], job_directory: Path) -> bool:
+    """Keep a job while an existing writeback image references its artifacts."""
+    writeback_plan = result.get("writebackPlan")
+    if not isinstance(writeback_plan, Mapping):
+        return False
+    images = writeback_plan.get("images")
+    if not isinstance(images, list):
+        return False
+
+    job_directory = job_directory.resolve(strict=False)
+    for image in images:
+        if not isinstance(image, Mapping):
+            continue
+        artifact = image.get("artifact")
+        if not isinstance(artifact, Mapping):
+            continue
+        path = artifact.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        try:
+            artifact_path = Path(path).expanduser().resolve(strict=False)
+            artifact_path.relative_to(job_directory)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if artifact_path.is_file():
+            return True
+    return False
+
+
 class SubprocessJobRunner:
     """Create a controlled job directory and execute exactly one worker process."""
 
@@ -260,6 +289,7 @@ class SubprocessJobRunner:
                 process.wait(timeout=5.0)
                 return_code = process.returncode
 
+        result: dict[str, Any] = {}
         try:
             if timed_out:
                 raise WorkerFailure(ErrorCode.TIMEOUT, "worker timed out")
@@ -269,22 +299,23 @@ class SubprocessJobRunner:
                     f"worker exited with code {return_code} without a result",
                 )
             try:
-                result = json.loads(result_path.read_text(encoding="utf-8"))
+                loaded_result = json.loads(result_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise WorkerFailure(
                     ErrorCode.INTERNAL_ERROR, "worker result is invalid"
                 ) from exc
-            if not isinstance(result, dict):
+            if not isinstance(loaded_result, dict):
                 raise WorkerFailure(
                     ErrorCode.INTERNAL_ERROR, "worker result must be an object"
                 )
+            result = loaded_result
             result["jobId"] = job_id
             return result
         finally:
             request_path.unlink(missing_ok=True)
             result_path.unlink(missing_ok=True)
             cancel_path.unlink(missing_ok=True)
-            if timed_out or not (job_directory / "chart.png").exists():
+            if timed_out or not _should_preserve_job_directory(result, job_directory):
                 shutil.rmtree(job_directory, ignore_errors=True)
 
 
@@ -459,12 +490,16 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             )
             return None
         if payload.get("version") != SCHEMA_VERSION:
-            self._send_error(400, ErrorCode.INVALID_REQUEST, "unsupported request version")
+            self._send_error(
+                400, ErrorCode.INVALID_REQUEST, "unsupported request version"
+            )
             return None
         try:
             command = Command(payload.get("command"))
         except (TypeError, ValueError):
-            self._send_error(400, ErrorCode.INVALID_COMMAND, "command is not whitelisted")
+            self._send_error(
+                400, ErrorCode.INVALID_COMMAND, "command is not whitelisted"
+            )
             return None
         config = payload.get("config", {})
         if not isinstance(config, dict):
@@ -489,10 +524,14 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
         if command in _SELECTION_COMMANDS:
             selection_data = payload.get("selection")
             if not isinstance(selection_data, Mapping):
-                self._send_error(400, ErrorCode.INVALID_SELECTION, "selection must be an object")
+                self._send_error(
+                    400, ErrorCode.INVALID_SELECTION, "selection must be an object"
+                )
                 return None
             try:
-                normalized["selection"] = SelectionPayload.from_dict(selection_data).to_dict()
+                normalized["selection"] = SelectionPayload.from_dict(
+                    selection_data
+                ).to_dict()
             except ContractError as exc:
                 self._send_error(400, exc.code, str(exc))
                 return None
@@ -506,7 +545,9 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
                 )
                 return None
             try:
-                normalized["sampleSelection"] = SelectionPayload.from_dict(sample_data).to_dict()
+                normalized["sampleSelection"] = SelectionPayload.from_dict(
+                    sample_data
+                ).to_dict()
             except ContractError as exc:
                 self._send_error(400, exc.code, str(exc))
                 return None
@@ -518,7 +559,9 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
                 "dpi",
                 "clipboard",
             }:
-                self._send_error(400, ErrorCode.INVALID_REQUEST, "export request is invalid")
+                self._send_error(
+                    400, ErrorCode.INVALID_REQUEST, "export request is invalid"
+                )
                 return None
             normalized["export"] = export_request
         return normalized
@@ -601,7 +644,10 @@ def serve(port: int = DEFAULT_PORT) -> int:
         persist_service_port(bound_port)
     except (OSError, RuntimeError, ValueError) as exc:
         server.server_close()
-        print(f"XSTARS WPS SERVICE ERROR: cannot persist bound port: {exc}", file=sys.stderr)
+        print(
+            f"XSTARS WPS SERVICE ERROR: cannot persist bound port: {exc}",
+            file=sys.stderr,
+        )
         return 2
     print(
         f"XSTARS WPS service listening on http://{bound_host}:{bound_port}", flush=True
