@@ -103,14 +103,43 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(artifact.validate_under(root), (root / "chart.png").resolve())
 
     def test_in_process_figure_source_is_explicit_not_executable(self):
+        picture_id = "XSTARS_20260831_abcdef123456"
         image = ImageWriteback(
             anchor_cell="A1",
             name="XSTARS_Plot_1",
             source_key="primary_figure",
+            picture_id=picture_id,
         )
-        self.assertEqual(image.to_dict()["sourceKey"], "primary_figure")
+        encoded = image.to_dict()
+        self.assertEqual(encoded["sourceKey"], "primary_figure")
+        self.assertEqual(encoded["pictureId"], picture_id)
+        self.assertEqual(ImageWriteback.from_dict(encoded), image)
+        legacy = dict(encoded)
+        legacy.pop("pictureId")
+        self.assertIsNone(ImageWriteback.from_dict(legacy).picture_id)
         with self.assertRaises(ContractError):
             ImageWriteback(anchor_cell="A1", name="bad", source_key="os.system('x')")
+        with self.assertRaises(ContractError):
+            ImageWriteback(
+                anchor_cell="A1",
+                name="bad",
+                source_key="primary_figure",
+                picture_id="../../payload",
+            )
+
+    def test_export_error_codes_are_stable(self):
+        self.assertEqual(
+            {code.value for code in ErrorCode if code.value.startswith(("PAYLOAD_", "EXPORT_"))},
+            {
+                "PAYLOAD_TOO_LARGE",
+                "PAYLOAD_MISSING",
+                "PAYLOAD_CORRUPT",
+                "PAYLOAD_VERSION",
+                "EXPORT_FORMAT",
+                "EXPORT_DPI",
+                "EXPORT_PATH",
+            },
+        )
 
     def test_artifact_path_format_dpi_and_controlled_root_boundaries(self):
         root = Path(tempfile.gettempdir()) / "xstars-artifacts"

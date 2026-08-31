@@ -24,15 +24,17 @@ function injectConfig(options) {
     options.config || path.join(os.homedir(), ".xstars", "wps_service.json"),
   );
   const outputPath = path.resolve(options.output || path.join(addonRoot, "config.js"));
-  const port = Number(options.port || process.env.XSTARS_WPS_PORT || 3892);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error("port must be an integer from 1 to 65535");
-  }
-
   const config = JSON.parse(fs.readFileSync(serviceConfigPath, "utf8"));
   if (!config || typeof config.token !== "string" || config.token.length < 32) {
     throw new Error("service config does not contain a valid token");
   }
+  const explicitPort = options.port !== undefined ? options.port : undefined;
+  const environmentPort = process.env.XSTARS_WPS_PORT || undefined;
+  const port = Number(explicitPort ?? environmentPort ?? config.port ?? 3892);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("port must be an integer from 1 to 65535");
+  }
+
   const template = fs.readFileSync(templatePath, "utf8");
   if (!template.includes("<port>") || !template.includes('"<token>"')) {
     throw new Error("config template placeholders are missing");

@@ -132,6 +132,32 @@ test("command sends the schema DTO and bearer token", async () => {
   });
 });
 
+test("ELISA and export command extras are explicitly serialized", async () => {
+  const bodies = [];
+  const api = loadClient(async (url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    bodies.push(JSON.parse(init.body));
+    return jsonResponse({
+      ok: true,
+      writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "done" },
+    });
+  });
+  const client = new api.WpsServiceClient({ token, port: 3892 });
+  const standard = { version: "1.0", values: [[1], [0.1]], address: "A1:A2", sheet: "ELISA" };
+  const sample = { version: "1.0", values: [["A"], [0.2]], address: "C1:C2", sheet: "ELISA" };
+
+  await client.command("run_elisa", standard, {}, { sampleSelection: sample });
+  await client.command("run_export", null, {}, {
+    export: { pictureId: "XSTARS_20260831_abcdef123456", format: "png", dpi: 300 },
+  });
+
+  assert.deepEqual(bodies[0].sampleSelection, sample);
+  assert.equal(bodies[1].selection, undefined);
+  assert.equal(bodies[1].export.dpi, 300);
+});
+
 test("known service errors map to stable user-facing messages", async () => {
   const api = loadClient(async (url) => {
     if (url.endsWith("/health")) {

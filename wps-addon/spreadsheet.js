@@ -64,29 +64,103 @@
     return address.trim();
   }
 
+  function readRange(application, range) {
+    if (!application || !range || !range.Rows || !range.Columns) {
+      throw new Error("请先选择一个连续的单元格区域");
+    }
+    if (range.Areas && Number(range.Areas.Count) !== 1) {
+      throw new Error("仅支持单个连续选区");
+    }
+    const sheet = range.Worksheet || application.ActiveSheet;
+    if (!sheet || typeof sheet.Name !== "string" || sheet.Name.trim() === "") {
+      throw new Error("无法读取活动工作表名称");
+    }
+    const rowCount = Number(range.Rows.Count);
+    const columnCount = Number(range.Columns.Count);
+    return {
+      version: "1.0",
+      values: normalizeSelectionValues(range.Value2, rowCount, columnCount),
+      address: getRangeAddress(range),
+      sheet: sheet.Name,
+    };
+  }
+
   function readSelection(application) {
     if (!application) {
       throw new Error("无法访问 WPS 表格应用程序");
     }
-    const selection = application.Selection;
-    if (!selection || !selection.Rows || !selection.Columns) {
-      throw new Error("请先选择一个连续的单元格区域");
+    return readRange(application, application.Selection);
+  }
+
+  function promptRange(application, message, title) {
+    if (!application || typeof application.InputBox !== "function") {
+      throw new Error("当前 WPS 不支持 InputBox 选区，请升级到受支持版本");
     }
-    if (selection.Areas && Number(selection.Areas.Count) !== 1) {
-      throw new Error("仅支持单个连续选区");
+    let selected;
+    try {
+      selected = application.InputBox(
+        message,
+        title,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        8,
+      );
+    } catch {
+      return null;
     }
-    const sheet = application.ActiveSheet;
-    if (!sheet || typeof sheet.Name !== "string" || sheet.Name.trim() === "") {
-      throw new Error("无法读取活动工作表名称");
+    return selected ? readRange(application, selected) : null;
+  }
+
+  function promptText(application, message, title, defaultValue) {
+    if (!application || typeof application.InputBox !== "function") {
+      throw new Error("当前 WPS 不支持参数输入");
     }
-    const rowCount = Number(selection.Rows.Count);
-    const columnCount = Number(selection.Columns.Count);
-    return {
-      version: "1.0",
-      values: normalizeSelectionValues(selection.Value2, rowCount, columnCount),
-      address: getRangeAddress(selection),
-      sheet: sheet.Name,
-    };
+    let value;
+    try {
+      value = application.InputBox(
+        message,
+        title,
+        defaultValue,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        2,
+      );
+    } catch {
+      return null;
+    }
+    if (value === null || value === false) {
+      return null;
+    }
+    const text = String(value).trim();
+    return text || defaultValue;
+  }
+
+  function selectedShape(application) {
+    const selection = application && application.Selection;
+    if (!selection) {
+      throw new Error("请先选择一张图片或 Shape");
+    }
+    let shapeRange = null;
+    try {
+      shapeRange = selection.ShapeRange || null;
+    } catch {
+      shapeRange = null;
+    }
+    if (shapeRange && typeof shapeRange.Item === "function") {
+      return shapeRange.Item(1);
+    }
+    if (shapeRange && typeof shapeRange.CopyPicture === "function") {
+      return shapeRange;
+    }
+    if (typeof selection.CopyPicture === "function") {
+      return selection;
+    }
+    throw new Error("当前 Selection 不包含可导出的图片");
   }
 
   function requireMatrix(values, label) {
@@ -173,8 +247,16 @@
         width,
         height,
       );
-      if (picture && typeof image.name === "string" && image.name.trim()) {
-        picture.Name = image.name;
+      const requestedName = typeof image.pictureId === "string" && image.pictureId
+        ? image.pictureId
+        : image.name;
+      if (picture && typeof requestedName === "string" && requestedName.trim()) {
+        try {
+          picture.Name = requestedName;
+        } catch {
+          // WPS builds that reject Shape.Name assignment keep the native name.
+          // Analysis writeback remains valid; export will use clipboard fallback.
+        }
       }
       pictures.push(picture);
     }
@@ -188,7 +270,11 @@
     getRangeAddress,
     normalizeCellValue,
     normalizeSelectionValues,
+    promptRange,
+    promptText,
+    readRange,
     readSelection,
+    selectedShape,
     setStatus,
     showError,
   });

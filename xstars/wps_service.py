@@ -34,6 +34,16 @@ DEFAULT_JOBS_ROOT = Path.home() / ".xstars" / "wps_jobs"
 MAX_REQUEST_BYTES = 1_048_576
 WORKER_TIMEOUT_SECONDS = 300.0
 JOB_RETENTION_SECONDS = 86_400.0
+_SELECTION_COMMANDS = {
+    Command.RUN,
+    Command.QUICK,
+    Command.WB,
+    Command.QPCR,
+    Command.CCK8,
+    Command.ELISA,
+    Command.TRANSFORM_ONLY,
+    Command.STANDARD_CURVE,
+}
 
 
 class WorkerFailure(RuntimeError):
@@ -90,6 +100,45 @@ def load_or_create_token(config_path: Path = DEFAULT_CONFIG_PATH) -> str:
         raise
     _restrict_permissions(config_path, 0o600)
     return token
+
+
+def persist_service_port(
+    port: int,
+    config_path: Path = DEFAULT_CONFIG_PATH,
+) -> None:
+    """Atomically preserve the service token while recording the actual bound port."""
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise ValueError("port must be from 1 to 65535")
+    config_path = config_path.expanduser().resolve(strict=False)
+    token = load_or_create_token(config_path)
+    try:
+        current = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid WPS service config: {exc}") from exc
+    if not isinstance(current, dict):
+        current = {}
+    current.update({"version": SCHEMA_VERSION, "token": token, "port": port})
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=config_path.parent,
+            prefix=f".{config_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(current, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _restrict_permissions(temporary, 0o600)
+        os.replace(temporary, config_path)
+        temporary = None
+        _restrict_permissions(config_path, 0o600)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def mask_token(token: str) -> str:
@@ -396,45 +445,83 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
                 400, ErrorCode.INVALID_REQUEST, "request body must be an object"
             )
             return None
-        allowed_fields = {"version", "command", "selection", "config"}
+        allowed_fields = {
+            "version",
+            "command",
+            "selection",
+            "sampleSelection",
+            "config",
+            "export",
+        }
         if set(payload) - allowed_fields:
             self._send_error(
                 400, ErrorCode.INVALID_REQUEST, "request contains unsupported fields"
             )
             return None
         if payload.get("version") != SCHEMA_VERSION:
-            self._send_error(
-                400, ErrorCode.INVALID_REQUEST, "unsupported request version"
-            )
+            self._send_error(400, ErrorCode.INVALID_REQUEST, "unsupported request version")
             return None
         try:
             command = Command(payload.get("command"))
         except (TypeError, ValueError):
-            self._send_error(
-                400, ErrorCode.INVALID_COMMAND, "command is not whitelisted"
-            )
-            return None
-        selection_data = payload.get("selection")
-        if not isinstance(selection_data, Mapping):
-            self._send_error(
-                400, ErrorCode.INVALID_SELECTION, "selection must be an object"
-            )
-            return None
-        try:
-            selection = SelectionPayload.from_dict(selection_data)
-        except ContractError as exc:
-            self._send_error(400, exc.code, str(exc))
+            self._send_error(400, ErrorCode.INVALID_COMMAND, "command is not whitelisted")
             return None
         config = payload.get("config", {})
         if not isinstance(config, dict):
             self._send_error(400, ErrorCode.INVALID_REQUEST, "config must be an object")
             return None
-        return {
+        if (
+            ("selection" in payload and command not in _SELECTION_COMMANDS)
+            or ("sampleSelection" in payload and command is not Command.ELISA)
+            or ("export" in payload and command is not Command.EXPORT)
+        ):
+            self._send_error(
+                400,
+                ErrorCode.INVALID_REQUEST,
+                "request fields do not match the command",
+            )
+            return None
+        normalized: dict[str, Any] = {
             "version": SCHEMA_VERSION,
             "command": command.value,
-            "selection": selection.to_dict(),
             "config": config,
         }
+        if command in _SELECTION_COMMANDS:
+            selection_data = payload.get("selection")
+            if not isinstance(selection_data, Mapping):
+                self._send_error(400, ErrorCode.INVALID_SELECTION, "selection must be an object")
+                return None
+            try:
+                normalized["selection"] = SelectionPayload.from_dict(selection_data).to_dict()
+            except ContractError as exc:
+                self._send_error(400, exc.code, str(exc))
+                return None
+        if command is Command.ELISA:
+            sample_data = payload.get("sampleSelection")
+            if not isinstance(sample_data, Mapping):
+                self._send_error(
+                    400,
+                    ErrorCode.INVALID_SELECTION,
+                    "sampleSelection must be an object",
+                )
+                return None
+            try:
+                normalized["sampleSelection"] = SelectionPayload.from_dict(sample_data).to_dict()
+            except ContractError as exc:
+                self._send_error(400, exc.code, str(exc))
+                return None
+        if command is Command.EXPORT:
+            export_request = payload.get("export")
+            if not isinstance(export_request, dict) or set(export_request) - {
+                "pictureId",
+                "format",
+                "dpi",
+                "clipboard",
+            }:
+                self._send_error(400, ErrorCode.INVALID_REQUEST, "export request is invalid")
+                return None
+            normalized["export"] = export_request
+        return normalized
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
@@ -510,6 +597,12 @@ def serve(port: int = DEFAULT_PORT) -> int:
         return 2
     bound_host = server.server_address[0]
     bound_port = server.server_address[1]
+    try:
+        persist_service_port(bound_port)
+    except (OSError, RuntimeError, ValueError) as exc:
+        server.server_close()
+        print(f"XSTARS WPS SERVICE ERROR: cannot persist bound port: {exc}", file=sys.stderr)
+        return 2
     print(
         f"XSTARS WPS service listening on http://{bound_host}:{bound_port}", flush=True
     )

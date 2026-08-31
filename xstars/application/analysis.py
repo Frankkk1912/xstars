@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 
 from ..config import ExperimentPreset, PrismConfig
@@ -21,7 +22,12 @@ from ..presets.elisa import ELISAOptions
 from ..presets.qpcr import QPCROptions
 from ..presets.wb import WBOptions
 from ..stats_engine import StatsEngine, StatsResult
-from ..tools.standard_curve import CurveFitResult
+from ..styles import get_prism_context
+from ..tools.standard_curve import (
+    CurveFitResult,
+    fit_standard_curve,
+    wide_to_conc_od,
+)
 from .contracts import (
     ImageWriteback,
     SelectionPayload,
@@ -53,6 +59,16 @@ class TransformResult:
     """Transform-only output and its host-neutral writeback description."""
 
     transformed_data: pd.DataFrame
+    writeback_plan: WritebackPlan
+
+
+@dataclass
+class StandardCurveResult:
+    """Standard-curve fit, figure, and host-neutral writeback description."""
+
+    standard_data: pd.DataFrame
+    fit_result: CurveFitResult
+    figure: Any
     writeback_plan: WritebackPlan
 
 
@@ -289,6 +305,124 @@ def analyze_selection(
         start_column=column,
         image_name=image_name,
         include_processed_data=include_processed_data,
+    )
+    return result
+
+
+def _curve_parameter_values(fit: CurveFitResult) -> list[list[Any]]:
+    values: list[list[Any]] = [
+        ["Method", fit.method],
+        ["Equation", fit.equation_str],
+        ["R²", _json_cell(fit.r_squared) if fit.r_squared is not None else "N/A"],
+    ]
+    values.extend([[str(key), _json_cell(value)] for key, value in fit.params.items()])
+    return values
+
+
+def plot_standard_curve(
+    standard_data: pd.DataFrame,
+    config: PrismConfig,
+) -> tuple[CurveFitResult, Any]:
+    """Fit and plot numeric wide standard data without host interaction."""
+    numeric = standard_data.copy()
+    for column in numeric.columns:
+        numeric[column] = pd.to_numeric(numeric[column], errors="coerce")
+    numeric = numeric.dropna(how="all").reset_index(drop=True)
+    conc, od = wide_to_conc_od(numeric)
+    fit = fit_standard_curve(conc, od, config.preset_elisa_fit_method)
+
+    from matplotlib import pyplot as plt
+
+    with get_prism_context(config.journal_preset, config.base_theme):
+        figure, axis = plt.subplots(
+            figsize=(config.fig_width, config.fig_height),
+            dpi=config.dpi,
+        )
+        axis.scatter(conc, od, color=config.palette[0], s=30, zorder=5, label="Standards")
+        positive = conc[conc > 0]
+        if fit.method == "linear" or len(positive) < 2:
+            x_fit = np.linspace(conc.min(), conc.max() * 1.1, 200)
+        else:
+            x_fit = np.geomspace(positive.min() * 0.5, positive.max() * 1.5, 200)
+        axis.plot(x_fit, fit.predict(x_fit), "-", color=config.palette[1], label=fit.method)
+        if len(positive) >= 2 and positive.max() / positive.min() > 10:
+            axis.set_xscale("log")
+        axis.set_xlabel("Concentration")
+        axis.set_ylabel("OD")
+        title = "Standard Curve"
+        if fit.r_squared is not None:
+            title += f" (R² = {fit.r_squared:.4f})"
+        axis.set_title(title)
+        axis.legend(fontsize=8)
+        figure.tight_layout()
+    return fit, figure
+
+
+def standard_curve_selection(
+    payload: SelectionPayload,
+    config: PrismConfig,
+    *,
+    output_start_cell: str,
+    image_name: str = "XSTARS_StdCurve_1",
+) -> StandardCurveResult:
+    """Fit a standard curve and construct its parameter-table/image plan."""
+    frame = DataHandler.from_selection_payload(payload)
+    if frame.shape[1] < 2:
+        raise ValueError("Select at least two concentration columns.")
+    fit, figure = plot_standard_curve(frame, config)
+    row, column = parse_cell(output_start_cell)
+    parameter_values = _curve_parameter_values(fit)
+    plan = WritebackPlan(
+        tables=[
+            TableWriteback(start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]),
+            TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
+        ],
+        images=[
+            ImageWriteback(
+                anchor_cell=cell_to_a1(row + len(parameter_values) + 2, column),
+                name=image_name,
+                source_key="primary_figure",
+            )
+        ],
+        status_message=f"XSTARS: Standard curve fitted ({fit.method})",
+    )
+    return StandardCurveResult(frame, fit, figure, plan)
+
+
+def elisa_selections(
+    standard_payload: SelectionPayload,
+    sample_payload: SelectionPayload,
+    config: PrismConfig,
+    *,
+    output_start_cell: str,
+    image_name: str = "XSTARS_ELISA_1",
+) -> AnalysisResult:
+    """Fit standards then back-calculate and analyze a second sample selection."""
+    standard_frame = DataHandler.from_selection_payload(standard_payload)
+    conc, od = wide_to_conc_od(standard_frame)
+    fit = fit_standard_curve(conc, od, config.preset_elisa_fit_method)
+    config.experiment_preset = ExperimentPreset.ELISA
+    config.elisa_fit_result = fit
+    sample_frame = DataHandler.from_selection_payload(sample_payload)
+    result = analyze_dataframe(sample_frame, config)
+    row, column = parse_cell(output_start_cell)
+    parameter_values = _curve_parameter_values(fit)
+    build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=row + len(parameter_values) + 2,
+        start_column=column,
+        image_name=image_name,
+        include_processed_data=True,
+        processed_data_title="Back-Calculated Concentrations",
+    )
+    result.writeback_plan.tables[0:0] = [
+        TableWriteback(start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]),
+        TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
+    ]
+    r2 = f", R²={fit.r_squared:.4f}" if fit.r_squared is not None else ""
+    result.writeback_plan.status_message = (
+        f"XSTARS: ELISA ({fit.method}{r2}) — {result.stats_result.decision_path}"
     )
     return result
 

@@ -15,11 +15,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from xstars.application import SelectionPayload, WritebackPlan
-from xstars.config import PrismConfig
+from xstars.config import ExperimentPreset, PrismConfig
 from xstars.data_handler import DataHandler
 
 _analysis = import_module("xstars.application.analysis")
 analyze_selection = _analysis.analyze_selection
+elisa_selections = _analysis.elisa_selections
+standard_curve_selection = _analysis.standard_curve_selection
 transform_selection = _analysis.transform_selection
 
 
@@ -82,6 +84,86 @@ class ApplicationAnalysisTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 0)
             self.assertIsNotNone(result.figure)
+
+    def test_wb_qpcr_and_cck8_presets_use_shared_analysis_pipeline(self):
+        cases = [
+            (
+                ExperimentPreset.WB,
+                _selection(),
+                {"preset_control_group": "Control"},
+                "Fold Change",
+            ),
+            (
+                ExperimentPreset.QPCR,
+                SelectionPayload(
+                    values=[["Control", "Treatment"], [1.0, 0.0], [1.2, 0.2], [0.8, -0.1]],
+                    address="A1:B4",
+                    sheet="qPCR",
+                ),
+                {"preset_control_group": "Control", "preset_input_format": "delta_ct"},
+                "Relative Expression",
+            ),
+            (
+                ExperimentPreset.CCK8,
+                SelectionPayload(
+                    values=[
+                        ["Blank", "Control", "Dose1", "Dose2"],
+                        [0.1, 1.0, 0.8, 0.4],
+                        [0.1, 1.1, 0.75, 0.35],
+                        [0.1, 0.9, 0.7, 0.3],
+                    ],
+                    address="A1:D4",
+                    sheet="CCK8",
+                ),
+                {
+                    "preset_control_group": "Control",
+                    "preset_blank_group": "Blank",
+                    "preset_fit_ic50": False,
+                },
+                "Viability",
+            ),
+        ]
+        for preset, selection, overrides, expected_label in cases:
+            with self.subTest(preset=preset.value):
+                config = PrismConfig(experiment_preset=preset, **overrides)
+                result = analyze_selection(selection, config, output_start_cell="F8", include_processed_data=True)
+                self.assertGreaterEqual(len(result.writeback_plan.tables), 2)
+                self.assertIn(expected_label, config.y_label)
+                self.assertIsNotNone(result.preset)
+
+    def test_standard_curve_and_two_selection_elisa_are_host_independent(self):
+        standard = SelectionPayload(
+            values=[
+                [1, 10, 100],
+                [0.1, 1.0, 10.0],
+                [0.11, 1.1, 10.1],
+                [0.09, 0.9, 9.9],
+            ],
+            address="A1:C4",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[
+                ["Control", "Treatment"],
+                [0.2, 0.4],
+                [0.21, 0.42],
+                [0.19, 0.38],
+            ],
+            address="E1:F4",
+            sheet="ELISA",
+        )
+        config = PrismConfig(preset_elisa_fit_method="linear")
+
+        curve = standard_curve_selection(standard, config, output_start_cell="A8")
+        self.assertEqual(curve.fit_result.method, "linear")
+        self.assertEqual(curve.writeback_plan.tables[0].values, [["Standard Curve Results"]])
+        self.assertEqual(curve.writeback_plan.images[0].source_key, "primary_figure")
+
+        elisa = elisa_selections(standard, samples, config, output_start_cell="A8")
+        self.assertEqual(config.experiment_preset, ExperimentPreset.ELISA)
+        self.assertEqual(list(elisa.transformed_data.columns), ["Control", "Treatment"])
+        self.assertEqual(elisa.writeback_plan.tables[0].values, [["Standard Curve Results"]])
+        self.assertIn("ELISA (linear", elisa.writeback_plan.status_message)
 
     def test_transform_only_returns_data_table_plan_without_host_calls(self):
         result = transform_selection(

@@ -50,6 +50,40 @@ test("selection serialization matches SelectionPayload for scalar and one-column
   );
 });
 
+test("Type=8 range prompts serialize the returned Range and cancellation is recoverable", () => {
+  const range = {
+    Address: "$C$1:$D$2",
+    Rows: { Count: 2 },
+    Columns: { Count: 2 },
+    Value2: [["A", "B"], [1, 2]],
+    Worksheet: { Name: "ELISA" },
+  };
+  const types = [];
+  let next = range;
+  const application = {
+    ActiveSheet: { Name: "Data" },
+    InputBox: (...args) => {
+      types.push(args[7]);
+      const result = next;
+      next = false;
+      return result;
+    },
+  };
+  const { api } = loadSpreadsheet(application);
+
+  const selected = api.promptRange(application, "message", "title");
+  const cancelled = api.promptRange(application, "message", "title");
+
+  assert.deepEqual(JSON.parse(JSON.stringify(selected)), {
+    version: "1.0",
+    values: [["A", "B"], [1, 2]],
+    address: "$C$1:$D$2",
+    sheet: "ELISA",
+  });
+  assert.equal(cancelled, null);
+  assert.deepEqual(types, [8, 8]);
+});
+
 test("selection rejects discontiguous areas and non-finite values", () => {
   const application = {
     ActiveSheet: { Name: "Data" },
@@ -110,6 +144,7 @@ test("WritebackPlan writes resized ranges and inserts a named picture at its anc
       {
         anchorCell: "D6",
         name: "XSTARS_Plot_1",
+        pictureId: "XSTARS_20260831_abcdef123456",
         artifact: { path: "C:\\Temp\\xstars\\chart.png" },
         width: 320,
         height: 180,
@@ -126,7 +161,7 @@ test("WritebackPlan writes resized ranges and inserts a named picture at its anc
   assert.deepEqual(pictureCalls, [
     ["C:\\Temp\\xstars\\chart.png", 0, -1, 420, 160, 320, 180],
   ]);
-  assert.equal(result.pictures[0].Name, "XSTARS_Plot_1");
+  assert.equal(result.pictures[0].Name, "XSTARS_20260831_abcdef123456");
   assert.equal(application.StatusBar, "XSTARS: Quick Run complete");
 });
 

@@ -196,10 +196,132 @@ test("Ribbon callbacks expose the approved controls and self-owned icon paths", 
     context.window.GetImage({ Id: "xstarsQuickRun" }),
     "assets/quick-run.svg",
   );
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(context.window.XstarsWpsAddin.CONTROL_COMMANDS)),
-    { xstarsRun: "run", xstarsQuickRun: "run_quick" },
+  const controls = JSON.parse(
+    JSON.stringify(context.window.XstarsWpsAddin.CONTROL_COMMANDS),
   );
+  assert.equal(controls.xstarsRun, "run");
+  assert.equal(controls.xstarsQuickRun, "run_quick");
+  assert.equal(controls.xstarsWB, "run_wb");
+  assert.equal(controls.xstarsQPCR, "run_qpcr");
+  assert.equal(controls.xstarsCCK8, "run_cck8");
+  assert.equal(controls.xstarsELISA, "run_elisa");
+  assert.equal(controls.xstarsTransform, "run_transform_only");
+  assert.equal(controls.xstarsStandardCurve, "run_standard_curve");
+  assert.equal(controls.xstarsExport, "run_export");
+  assert.equal(controls.xstarsThemeNature, "run_set_theme_nature");
+  assert.equal(
+    controls.xstarsJournalPaletteNature,
+    "run_set_journal_palette_nature",
+  );
+  assert.equal(controls.xstarsPaletteColorblind, "run_set_palette_colorblind");
+  assert.equal(controls.xstarsResetSettings, "run_reset_settings");
+});
+
+test("ELISA uses two Type=8 InputBox ranges and sends both selections", async () => {
+  const host = makeHost();
+  const ranges = [
+    {
+      Address: () => "$A$1:$C$4",
+      Rows: { Count: 4 },
+      Columns: { Count: 3 },
+      Value2: [[1, 10, 100], [0.1, 1, 10], [0.11, 1.1, 10.1], [0.09, 0.9, 9.9]],
+      Worksheet: host.application.ActiveSheet,
+    },
+    {
+      Address: () => "$E$1:$F$4",
+      Rows: { Count: 4 },
+      Columns: { Count: 2 },
+      Value2: [["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42], [0.19, 0.38]],
+      Worksheet: host.application.ActiveSheet,
+    },
+  ];
+  const inputTypes = [];
+  host.application.InputBox = (...args) => {
+    inputTypes.push(args[7]);
+    return ranges.shift();
+  };
+  let commandBody;
+  const { context } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    commandBody = JSON.parse(init.body);
+    return jsonResponse({
+      ok: true,
+      writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "done" },
+    });
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runElisa();
+
+  assert.equal(result.response.ok, true);
+  assert.deepEqual(inputTypes, [8, 8]);
+  assert.equal(commandBody.command, "run_elisa");
+  assert.equal(commandBody.selection.address, "$A$1:$C$4");
+  assert.equal(commandBody.sampleSelection.address, "$E$1:$F$4");
+});
+
+test("ELISA cancellation is friendly and sends no service request", async () => {
+  const host = makeHost();
+  host.application.InputBox = () => false;
+  let requests = 0;
+  const { context, alerts } = loadAddin(() => {
+    requests += 1;
+    throw new Error("network must not be called");
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runElisa();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    cancelled: true,
+    stage: "standard",
+  });
+  assert.equal(requests, 0);
+  assert.deepEqual(alerts, []);
+  assert.equal(host.application.StatusBar, "XSTARS: ELISA 已取消");
+});
+
+test("high-resolution export prefers pictureId and arbitrary Shapes use CopyPicture", async () => {
+  const host = makeHost();
+  let currentShape = { Name: "XSTARS_20260831_abcdef123456" };
+  host.application.Selection = {
+    ShapeRange: { Item: () => currentShape },
+  };
+  const prompts = ["png", "300", "tiff", "96"];
+  host.application.InputBox = (...args) => {
+    assert.equal(args[7], 2);
+    return prompts.shift();
+  };
+  const bodies = [];
+  const { context } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    return jsonResponse({
+      ok: true,
+      export: { path: "C:\\Users\\test\\.xstars\\exports\\chart.png" },
+      writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "exported" },
+    });
+  }, host.application);
+
+  await context.window.XstarsWpsAddin.runExport();
+  let copied = 0;
+  currentShape = {
+    Name: "Picture 1",
+    CopyPicture: (appearance, format) => {
+      copied += 1;
+      assert.deepEqual([appearance, format], [2, -4147]);
+    },
+  };
+  await context.window.XstarsWpsAddin.runExport();
+
+  assert.equal(bodies[0].export.pictureId, "XSTARS_20260831_abcdef123456");
+  assert.equal(bodies[0].export.clipboard, false);
+  assert.equal(bodies[1].export.clipboard, true);
+  assert.equal(bodies[1].export.format, "tiff");
+  assert.equal(copied, 1);
 });
 
 test("selection and broker errors are shown without triggering real dialogs", async () => {

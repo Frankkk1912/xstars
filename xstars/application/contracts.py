@@ -22,6 +22,7 @@ MAX_MESSAGE_LENGTH = 2_000
 
 _CELL_RE = re.compile(r"^\$?([A-Za-z]{1,3})\$?([1-9][0-9]*)$")
 _SOURCE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_PICTURE_ID_RE = re.compile(r"^XSTARS_[0-9]{8}_[0-9a-z]{8,32}$")
 
 
 class Command(str, Enum):
@@ -87,6 +88,12 @@ class ErrorCode(str, Enum):
     BUSY = "BUSY"
     TIMEOUT = "TIMEOUT"
     ANALYSIS_FAILED = "ANALYSIS_FAILED"
+    PAYLOAD_MISSING = "PAYLOAD_MISSING"
+    PAYLOAD_CORRUPT = "PAYLOAD_CORRUPT"
+    PAYLOAD_VERSION = "PAYLOAD_VERSION"
+    EXPORT_FORMAT = "EXPORT_FORMAT"
+    EXPORT_DPI = "EXPORT_DPI"
+    EXPORT_PATH = "EXPORT_PATH"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -322,6 +329,7 @@ class ImageWriteback:
     source_key: str | None = None
     width: float | None = None
     height: float | None = None
+    picture_id: str | None = None
 
     def __post_init__(self) -> None:
         parse_cell(self.anchor_cell)
@@ -331,6 +339,8 @@ class ImageWriteback:
             raise ContractError(ErrorCode.INVALID_REQUEST, "image source is required")
         if self.source_key is not None and _SOURCE_KEY_RE.fullmatch(self.source_key) is None:
             raise ContractError(ErrorCode.INVALID_REQUEST, "image source key is invalid")
+        if self.picture_id is not None and _PICTURE_ID_RE.fullmatch(self.picture_id) is None:
+            raise ContractError(ErrorCode.INVALID_REQUEST, "image pictureId is invalid")
         for dimension in (self.width, self.height):
             if dimension is not None and (not isinstance(dimension, (int, float)) or dimension <= 0):
                 raise ContractError(ErrorCode.INVALID_REQUEST, "image dimensions must be positive")
@@ -345,6 +355,8 @@ class ImageWriteback:
             result["width"] = self.width
         if self.height is not None:
             result["height"] = self.height
+        if self.picture_id is not None:
+            result["pictureId"] = self.picture_id
         return result
 
     @classmethod
@@ -358,6 +370,7 @@ class ImageWriteback:
                 source_key=data.get("sourceKey"),
                 width=data.get("width"),
                 height=data.get("height"),
+                picture_id=data.get("pictureId"),
             )
         except KeyError as exc:
             raise ContractError(ErrorCode.INVALID_REQUEST, f"Missing field: {exc.args[0]}") from exc

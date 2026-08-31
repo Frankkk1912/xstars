@@ -283,25 +283,25 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M5 — 预设/ELISA 落地/主题设置/高分辨率导出
 
-- [ ] **T5.1 接通 WB/qPCR/CCK-8、Transform 与 Standard Curve**
+- [x] **T5.1 接通 WB/qPCR/CCK-8、Transform 与 Standard Curve**
   - 文件：`xstars/application/analysis.py`（修改）、`wps-addon/main.js`（修改）、相关测试
   - 修改：增加各命令映射与特定 WritebackPlan；核心算法不变。
   - 验收：模板对应 Sheet 在专业版逐项通过，数值与 Python/Excel 基准一致。
   - 依赖：M4 通过；支撑 G5。
 
-- [ ] **T5.2 完成 ELISA 交互落地（采用 M0.4 选定路径）**
+- [x] **T5.2 完成 ELISA 交互落地（采用 M0.4 选定路径）**
   - 文件：`xstars/application/analysis.py`（修改）、`wps-addon/main.js`、`wps-addon/spreadsheet.js`（修改）、相关测试
   - 修改：实现 M0.4 选定的标准数据/样本数据选择协议与取消恢复。
   - 验收：ELISA 模板完整拟合、反算、统计、图表与可选标准曲线通过。
   - 依赖：T5.1、M0.4 结论（M1）；支撑 G1、G5、R8。
 
-- [ ] **T5.3 完成主题/设置与错误诊断**
+- [x] **T5.3 完成主题/设置与错误诊断**
   - 文件：`wps-addon/ribbon.xml`、`wps-addon/main.js`（修改）、`xstars/config.py`（修改，仅向后兼容字段）、`xstars/wps_service.py`（修改）
   - 修改：主题命令、设置共享、稳定错误码、脱敏日志与诊断包；`serve` 启动时将 port 持久化到 `~/.xstars/wps_service.json`，inject-config 默认从该文件读取端口（T4.3 实机发现：注入端口与 broker 实际端口错位导致连接失败）
   - 验收：设置跨 WPS 重启持久化；故障用例不崩溃且日志可定位。
   - 依赖：T5.1；支撑 G6、R5、R6。
 
-- [ ] **T5.4 完成高分辨率导出（2026-08-31 用户定案方案 A：重渲染主路径 + 剪贴板 bonus）**
+- [x] **T5.4 完成高分辨率导出（2026-08-31 用户定案方案 A：重渲染主路径 + 剪贴板 bonus）**
   - 文件：`xstars/application/export.py`（新建）、`tests/test_wps_export.py`（新建）、`wps-addon/main.js`（修改）、`xstars/application/worker.py`（修改）、`xstars/application/analysis.py`（修改）
   - 修改：生成图表时 best-effort 持久化轻量重渲染 payload（清洗数据+配置快照，`~/.xstars/artifacts/`，由 worker 下发 pictureId、加载项重命名 Shape 关联，不阻断出图）；导出命令对 XSTARS 图加载 payload 重渲染目标 DPI（主路径，真细节）；任意选中图片走剪贴板重编码（bonus）；payload 缺失/损坏给出可诊断错误；严格校验格式、DPI 与目标路径。
   - 验收：XSTARS 图导出 PNG/TIFF/JPG/PDF 为重渲染输出（独立验证 DPI、像素与文件有效性）；非 XSTARS 图走剪贴板路径；DPI 按请求值精确。

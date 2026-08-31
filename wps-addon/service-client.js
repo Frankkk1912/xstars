@@ -27,6 +27,12 @@
     BUSY: "XSTARS 正在处理另一个任务，请稍后重试。",
     TIMEOUT: "XSTARS 分析超时，请缩小选区后重试。",
     ANALYSIS_FAILED: "XSTARS 无法分析当前数据，请检查数据格式。",
+    PAYLOAD_MISSING: "找不到该图的高清重渲染数据，请重新生成图表；普通图片可重试剪贴板导出。",
+    PAYLOAD_CORRUPT: "该图的高清重渲染数据已损坏，请重新生成图表。",
+    PAYLOAD_VERSION: "该图由不兼容版本生成，请使用当前版本重新生成图表。",
+    EXPORT_FORMAT: "导出格式无效，仅支持 PNG、TIFF、JPG、PDF。",
+    EXPORT_DPI: "导出 DPI 无效，请输入 72 到 1200 的整数。",
+    EXPORT_PATH: "无法写入 XSTARS 受控导出目录。",
     INTERNAL_ERROR: "XSTARS 本地服务发生内部错误。",
     INVALID_RESPONSE: "XSTARS 本地服务返回了无效响应。",
   });
@@ -153,7 +159,7 @@
       return true;
     }
 
-    async command(command, selection, config, options) {
+    async command(command, selection, config, extra, options) {
       if (!this.baseUrl) {
         await this.discoverService();
       }
@@ -172,9 +178,18 @@
         const body = {
           version: SCHEMA_VERSION,
           command,
-          selection,
           config: config || {},
         };
+        if (selection) {
+          body.selection = selection;
+        }
+        const additional = extra || {};
+        if (additional.sampleSelection) {
+          body.sampleSelection = additional.sampleSelection;
+        }
+        if (additional.export) {
+          body.export = additional.export;
+        }
         const { response, payload } = await readJsonResponse(
           this.fetchImpl,
           `${this.baseUrl}/command`,

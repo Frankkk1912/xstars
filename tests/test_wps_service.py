@@ -11,9 +11,11 @@ import urllib.request
 from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from xstars.application.contracts import SCHEMA_VERSION
+from xstars.config import ExperimentPreset, JournalPreset, PrismConfig
 
 pytest = import_module("pytest")
 _service = import_module("xstars.wps_service")
@@ -22,6 +24,7 @@ SubprocessJobRunner = _service.SubprocessJobRunner
 create_server = _service.create_server
 load_or_create_token = _service.load_or_create_token
 origin_allowed = _service.origin_allowed
+persist_service_port = _service.persist_service_port
 
 TOKEN = "t" * 48
 
@@ -221,6 +224,78 @@ def test_oversized_request_is_rejected_before_json_parsing():
     assert result["error"]["code"] == "PAYLOAD_TOO_LARGE"
 
 
+def test_preset_elisa_export_and_setting_commands_are_shape_validated():
+    runner = FakeRunner()
+    with _running_server(runner=runner) as service:
+        preset = _payload("run_wb")
+        assert _request(
+            service, "/command", method="POST", payload=preset, headers=_auth()
+        )[0] == 200
+
+        elisa = _payload("run_elisa")
+        elisa["sampleSelection"] = {
+            "version": SCHEMA_VERSION,
+            "values": [["Control", "Treatment"], [0.2, 0.4], [0.3, 0.5]],
+            "address": "E1:F3",
+            "sheet": "Data",
+        }
+        assert _request(
+            service, "/command", method="POST", payload=elisa, headers=_auth()
+        )[0] == 200
+        assert runner.calls[-1]["sampleSelection"]["address"] == "E1:F3"
+
+        export = {
+            "version": SCHEMA_VERSION,
+            "command": "run_export",
+            "config": {},
+            "export": {
+                "pictureId": "XSTARS_20260831_abcdef123456",
+                "format": "png",
+                "dpi": 300,
+                "clipboard": False,
+            },
+        }
+        assert _request(
+            service, "/command", method="POST", payload=export, headers=_auth()
+        )[0] == 200
+        assert "selection" not in runner.calls[-1]
+
+        setting = {
+            "version": SCHEMA_VERSION,
+            "command": "run_set_theme_nature",
+            "config": {},
+        }
+        assert _request(
+            service, "/command", method="POST", payload=setting, headers=_auth()
+        )[0] == 200
+        assert runner.calls[-1]["command"] == "run_set_theme_nature"
+
+
+def test_elisa_requires_second_selection_and_export_rejects_extra_fields():
+    with _running_server() as service:
+        status, _headers, result = _request(
+            service,
+            "/command",
+            method="POST",
+            payload=_payload("run_elisa"),
+            headers=_auth(),
+        )
+        assert status == 400
+        assert result["error"]["code"] == "INVALID_SELECTION"
+
+        export = {
+            "version": SCHEMA_VERSION,
+            "command": "run_export",
+            "config": {},
+            "export": {"format": "png", "dpi": 300, "targetPath": "C:/outside"},
+        }
+        status, _headers, result = _request(
+            service, "/command", method="POST", payload=export, headers=_auth()
+        )
+        assert status == 400
+        assert result["error"]["code"] == "INVALID_REQUEST"
+
+
 def test_valid_command_is_normalized_before_runner_dispatch():
     runner = FakeRunner()
     with _running_server(runner=runner) as service:
@@ -287,6 +362,98 @@ def test_instance_token_is_random_persistent_and_stored_without_plaintext_logs(
     assert json.loads(config_path.read_text(encoding="utf-8"))["token"] == first
     if os.name != "nt":
         assert config_path.stat().st_mode & 0o077 == 0
+
+
+def test_bound_port_is_atomically_persisted_without_rotating_token(tmp_path):
+    config_path = tmp_path / ".xstars" / "wps_service.json"
+    token = load_or_create_token(config_path)
+    original = json.loads(config_path.read_text(encoding="utf-8"))
+    original["installerField"] = "preserved"
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+
+    persist_service_port(40123, config_path)
+
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored == {
+        "version": SCHEMA_VERSION,
+        "token": token,
+        "installerField": "preserved",
+        "port": 40123,
+    }
+    assert not list(config_path.parent.glob("*.tmp"))
+    if os.name != "nt":
+        assert config_path.stat().st_mode & 0o077 == 0
+
+
+def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_path):
+    worker = import_module("xstars.application.worker")
+    preset_request = _payload("run_wb")
+    preset_request["cancelPath"] = str((tmp_path / "cancel").resolve())
+    observed = []
+    fake_export = SimpleNamespace(
+        new_picture_id=lambda: "XSTARS_20260831_abcdef123456",
+        persist_render_payload=lambda *args, **kwargs: tmp_path / "payload.json",
+    )
+
+    def choose(_selection, config):
+        observed.append(config.experiment_preset)
+        return config
+
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(worker, "import_module", return_value=fake_export),
+    ):
+        preset_result = worker.execute_request(
+            preset_request,
+            tmp_path,
+            dialog_config=choose,
+        )
+    assert preset_result["ok"] is True
+    assert observed == [ExperimentPreset.WB]
+    assert preset_result["writebackPlan"]["images"][0]["pictureId"].startswith("XSTARS_")
+
+    setting_request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_set_theme_nature",
+        "config": {},
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    settings_path = tmp_path / "settings.json"
+    config_module = import_module("xstars.config")
+    with mock.patch.object(config_module, "DEFAULT_SETTINGS_PATH", settings_path):
+        setting_result = worker.execute_request(setting_request, tmp_path)
+        reloaded = PrismConfig.load()
+    assert setting_result["ok"] is True
+    assert reloaded.journal_preset is JournalPreset.NATURE
+    assert settings_path.is_file()
+
+    exported = {
+        "path": str((tmp_path / "chart.png").resolve()),
+        "format": "png",
+        "dpi": 300,
+        "source": "render_payload",
+    }
+    fake_export = SimpleNamespace(render_payload_export=mock.Mock(return_value=exported))
+    export_request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_export",
+        "config": {},
+        "export": {
+            "pictureId": "XSTARS_20260831_abcdef123456",
+            "format": "png",
+            "dpi": 300,
+        },
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(worker, "import_module", return_value=fake_export),
+    ):
+        export_result = worker.execute_request(export_request, tmp_path)
+    assert export_result["export"] == exported
+    fake_export.render_payload_export.assert_called_once_with(
+        "XSTARS_20260831_abcdef123456", "png", 300
+    )
 
 
 def test_worker_timeout_signals_cancel_kills_process_and_cleans_job(tmp_path):
