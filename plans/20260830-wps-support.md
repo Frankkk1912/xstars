@@ -424,7 +424,7 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 | `xstars/application/worker.py` | 受控请求文件执行、Tkinter 主线程、原子写结果 |
 | `xstars/wps_service.py` | 127.0.0.1 broker、鉴权、CORS、单实例、worker 管理、健康检查 |
 | `wps-addon/ribbon.xml`、`wps-addon/main.js`、`wps-addon/service-client.js`、`wps-addon/spreadsheet.js`、`wps-addon/config.template.js`、`wps-addon/assets/*`、`wps-addon/package.json`、`wps-addon/tests/*` | 正式 WPS 加载项 |
-| `wps-addon/index.html`、`wps-addon/manifest.xml`、`wps-addon/vite.config.js`、`wps-addon/scripts/inject-config.cjs`（2026-08-31 批准范围扩展） | 官方 wpsjs 加载项壳（loader/清单/构建/配置注入），零业务逻辑；缺失则无法打包安装进行 T4.3 实机验证 |
+| `wps-addon/index.html`、`wps-addon/manifest.xml`、`wps-addon/vite.config.js`、`wps-addon/scripts/inject-config.cjs`、`wps-addon/scripts/build-offline-publish.cjs`（2026-08-31 批准范围扩展） | 官方 wpsjs 加载项壳与离线发布工具链（适配自 PoC 同名脚本，零业务逻辑）；缺失则无法打包安装进行 T4.3 实机验证 |
 | `installer/wps/xstars-wps.spec`、`installer/wps/XSTARS_WPS.iss`、`installer/wps/build.ps1` | WPS 独立安装包 |
 | `docs/wps-installation.md`、`docs/wps-validation.md` | 用户文档 + 实机矩阵模板 |
 

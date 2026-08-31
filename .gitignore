@@ -47,3 +47,5 @@ poc/wps/.gate0-artifacts/
 wps-addon/node_modules/
 wps-addon/config.js
 wps-addon/wps-addon-publish/
+wps-addon/wps-addon-build/
+wps-addon/deploy/
