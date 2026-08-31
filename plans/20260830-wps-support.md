@@ -262,13 +262,13 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M4 — WPS Ribbon + Run/Quick 垂直切片
 
-- [ ] **T4.1 实现 WPS Ribbon 与服务客户端**
+- [x] **T4.1 实现 WPS Ribbon 与服务客户端**
   - 文件：`wps-addon/ribbon.xml`、`wps-addon/main.js`、`wps-addon/service-client.js`、`wps-addon/config.template.js`、`wps-addon/assets/*`（新建）
   - 修改：复刻批准范围内 Ribbon；服务探测/健康检查/鉴权（token）/错误展示；不依赖 `imageMso`（自有图标）；`config.template.js` 由安装器注入端口范围与每实例密钥。
   - 验收：`node --test` 覆盖服务发现/鉴权/错误映射；实机 Ribbon 显示与 Run/Quick 可用。
   - 依赖：M3 通过；支撑 G5、G6、G12、R6。
 
-- [ ] **T4.2 实现 WPS Selection 与 WritebackPlan 执行器**
+- [x] **T4.2 实现 WPS Selection 与 WritebackPlan 执行器**
   - 文件：`wps-addon/spreadsheet.js`（新建）、`wps-addon/tests/*`（新建）
   - 修改：连续选区验证、`Value2` 序列化、批量写回、图片命名/定位、状态栏与错误映射（复用 `poc/wps` 的规整语义）。
   - 验收：Data Sheet Run/Quick 完整垂直切片（实机）+ 保存重开结果不丢失。
