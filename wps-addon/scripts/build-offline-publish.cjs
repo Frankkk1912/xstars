@@ -52,7 +52,9 @@ function run(command, args, options = {}) {
     process.stdout.write(result.stdout || "");
     process.stderr.write(result.stderr || "");
     if (result.status !== 0) {
-        throw new Error(`${command} ${args.join(" ")} exited with status ${result.status}`);
+        throw new Error(
+            `${command} ${args.join(" ")} exited with status ${result.status}`,
+        );
     }
 }
 

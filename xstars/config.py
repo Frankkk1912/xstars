@@ -6,40 +6,39 @@ import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 DEFAULT_SETTINGS_PATH = Path.home() / ".xstars" / "settings.json"
 
 
 class BaseTheme(Enum):
-    CLASSIC = "classic"    # white bg, no grid, left/bottom spines
-    BW = "bw"              # white bg, all spines, light grid
-    MINIMAL = "minimal"    # no spines, light grid
-    DARK = "dark"          # dark bg, light text, subtle grid
+    CLASSIC = "classic"  # white bg, no grid, left/bottom spines
+    BW = "bw"  # white bg, all spines, light grid
+    MINIMAL = "minimal"  # no spines, light grid
+    DARK = "dark"  # dark bg, light text, subtle grid
 
 
 class PalettePreset(Enum):
-    DEFAULT = "default"        # original journal colors, no adjustment
-    PASTEL = "pastel"          # lighten + desaturate
-    DEEP = "deep"              # darken
-    VIBRANT = "vibrant"        # boost saturation
-    MUTED = "muted"            # desaturate
+    DEFAULT = "default"  # original journal colors, no adjustment
+    PASTEL = "pastel"  # lighten + desaturate
+    DEEP = "deep"  # darken
+    VIBRANT = "vibrant"  # boost saturation
+    MUTED = "muted"  # desaturate
     COLORBLIND = "colorblind"  # Wong colorblind-safe (overrides base colors)
 
 
 class JournalPalette(Enum):
-    DEFAULT = "default"     # D3 category10
-    NATURE = "nature"       # Nature Publishing Group
-    SCIENCE = "science"     # Science (AAAS)
-    CELL = "cell"           # Cell Press
-    LANCET = "lancet"       # Lancet
-    NEJM = "nejm"           # NEJM
-    JAMA = "jama"           # JAMA
-    BMJ = "bmj"             # BMJ
+    DEFAULT = "default"  # D3 category10
+    NATURE = "nature"  # Nature Publishing Group
+    SCIENCE = "science"  # Science (AAAS)
+    CELL = "cell"  # Cell Press
+    LANCET = "lancet"  # Lancet
+    NEJM = "nejm"  # NEJM
+    JAMA = "jama"  # JAMA
+    BMJ = "bmj"  # BMJ
 
 
 class AnnotationFormat(Enum):
-    STARS = "stars"            # "***"
+    STARS = "stars"  # "***"
     SCIENTIFIC = "scientific"  # "p=1.2e-4"
 
 
@@ -75,14 +74,14 @@ class ErrorBarType(Enum):
 
 
 class DoseAxisScale(Enum):
-    AUTO = "auto"      # log if range > 100×, linear otherwise
+    AUTO = "auto"  # log if range > 100×, linear otherwise
     LOG = "log"
     LINEAR = "linear"
 
 
 class FitMethod(Enum):
-    AUTO = "auto"            # try 3PL first, fallback to log-linear
-    THREE_PL = "three_pl"    # 3-parameter logistic (top fixed at 100)
+    AUTO = "auto"  # try 3PL first, fallback to log-linear
+    THREE_PL = "three_pl"  # 3-parameter logistic (top fixed at 100)
     LOG_LINEAR = "log_linear"  # log-linear interpolation
 
 
@@ -101,7 +100,9 @@ class PrismConfig:
     paired: bool = False
     alpha: float = 0.05
     annotation_format: AnnotationFormat = AnnotationFormat.STARS
-    control_group: str | None = None  # None = all pairwise; group name = compare all vs control
+    control_group: str | None = (
+        None  # None = all pairwise; group name = compare all vs control
+    )
 
     # Labels
     y_label: str = "Value"
@@ -122,8 +123,14 @@ class PrismConfig:
     # Colors — default Prism-like palette
     palette: list[str] = field(
         default_factory=lambda: [
-            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
-            "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#7f7f7f",
         ]
     )
 
@@ -131,8 +138,8 @@ class PrismConfig:
     show_ns: bool = True  # show "ns" for non-significant pairs
 
     # Output options
-    output_stats: bool = True   # write stats table to Excel
-    output_data: bool = True    # write processed data table to Excel
+    output_stats: bool = True  # write stats table to Excel
+    output_data: bool = True  # write processed data table to Excel
 
     # Export
     export_path: str = ""  # empty = no file export; set to path to save chart
@@ -142,20 +149,20 @@ class PrismConfig:
     # Experiment preset
     experiment_preset: ExperimentPreset = ExperimentPreset.NONE
     preset_control_group: str = ""
-    preset_has_reference: bool = False       # WB: labeled reference protein mode
-    preset_reference_protein: str = ""       # WB: which protein is the reference
-    preset_input_format: str = "delta_ct"    # qPCR: "delta_ct" or "raw_ct"
-    preset_reference_gene: str = ""          # qPCR: which gene is the reference
-    preset_blank_group: str = ""             # CCK-8: blank column name
-    preset_fit_ic50: bool = True             # CCK-8: fit 4PL curve
-    preset_concentrations: str = ""          # CCK-8: comma-separated concentrations
+    preset_has_reference: bool = False  # WB: labeled reference protein mode
+    preset_reference_protein: str = ""  # WB: which protein is the reference
+    preset_input_format: str = "delta_ct"  # qPCR: "delta_ct" or "raw_ct"
+    preset_reference_gene: str = ""  # qPCR: which gene is the reference
+    preset_blank_group: str = ""  # CCK-8: blank column name
+    preset_fit_ic50: bool = True  # CCK-8: fit 4PL curve
+    preset_concentrations: str = ""  # CCK-8: comma-separated concentrations
     preset_dose_axis_scale: DoseAxisScale = DoseAxisScale.AUTO  # CCK-8: x-axis scale
     preset_fit_method: FitMethod = FitMethod.AUTO  # CCK-8: IC50 fitting method
 
     # ELISA
-    preset_elisa_fit_method: str = "auto"          # standard_curve fit method
+    preset_elisa_fit_method: str = "auto"  # standard_curve fit method
     preset_elisa_use_existing_params: bool = False  # skip std curve, use user params
-    preset_elisa_existing_params: str = ""          # JSON string of param dict
+    preset_elisa_existing_params: str = ""  # JSON string of param dict
 
     # CCK-8 IC50 dose-response (transient, not persisted)
     ic50_fit_info: object | None = None
@@ -182,14 +189,23 @@ class PrismConfig:
         d["experiment_preset"] = self.experiment_preset.value
         # Drop transient fields that shouldn't persist
         for key in (
-            "export_path", "control_group",
-            "preset_control_group", "preset_has_reference",
-            "preset_reference_protein", "preset_reference_gene",
-            "preset_input_format", "preset_blank_group", "preset_fit_ic50",
-            "preset_concentrations", "preset_dose_axis_scale", "preset_fit_method",
+            "export_path",
+            "control_group",
+            "preset_control_group",
+            "preset_has_reference",
+            "preset_reference_protein",
+            "preset_reference_gene",
+            "preset_input_format",
+            "preset_blank_group",
+            "preset_fit_ic50",
+            "preset_concentrations",
+            "preset_dose_axis_scale",
+            "preset_fit_method",
             "ic50_fit_info",
-            "preset_elisa_fit_method", "preset_elisa_use_existing_params",
-            "preset_elisa_existing_params", "elisa_fit_result",
+            "preset_elisa_fit_method",
+            "preset_elisa_use_existing_params",
+            "preset_elisa_existing_params",
+            "elisa_fit_result",
         ):
             d.pop(key, None)
         return d
@@ -225,13 +241,20 @@ class PrismConfig:
         defaults = cls()
         for f in cls.__dataclass_fields__:
             if f in (
-                "export_path", "control_group",
-                "preset_control_group", "preset_has_reference",
-                "preset_reference_protein", "preset_reference_gene",
-                "preset_input_format", "preset_blank_group", "preset_fit_ic50",
+                "export_path",
+                "control_group",
+                "preset_control_group",
+                "preset_has_reference",
+                "preset_reference_protein",
+                "preset_reference_gene",
+                "preset_input_format",
+                "preset_blank_group",
+                "preset_fit_ic50",
                 "ic50_fit_info",
-                "preset_elisa_fit_method", "preset_elisa_use_existing_params",
-                "preset_elisa_existing_params", "elisa_fit_result",
+                "preset_elisa_fit_method",
+                "preset_elisa_use_existing_params",
+                "preset_elisa_existing_params",
+                "elisa_fit_result",
             ):
                 continue
             if f in raw:
