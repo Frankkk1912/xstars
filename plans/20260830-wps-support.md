@@ -14,6 +14,7 @@
 | --- | --- | --- |
 | rev 1 | 2026-08-30 | 由旧文档 `docs/wps-support-implementation-plan.md` 重梳而来：继承 M0.0–M0.3 已完成项与实机证据；记录 2026-08-30 访谈决策 D-A..D-H；将 M0.4+旧 M1–M6 重组为 7 个 Milestone；沿用 mac-support PR 的 9 段式风格与 feature-impl PR 模板。 |
 | rev 1（批准） | 2026-08-30 | 用户对本精确 rev 明确回复「批准」；进入 `/feature-impl` 实施，从 M1（Gate 0 收尾）开始，每 Milestone 验证闸门通过后才进入下一个。 |
+| rev 1（白名单扩展） | 2026-08-31 | 用户批准将 `poc/wps/addin/package.json` 纳入 T1.3 文件白名单，仅限 PoC 版本号随 Milestone 递增（本次 1.2.2→1.2.3）；背景：M0.4 实机步骤 4 发现 WPS 内嵌浏览器不支持 `window.prompt`（返回 null 被误判为取消，commit `97820ce` 已改用宿主原生 `InputBox(Type=2)`），且同版本重装会跳过解压，需版本递增触发重新提取。 |
 
 ---
 
