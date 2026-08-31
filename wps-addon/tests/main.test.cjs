@@ -360,6 +360,8 @@ test("selection and broker errors are shown without triggering real dialogs", as
   const busyResult = await busy.context.window.XstarsWpsAddin.runCommand("run");
 
   assert.equal(busyResult.error.code, "BUSY");
-  assert.deepEqual(busy.alerts, ["XSTARS 正在处理另一个任务，请稍后重试。"]);
+  assert.deepEqual(busy.alerts, [
+    "XSTARS 正在处理另一个任务，请稍后重试。\n详情：busy",
+  ]);
   assert.match(busyHost.application.StatusBar, /正在处理另一个任务/);
 });

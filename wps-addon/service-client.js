@@ -222,10 +222,19 @@
   }
 
   function toUserMessage(error) {
-    if (error && USER_MESSAGES[error.code]) {
-      return USER_MESSAGES[error.code];
+    const stableMessage = error && USER_MESSAGES[error.code]
+      ? USER_MESSAGES[error.code]
+      : USER_MESSAGES.SERVICE_UNAVAILABLE;
+    const rawDetail = error && typeof error.detail === "string"
+      ? error.detail
+      : error && typeof error.message === "string"
+        ? error.message
+        : "";
+    const detail = rawDetail.replace(/\s+/g, " ").trim().slice(0, 200);
+    if (detail && detail !== stableMessage) {
+      return `${stableMessage}\n详情：${detail}`;
     }
-    return USER_MESSAGES.SERVICE_UNAVAILABLE;
+    return stableMessage;
   }
 
   root.XstarsServiceClient = Object.freeze({

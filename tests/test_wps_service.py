@@ -456,6 +456,98 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
     )
 
 
+def test_worker_labeled_wb_persists_one_artifact_and_render_payload_per_target(
+    tmp_path,
+):
+    import_module("matplotlib.pyplot").close("all")
+    worker = import_module("xstars.application.worker")
+    export_module = import_module("xstars.application.export")
+    request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_wb",
+        "selection": {
+            "version": SCHEMA_VERSION,
+            "values": [
+                ["Protein", "Control", "Treatment_A", "Treatment_B"],
+                ["Target-A", 12000, 28000, 6500],
+                ["Target-A", 15000, 31000, 7200],
+                ["Target-A", 11500, 26500, 5800],
+                ["Target-B", 8000, 12000, 4000],
+                ["Target-B", 9200, 13500, 3800],
+                ["Target-B", 7800, 11000, 4200],
+                ["GAPDH", 45000, 44000, 43000],
+                ["GAPDH", 47000, 46000, 45000],
+                ["GAPDH", 43000, 43500, 42500],
+            ],
+            "address": "A1:D10",
+            "sheet": "WB",
+        },
+        "config": {
+            "preset_reference_protein": "GAPDH",
+            "output_stats": False,
+            "output_data": True,
+        },
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    artifacts_root = tmp_path / "render-payloads"
+    real_persist = export_module.persist_render_payload
+
+    def persist_in_test_root(picture_id, frame, config, figure, **kwargs):
+        return real_persist(
+            picture_id,
+            frame,
+            config,
+            figure,
+            artifacts_root=artifacts_root,
+            **kwargs,
+        )
+
+    observed = []
+
+    def choose(_selection, config):
+        observed.append(
+            (config.experiment_preset, config.preset_has_reference, config.preset_control_group)
+        )
+        return config
+
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(
+            export_module,
+            "persist_render_payload",
+            side_effect=persist_in_test_root,
+        ),
+        mock.patch.object(worker, "import_module", return_value=export_module),
+    ):
+        output = worker.execute_request(
+            request,
+            tmp_path,
+            dialog_config=choose,
+        )
+
+    assert observed == [(ExperimentPreset.WB, True, "Control")]
+    images = output["writebackPlan"]["images"]
+    assert len(images) == 2
+    assert len({image["pictureId"] for image in images}) == 2
+    assert [Path(image["artifact"]["path"]).name for image in images] == [
+        "chart_1.png",
+        "chart_2.png",
+    ]
+    assert all(Path(image["artifact"]["path"]).is_file() for image in images)
+    payloads = [
+        json.loads((artifacts_root / f"{image['pictureId']}.json").read_text(encoding="utf-8"))
+        for image in images
+    ]
+    assert [payload["config"]["title"] for payload in payloads] == [
+        "Target-A",
+        "Target-B",
+    ]
+    assert all(
+        payload["data"]["columns"] == ["Control", "Treatment_A", "Treatment_B"]
+        for payload in payloads
+    )
+
+
 def test_worker_timeout_signals_cancel_kills_process_and_cleans_job(tmp_path):
     jobs_root = tmp_path / "jobs"
 

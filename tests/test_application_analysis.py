@@ -21,6 +21,7 @@ from xstars.data_handler import DataHandler
 _analysis = import_module("xstars.application.analysis")
 analyze_selection = _analysis.analyze_selection
 elisa_selections = _analysis.elisa_selections
+split_selection_labels = _analysis.split_selection_labels
 standard_curve_selection = _analysis.standard_curve_selection
 transform_selection = _analysis.transform_selection
 
@@ -38,6 +39,46 @@ def _selection() -> SelectionPayload:
     )
 
 
+def _wb_labeled_selection(*, target_b_replicates: int = 3) -> SelectionPayload:
+    rows = [
+        ["Target-A", 12000, 28000, 6500],
+        ["Target-A", 15000, 31000, 7200],
+        ["Target-A", 11500, 26500, 5800],
+        ["Target-B", 8000, 12000, 4000],
+        ["Target-B", 9200, 13500, 3800],
+        ["Target-B", 7800, 11000, 4200],
+        ["GAPDH", 45000, 44000, 43000],
+        ["GAPDH", 47000, 46000, 45000],
+        ["GAPDH", 43000, 43500, 42500],
+    ]
+    if target_b_replicates == 2:
+        rows.pop(5)
+    return SelectionPayload(
+        values=[["Protein", "Control", "Treatment_A", "Treatment_B"], *rows],
+        address=f"A1:D{len(rows) + 1}",
+        sheet="WB",
+    )
+
+
+def _qpcr_labeled_selection() -> SelectionPayload:
+    return SelectionPayload(
+        values=[
+            ["Gene", "Control", "Treatment_A", "Treatment_B"],
+            ["Gene-A", 25.0, 27.0, 24.0],
+            ["Gene-A", 25.2, 27.1, 24.2],
+            ["Gene-A", 24.8, 26.9, 23.8],
+            ["Gene-B", 23.0, 24.5, 22.0],
+            ["Gene-B", 23.2, 24.7, 22.1],
+            ["Gene-B", 22.8, 24.3, 21.9],
+            ["GAPDH", 20.0, 20.1, 20.0],
+            ["GAPDH", 20.1, 20.0, 20.2],
+            ["GAPDH", 19.9, 20.2, 19.8],
+        ],
+        address="A1:D10",
+        sheet="qPCR",
+    )
+
+
 class ApplicationAnalysisTests(unittest.TestCase):
     def tearDown(self):
         plt.close("all")
@@ -49,6 +90,106 @@ class ApplicationAnalysisTests(unittest.TestCase):
         self.assertEqual(list(frame.columns), ["Control", "Treatment"])
         self.assertEqual(frame.iloc[0].tolist(), [1.0, 2.5])
         self.assertEqual(len(frame), 1)
+
+    def test_label_detection_uses_excel_threshold_and_preserves_numeric_alignment(self):
+        labels, numeric = split_selection_labels(
+            _wb_labeled_selection(target_b_replicates=2)
+        )
+
+        self.assertIsNotNone(labels)
+        self.assertEqual(labels.tolist().count("Target-A"), 3)
+        self.assertEqual(labels.tolist().count("Target-B"), 2)
+        self.assertEqual(labels.tolist().count("GAPDH"), 3)
+        self.assertEqual(
+            list(numeric.columns), ["Control", "Treatment_A", "Treatment_B"]
+        )
+        self.assertEqual(len(numeric), len(labels))
+
+        no_labels, ordinary = split_selection_labels(_selection())
+        self.assertIsNone(no_labels)
+        self.assertEqual(list(ordinary.columns), ["Control", "Treatment"])
+
+    def test_wb_labeled_selection_builds_per_target_tables_and_images(self):
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.WB,
+            preset_has_reference=True,
+            preset_reference_protein="GAPDH",
+            preset_control_group="Control",
+            output_stats=True,
+            output_data=True,
+        )
+
+        result = analyze_selection(
+            _wb_labeled_selection(),
+            config,
+            output_start_cell="A13",
+            include_processed_data=True,
+        )
+
+        self.assertEqual(
+            [target.name for target in result.target_results],
+            ["Target-A", "Target-B"],
+        )
+        self.assertEqual(
+            [image.name for image in result.writeback_plan.images],
+            ["XSTARS_Plot_Target-A", "XSTARS_Plot_Target-B"],
+        )
+        self.assertEqual(
+            [image.source_key for image in result.writeback_plan.images],
+            ["target_figure_1", "target_figure_2"],
+        )
+        self.assertNotEqual(
+            result.writeback_plan.images[0].anchor_cell,
+            result.writeback_plan.images[1].anchor_cell,
+        )
+        self.assertEqual(
+            [result.writeback_plan.tables[index].values[0][0] for index in (0, 2, 4, 6)],
+            [
+                "Target-A",
+                "Processed Data — Target-A",
+                "Target-B",
+                "Processed Data — Target-B",
+            ],
+        )
+        self.assertEqual(
+            [target.render_config.title for target in result.target_results],
+            ["Target-A", "Target-B"],
+        )
+        self.assertIn("2 target(s) analyzed", result.writeback_plan.status_message)
+
+    def test_qpcr_labeled_selection_uses_reference_gene_per_target(self):
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_has_reference=True,
+            preset_reference_gene="GAPDH",
+            preset_control_group="Control",
+            preset_input_format="raw_ct",
+            output_stats=False,
+            output_data=True,
+        )
+
+        result = analyze_selection(
+            _qpcr_labeled_selection(),
+            config,
+            output_start_cell="F13",
+            include_processed_data=True,
+        )
+
+        self.assertEqual(
+            [target.name for target in result.target_results],
+            ["Gene-A", "Gene-B"],
+        )
+        self.assertEqual(len(result.writeback_plan.images), 2)
+        self.assertEqual(
+            [table.values[0][0] for table in result.writeback_plan.tables[::2]],
+            ["Processed Data — Gene-A", "Processed Data — Gene-B"],
+        )
+        for target in result.target_results:
+            self.assertEqual(list(target.transformed_data.columns), [
+                "Control", "Treatment_A", "Treatment_B"
+            ])
+            self.assertEqual(len(target.transformed_data), 3)
+        self.assertIn("2 gene(s) analyzed", result.writeback_plan.status_message)
 
     def test_selection_analysis_returns_stats_figure_and_writeback_plan(self):
         result = analyze_selection(

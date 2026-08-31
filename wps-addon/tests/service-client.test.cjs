@@ -182,11 +182,29 @@ test("known service errors map to stable user-facing messages", async () => {
       assert.equal(error.status, 409);
       assert.equal(
         api.toUserMessage(error),
-        "XSTARS 正在处理另一个任务，请稍后重试。",
+        "XSTARS 正在处理另一个任务，请稍后重试。\n详情：another job",
       );
       return true;
     },
   );
+});
+
+test("analysis errors append bounded server detail to the stable message", () => {
+  const api = loadClient(async () => jsonResponse({}));
+  const elisaDetail = "Column name 'Instructions' cannot be parsed as a concentration.";
+  const message = api.toUserMessage(
+    new api.ServiceError("ANALYSIS_FAILED", elisaDetail, 422),
+  );
+
+  assert.equal(
+    message,
+    `XSTARS 无法分析当前数据，请检查数据格式。\n详情：${elisaDetail}`,
+  );
+
+  const longMessage = api.toUserMessage(
+    new api.ServiceError("ANALYSIS_FAILED", "x".repeat(250), 422),
+  );
+  assert.equal(longMessage.split("详情：")[1].length, 200);
 });
 
 test("missing generated config fails diagnostically without a hard-coded token", () => {

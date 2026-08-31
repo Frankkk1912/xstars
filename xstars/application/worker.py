@@ -31,11 +31,13 @@ from ..data_handler import DataHandler
 from ..styles import get_palette
 from .analysis import (
     AnalysisResult,
+    LabeledAnalysisResult,
     StandardCurveResult,
     analyze_selection,
     elisa_selections,
     guess_blank,
     guess_control,
+    split_selection_labels,
     standard_curve_selection,
     transform_selection,
 )
@@ -167,7 +169,7 @@ def _dialog_config(
     """Show the existing settings dialog on the current (main) thread."""
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("Tkinter dialogs must run on the worker main thread")
-    frame = DataHandler.from_selection_payload(selection)
+    _labels, frame = split_selection_labels(selection)
     from ..ui_dialog import SettingsDialog  # GUI import remains worker-only.
 
     dialog = SettingsDialog(
@@ -265,27 +267,70 @@ def _configure_preset(command: Command, selection: SelectionPayload, config: Pri
     if preset is None:
         return
     config.experiment_preset = preset
-    frame = DataHandler.from_selection_payload(selection)
+    labels, frame = split_selection_labels(selection)
     groups = DataHandler.group_names(frame)
     if not config.preset_control_group and groups:
         config.preset_control_group = guess_control(groups)
+    if labels is not None and preset in (ExperimentPreset.WB, ExperimentPreset.QPCR):
+        config.preset_has_reference = True
     if preset is ExperimentPreset.CCK8 and not config.preset_blank_group:
         config.preset_blank_group = guess_blank(groups)
 
 
 def _finalize_analysis(
     command: Command,
-    result: AnalysisResult | StandardCurveResult,
+    result: AnalysisResult | LabeledAnalysisResult | StandardCurveResult,
     config: PrismConfig,
     artifact_path: Path,
     *,
     renderer: str = "plot_engine",
 ) -> dict[str, Any]:
+    export_module = import_module("xstars.application.export")
+    from matplotlib import pyplot as plt
+
+    if isinstance(result, LabeledAnalysisResult):
+        if len(result.writeback_plan.images) != len(result.target_results):
+            raise ValueError("labeled analysis image count does not match targets")
+        for index, (target, image) in enumerate(
+            zip(result.target_results, result.writeback_plan.images, strict=True),
+            start=1,
+        ):
+            target_artifact = artifact_path.with_stem(f"{artifact_path.stem}_{index}")
+            if not target_artifact.is_file():
+                target.figure.savefig(
+                    target_artifact,
+                    format="png",
+                    dpi=config.export_dpi,
+                )
+            picture_id = export_module.new_picture_id()
+            # Analysis/writeback remains usable; later export reports a stable
+            # missing-payload error if this best-effort persistence fails.
+            with suppress(Exception):
+                export_module.persist_render_payload(
+                    picture_id,
+                    target.transformed_data,
+                    target.render_config,
+                    target.figure,
+                    renderer=renderer,
+                )
+            image.picture_id = picture_id
+            image.artifact = Artifact(
+                path=str(target_artifact),
+                format=ArtifactFormat.PNG,
+                dpi=config.export_dpi,
+            )
+            image.source_key = None
+            plt.close(target.figure)
+        return _success(command, result.writeback_plan)
+
     if not artifact_path.is_file():
         result.figure.savefig(artifact_path, format="png", dpi=config.export_dpi)
-    export_module = import_module("xstars.application.export")
     picture_id = export_module.new_picture_id()
-    frame = result.transformed_data if isinstance(result, AnalysisResult) else result.standard_data
+    frame = (
+        result.transformed_data
+        if isinstance(result, AnalysisResult)
+        else result.standard_data
+    )
     # Analysis/writeback remains usable; later export reports a stable missing-payload error.
     with suppress(Exception):
         export_module.persist_render_payload(
@@ -303,8 +348,6 @@ def _finalize_analysis(
             dpi=config.export_dpi,
         )
         image.source_key = None
-    from matplotlib import pyplot as plt
-
     plt.close(result.figure)
     return _success(command, result.writeback_plan)
 

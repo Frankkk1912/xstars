@@ -7,7 +7,9 @@ for reading a selection, presenting dialogs, and executing a WritebackPlan.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from math import ceil
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -52,6 +54,34 @@ class AnalysisResult:
     def figure_sources(self) -> dict[str, Any]:
         """In-process figure registry used by the Excel plan executor."""
         return {"primary_figure": self.figure}
+
+
+@dataclass
+class TargetAnalysisResult:
+    """One target from a labeled WB/qPCR selection."""
+
+    name: str
+    transformed_data: pd.DataFrame
+    stats_result: StatsResult
+    figure: Any
+    render_config: PrismConfig
+
+
+@dataclass
+class LabeledAnalysisResult:
+    """Per-target outputs for a labeled WB/qPCR selection."""
+
+    target_results: list[TargetAnalysisResult]
+    preset: BasePreset
+    writeback_plan: WritebackPlan = field(default_factory=WritebackPlan)
+
+    @property
+    def figure_sources(self) -> dict[str, Any]:
+        """In-process figure registry keyed by each writeback image."""
+        return {
+            f"target_figure_{index}": target.figure
+            for index, target in enumerate(self.target_results, start=1)
+        }
 
 
 @dataclass
@@ -286,6 +316,153 @@ def build_analysis_writeback_plan(
     return plan
 
 
+def split_selection_labels(
+    payload: SelectionPayload,
+) -> tuple[pd.Series | None, pd.DataFrame]:
+    """Split a mostly non-numeric first column from numeric selection data.
+
+    This mirrors Excel's ``_read_selection_auto`` rule: the first data column
+    is a label column only when more than half of its values fail numeric
+    conversion. Rows whose numeric cells are all empty are removed from both
+    outputs so labels remain aligned with their measurements.
+    """
+    headers = [str(value).strip() for value in payload.values[0]]
+    raw = pd.DataFrame(payload.values[1:], columns=headers)
+    if raw.empty:
+        return None, DataHandler.clean(raw)
+
+    first_column = pd.Series(raw.iloc[:, 0])
+    numeric_first = pd.Series(pd.to_numeric(first_column, errors="coerce"))
+    is_labeled = int(numeric_first.isna().sum()) > len(first_column) // 2
+    if not is_labeled:
+        return None, DataHandler.clean(raw)
+
+    labels = first_column.astype(str).str.strip()
+    numeric = raw.iloc[:, 1:].copy()
+    for column in numeric.columns:
+        numeric[column] = pd.to_numeric(numeric[column], errors="coerce")
+    valid = ~numeric.isna().all(axis=1)
+    return (
+        labels.loc[valid].reset_index(drop=True),
+        numeric.loc[valid].reset_index(drop=True),
+    )
+
+
+def _analyze_labeled(
+    labels: pd.Series,
+    frame: pd.DataFrame,
+    config: PrismConfig,
+    *,
+    start_row: int,
+    start_column: int,
+) -> LabeledAnalysisResult:
+    """Run Excel-equivalent labeled WB/qPCR analysis and plan each target."""
+    DataHandler.validate(frame)
+    preset = get_preset(config.experiment_preset)
+    options = build_preset_options(config)
+    if preset is None or options is None or not hasattr(preset, "transform_labeled"):
+        raise ValueError("The selected preset does not support labeled data.")
+
+    target_frames = cast(Any, preset).transform_labeled(labels, frame, options)
+    if config.y_label == "Value":
+        config.y_label = preset.default_y_label
+
+    targets: list[TargetAnalysisResult] = []
+    tables: list[TableWriteback] = []
+    current_row = start_row
+    for index, (target_name, transformed) in enumerate(target_frames, start=1):
+        DataHandler.validate(transformed)
+        stats_result = StatsEngine(config).analyze(transformed)
+        render_config = replace(config, title=str(target_name), export_path="")
+        figure = PlotEngine(render_config).plot(transformed, stats_result)
+
+        if config.export_path:
+            path = Path(config.export_path)
+            export_figure(
+                figure,
+                str(path.with_stem(f"{path.stem}_{index}")),
+                config.export_dpi,
+            )
+
+        target = TargetAnalysisResult(
+            name=str(target_name),
+            transformed_data=transformed,
+            stats_result=stats_result,
+            figure=figure,
+            render_config=render_config,
+        )
+        targets.append(target)
+
+        if config.output_stats:
+            stats_frame = stats_result.to_dataframe()
+            tables.append(
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row, start_column),
+                    values=[[target.name]],
+                )
+            )
+            current_row += 1
+            tables.append(
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row, start_column),
+                    values=dataframe_values(stats_frame),
+                )
+            )
+            current_row += len(stats_frame) + 2
+
+        if config.output_data:
+            tables.append(
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row, start_column),
+                    values=[[f"Processed Data — {target.name}"]],
+                )
+            )
+            current_row += 1
+            tables.append(
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row, start_column),
+                    values=dataframe_values(transformed),
+                )
+            )
+            current_row += len(transformed) + 2
+
+    images: list[ImageWriteback] = []
+    image_row = current_row
+    for index, target in enumerate(targets, start=1):
+        width_inches, height_inches = (
+            float(value) for value in target.figure.get_size_inches()
+        )
+        width_points = width_inches * 72
+        height_points = height_inches * 72
+        images.append(
+            ImageWriteback(
+                anchor_cell=cell_to_a1(image_row, start_column),
+                name=f"XSTARS_Plot_{target.name}",
+                source_key=f"target_figure_{index}",
+                width=width_points,
+                height=height_points,
+            )
+        )
+        # WPS anchors pictures to cells; approximate Excel's image-height +
+        # 15-point vertical stacking using the default 15-point row height.
+        image_row += ceil(height_points / 15) + 1
+
+    preset_label, kind = (
+        ("WB", "target")
+        if config.experiment_preset is ExperimentPreset.WB
+        else ("qPCR", "gene")
+    )
+    plan = WritebackPlan(
+        tables=tables,
+        images=images,
+        status_message=(
+            f"XSTARS: {preset_label} labeled mode — "
+            f"{len(targets)} {kind}(s) analyzed"
+        ),
+    )
+    return LabeledAnalysisResult(targets, preset, plan)
+
+
 def analyze_selection(
     payload: SelectionPayload,
     config: PrismConfig,
@@ -293,11 +470,24 @@ def analyze_selection(
     output_start_cell: str,
     image_name: str = "XSTARS_Plot_1",
     include_processed_data: bool = False,
-) -> AnalysisResult:
+) -> AnalysisResult | LabeledAnalysisResult:
     """Analyze a serialized selection and return a host-neutral result."""
-    frame = DataHandler.from_selection_payload(payload)
-    result = analyze_dataframe(frame, config)
+    labels, frame = split_selection_labels(payload)
     row, column = parse_cell(output_start_cell)
+    if (
+        labels is not None
+        and config.preset_has_reference
+        and config.experiment_preset in (ExperimentPreset.WB, ExperimentPreset.QPCR)
+    ):
+        return _analyze_labeled(
+            labels,
+            frame,
+            config,
+            start_row=row,
+            start_column=column,
+        )
+
+    result = analyze_dataframe(frame, config)
     build_analysis_writeback_plan(
         result,
         config,
