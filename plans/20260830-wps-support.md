@@ -227,13 +227,13 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M2 — Excel characterization + application 契约
 
-- [ ] **T2.1 增加 Excel 行为刻画测试**
+- [x] **T2.1 增加 Excel 行为刻画测试**
   - 文件：`tests/test_end_to_end.py`（修改/扩展）或新增 `tests/test_excel_characterization.py`
   - 修改：锁定现有入口（`run`/`run_quick`/`run_wb`/`run_qpcr`/`run_cck8`/`run_elisa`/`run_transform_only`/`run_standard_curve`/`run_export`）、选区解析、结果表位置、图片命名、错误、导出与取消行为。
   - 验收：重构前可稳定复现当前行为；142 基线全绿。
   - 依赖：M1 通过；支撑 G12、G4、G5。
 
-- [ ] **T2.2 定义宿主无关请求/响应契约**
+- [x] **T2.2 定义宿主无关请求/响应契约**
   - 文件：`xstars/application/contracts.py`（新建）、`tests/test_application_contracts.py`（新建）
   - 修改：命令白名单、`SelectionPayload`、`WritebackPlan`、`Artifact` DTO、稳定错误码、版本字段；序列化往返/非法输入/路径与大小边界校验。
   - 验收：契约单测通过；命令枚举闭合；无任意函数名/shell/路径穿越。

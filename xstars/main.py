@@ -3,27 +3,27 @@
 from __future__ import annotations
 
 import traceback
+from contextlib import suppress
+from importlib import import_module
+from typing import Any, cast
 
-import xlwings as xw
+import pandas as pd
 
 from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
-from .presets import get_preset
-from .presets.wb import WBOptions
-from .presets.qpcr import QPCROptions
-from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
-from .presets.elisa import ELISAOptions, ELISAPreset
 from .stats_engine import StatsEngine
 from .ui_dialog import SettingsDialog, TransformOnlyDialog
 
+xw = import_module("xlwings")
+_application_analysis = import_module(".application.analysis", __package__)
+
 try:
-    import ttkbootstrap as _ttkb
+    _ttkb = import_module("ttkbootstrap")
     HAS_TTKB = True
 except ImportError:
+    _ttkb = None
     HAS_TTKB = False
-
-import pandas as pd
 
 
 def _write_transformed_data(
@@ -50,82 +50,65 @@ def _next_plot_name(sheet, base: str = "XSTARS_Plot") -> str:
         i += 1
 
 
+def _selection_output_row(selection, data_rows: int) -> int:
+    """Return the legacy output row, tolerating incomplete xlwings mocks."""
+    row_count = selection.rows.count
+    if not isinstance(row_count, int):
+        row_count = data_rows + 1  # header plus data rows
+    return selection.row + row_count + 2
+
+
+def _execute_analysis_writeback(book, sheet, result) -> None:
+    """Execute a host-neutral WritebackPlan through the Excel adapter."""
+    for table in result.writeback_plan.tables:
+        row, column = _application_analysis.parse_cell(table.start_cell)
+        sheet.range((row, column)).value = table.values
+
+    for image in result.writeback_plan.images:
+        row, column = _application_analysis.parse_cell(image.anchor_cell)
+        source = (
+            image.artifact.path
+            if image.artifact is not None
+            else result.figure_sources[image.source_key]
+        )
+        kwargs = {
+            "name": image.name,
+            "left": sheet.range((row, column)).left,
+            "top": sheet.range((row, column)).top,
+        }
+        if image.width is not None:
+            kwargs["width"] = image.width
+        if image.height is not None:
+            kwargs["height"] = image.height
+        sheet.pictures.add(source, **kwargs)
+
+    book.app.status_bar = result.writeback_plan.status_message
+
+
 def _guess_control(groups: list[str]) -> str:
     """Pick the most likely control group from column names."""
-    for g in groups:
-        if g.lower() in ("control", "ctrl", "con", "ctl", "nc", "vehicle"):
-            return g
-    # Fall back to second column if first looks like blank, else first
-    if len(groups) >= 2 and groups[0].lower() in ("blank", "blk", "bg", "background"):
-        return groups[1]
-    return groups[0]
+    return _application_analysis.guess_control(groups)
 
 
 def _guess_blank(groups: list[str]) -> str:
     """Pick the most likely blank group, or empty string if none found."""
-    for g in groups:
-        if g.lower() in ("blank", "blk", "bg", "background"):
-            return g
-    return ""
+    return _application_analysis.guess_blank(groups)
 
 
 def _build_preset_options(config: PrismConfig):
     """Map flat PrismConfig fields to the appropriate preset Options dataclass."""
-    preset_type = config.experiment_preset
-    if preset_type == ExperimentPreset.WB:
-        return WBOptions(
-            control_group=config.preset_control_group,
-            has_reference=config.preset_has_reference,
-            reference_protein=config.preset_reference_protein,
-        )
-    elif preset_type == ExperimentPreset.QPCR:
-        return QPCROptions(
-            control_group=config.preset_control_group,
-            input_format=config.preset_input_format,
-            reference_gene=config.preset_reference_gene,
-        )
-    elif preset_type == ExperimentPreset.CCK8:
-        concentrations = []
-        if config.preset_concentrations:
-            try:
-                concentrations = [
-                    float(x.strip())
-                    for x in config.preset_concentrations.split(",")
-                    if x.strip()
-                ]
-            except ValueError:
-                pass
-        return CCK8Options(
-            control_group=config.preset_control_group,
-            blank_group=config.preset_blank_group,
-            fit_ic50=config.preset_fit_ic50,
-            concentrations=concentrations,
-            fit_method=config.preset_fit_method.value,
-        )
-    elif preset_type == ExperimentPreset.ELISA:
-        return ELISAOptions(
-            control_group=config.preset_control_group,
-            fit_result=config.elisa_fit_result,
-        )
-    return None
+    return _application_analysis.build_preset_options(config)
 
 
 def _apply_preset(df_wide, config: PrismConfig):
     """Apply experiment preset transform if configured. Returns transformed df."""
-    preset = get_preset(config.experiment_preset)
-    if preset is None:
-        return df_wide
-    options = _build_preset_options(config)
-    df_wide = preset.transform(df_wide, options)
-    if config.y_label == "Value":
-        config.y_label = preset.default_y_label
-    return df_wide
+    return _application_analysis.apply_preset(df_wide, config)[0]
 
 
 def _friendly_message(message: str) -> str:
     """Translate raw Python/library error messages into user-friendly hints."""
     # Mapping: (substring in raw message) → friendly message
-    _PATTERNS: list[tuple[str, str]] = [
+    _PATTERNS: list[tuple[str, str | None]] = [
         (
             "arg must be a list, tuple, 1-d array, or Series",
             "Please select a valid data range.\n\n"
@@ -163,7 +146,7 @@ def _friendly_message(message: str) -> str:
     return message
 
 
-def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> None:
+def _show_error(book: Any, message: str, *, is_unexpected: bool = False) -> None:
     """Display a user-friendly error message via a Tkinter popup and Excel status bar."""
     friendly = _friendly_message(message)
     if is_unexpected:
@@ -188,15 +171,13 @@ def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> 
         messagebox.showerror("Excel-Prism", friendly, parent=root)
         root.destroy()
     except Exception:
-        # Last resort: try VBA MsgBox
-        try:
+        # Last resort: try VBA MsgBox.
+        with suppress(Exception):
             book.app.macro("MsgBox")(
                 f"Excel-Prism Error\n\n{friendly}",
                 16,  # vbCritical
                 "Excel-Prism",
             )
-        except Exception:
-            pass
 
 
 _USER_ERRORS = (ValueError, TypeError, KeyError)
@@ -268,15 +249,17 @@ def run_elisa() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_elisa_impl(book: xw.Book) -> None:
+def _run_elisa_impl(book: Any) -> None:
     """ELISA flow: read std curve selection → fit → dialog → select samples → back-calc → stats → plot."""
-    import numpy as np
     import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from .tools.standard_curve import back_calculate, fit_standard_curve, wide_to_conc_od
+    import numpy as np
+
     from .presets.elisa_dialog import ELISADialog
     from .styles import get_prism_context
+    from .tools.standard_curve import back_calculate, wide_to_conc_od
+
+    matplotlib.use("Agg")
+    plt = import_module("matplotlib.pyplot")
 
     sheet = book.selection.sheet
     sel = book.selection
@@ -321,8 +304,8 @@ def _run_elisa_impl(book: xw.Book) -> None:
     # 4. Back-calculate: sample OD → concentration
     conc_df = sample_df.copy()
     for col in conc_df.columns:
-        od_vals = pd.to_numeric(conc_df[col], errors="coerce").to_numpy()
-        conc_df[col] = back_calculate(fit, od_vals)
+        od_series = pd.Series(pd.to_numeric(conc_df[col], errors="coerce"))
+        conc_df[col] = back_calculate(fit, od_series.to_numpy())
 
     # 5. Stats + plot
     handler.validate(conc_df)
@@ -423,17 +406,15 @@ def _run_elisa_impl(book: xw.Book) -> None:
     )
 
 
-def _has_label_column(df: "pd.DataFrame") -> bool:
+def _has_label_column(df: pd.DataFrame) -> bool:
     """Check if the first column of a raw DataFrame contains non-numeric labels."""
-    import pandas as pd
-
-    first_col = df.iloc[:, 0]
-    numeric = pd.to_numeric(first_col, errors="coerce")
+    first_col = pd.Series(df.iloc[:, 0])
+    numeric = pd.Series(pd.to_numeric(first_col, errors="coerce"))
     # If more than half the values failed numeric conversion, it's a label column
-    return numeric.isna().sum() > len(first_col) // 2
+    return int(numeric.isna().sum()) > len(first_col) // 2
 
 
-def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
+def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
     """Like _run_impl but pre-selects the experiment preset."""
     sheet = book.selection.sheet
     handler = DataHandler()
@@ -480,92 +461,31 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
         _run_qpcr_labeled(book, sheet, handler, wb_labels, df_wide, config)
         return
 
-    # Apply preset transform
-    preset = get_preset(config.experiment_preset)
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    # Populate IC50 fit info for dose-response chart
-    if (
-        isinstance(preset, CCK8Preset)
-        and preset.last_result
-        and preset.last_result.ic50 is not None
-        and preset.last_result.fit_params is not None
-    ):
-        opts = _build_preset_options(config)
-        dose_cols = [
-            c for c in df_wide.columns
-            if c != opts.control_group
-        ]
-        if opts.concentrations and len(opts.concentrations) == len(dose_cols):
-            config.ic50_fit_info = CCK8FitInfo(
-                concentrations=opts.concentrations,
-                fit_params=preset.last_result.fit_params,
-                dose_col_names=dose_cols,
-            )
-
-    # Stats
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
-
-    # Plot
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
-    if config.export_path:
-        export_figure(fig, config.export_path, config.export_dpi)
-
-    # Stats summary table below data selection
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-        # IC50 results for CCK-8
-        if isinstance(preset, CCK8Preset) and preset.last_result and preset.last_result.ic50 is not None:
-            ic50_dest = sheet.range((next_row, start_col))
-            res = preset.last_result
-            ic50_data = [
-                ["IC50", res.ic50],
-                ["R²", res.r_squared],
-            ]
-            if res.ic50_95ci:
-                ic50_data.append(["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"])
-            ic50_dest.value = ic50_data
-            next_row += len(ic50_data) + 2
-
-    # Write processed data
-    if config.output_data:
-        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, "Processed Data")
-
-    # Insert chart below stats/data tables
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=True,
     )
-
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
 def _run_wb_labeled(
-    book: xw.Book,
+    book: Any,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """WB labeled reference mode: produce one figure per target protein."""
     from .presets.wb import WBPreset
 
-    preset = WBPreset()
+    preset = cast(Any, WBPreset())
     options = _build_preset_options(config)
     target_dfs = preset.transform_labeled(labels, df_numeric, options)
 
@@ -635,17 +555,17 @@ def _run_wb_labeled(
 
 
 def _run_qpcr_labeled(
-    book: xw.Book,
+    book: Any,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """qPCR labeled reference mode: produce one figure per target gene."""
     from .presets.qpcr import QPCRPreset
 
-    preset = QPCRPreset()
+    preset = cast(Any, QPCRPreset())
     options = _build_preset_options(config)
     target_dfs = preset.transform_labeled(labels, df_numeric, options)
 
@@ -714,7 +634,7 @@ def _run_qpcr_labeled(
     book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
 
 
-def _read_selection_auto(handler: DataHandler, book: xw.Book):
+def _read_selection_auto(handler: DataHandler, book: Any):
     """Read Excel selection, auto-detecting a label column in the first column.
 
     Returns (wb_labels, df_wide) where wb_labels is a Series of string labels
@@ -741,7 +661,7 @@ def _read_selection_auto(handler: DataHandler, book: xw.Book):
     return None, handler.clean(raw)
 
 
-def _run_impl(book: xw.Book) -> None:
+def _run_impl(book: Any) -> None:
     sheet = book.selection.sheet
 
     # 1. Read data (auto-detect label column)
@@ -773,60 +693,20 @@ def _run_impl(book: xw.Book) -> None:
         _run_wb_labeled(book, sheet, handler, wb_labels, df_wide, config)
         return
 
-    # 2b. Apply experiment preset transform
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    # 3. Statistics
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
-
-    # 4. Plot
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
-    # 5. Export figure to file if requested
-    if config.export_path:
-        export_figure(fig, config.export_path, config.export_dpi)
-
-    # 6. Write stats summary table below the data selection
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-        # Write IC50 results if CCK-8 preset was used
-        preset = get_preset(config.experiment_preset)
-        if isinstance(preset, CCK8Preset) and preset.last_result and preset.last_result.ic50 is not None:
-            ic50_dest = sheet.range((next_row, start_col))
-            res = preset.last_result
-            ic50_data = [
-                ["IC50", res.ic50],
-                ["R²", res.r_squared],
-            ]
-            if res.ic50_95ci:
-                ic50_data.append(["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"])
-            ic50_dest.value = ic50_data
-            next_row += len(ic50_data) + 2
-
-    # 7. Insert chart below stats table
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=False,
     )
-
-    # Show decision path in status bar
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
-def _run_quick_impl(book: xw.Book) -> None:
+def _run_quick_impl(book: Any) -> None:
     sheet = book.selection.sheet
 
     config = PrismConfig.load()
@@ -835,36 +715,17 @@ def _run_quick_impl(book: xw.Book) -> None:
     _labels, df_wide = _read_selection_auto(handler, book)
     handler.validate(df_wide)
 
-    # Apply experiment preset transform
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
-
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    # Write stats summary table below the data selection
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-    # Insert chart below stats table
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=False,
     )
-
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
 def run_export() -> None:
@@ -878,14 +739,12 @@ def run_export() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _get_selected_shapes(book: xw.Book) -> list:
+def _get_selected_shapes(book: Any) -> list:
     """Return COM Shape objects the user has selected, or XSTARS charts as fallback."""
-    try:
+    with suppress(Exception):
         sel = book.app.api.Selection
-        type_name = sel.ShapeRange.Item(1).Type  # will succeed if a shape is selected
+        _ = sel.ShapeRange.Item(1).Type  # succeeds only when a shape is selected
         return [sel.ShapeRange.Item(i) for i in range(1, sel.ShapeRange.Count + 1)]
-    except Exception:
-        pass
     # Fallback: find XSTARS charts on the active sheet
     sheet = book.selection.sheet
     pics = [p for p in sheet.pictures if p.name.startswith("XSTARS_Plot")]
@@ -900,8 +759,9 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
     Strategy: temporarily scale the shape up so that CopyPicture(xlBitmap)
     captures at higher resolution, then restore original dimensions.
     """
-    from PIL import ImageGrab, Image
     import time
+
+    from PIL import ImageGrab
 
     scale = dpi / 96.0
     orig_w = shape.Width
@@ -919,9 +779,10 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
         shape.CopyPicture(1, 2)
         time.sleep(0.3)  # let clipboard settle
 
-        img = ImageGrab.grabclipboard()
-        if img is None:
+        clipboard_image = ImageGrab.grabclipboard()
+        if clipboard_image is None or isinstance(clipboard_image, list):
             raise RuntimeError("Could not capture image from clipboard.")
+        img = cast(Any, clipboard_image)
 
         ext = save_path.rsplit(".", 1)[-1].lower()
         if ext == "pdf":
@@ -944,13 +805,10 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
 
 def _show_export_dialog() -> tuple[str, int] | None:
     """Show export dialog with format, DPI, and path options. Returns (path, dpi) or None."""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    if HAS_TTKB:
-        import ttkbootstrap as ttkb
-    else:
-        ttkb = None
+    tk = import_module("tkinter")
+    filedialog = import_module("tkinter.filedialog")
+    tk_ttk = import_module("tkinter.ttk")
+    ttkb = _ttkb if HAS_TTKB else None
 
     _FORMAT_MAP = {
         "PNG image": ("png", ".png"),
@@ -973,10 +831,10 @@ def _show_export_dialog() -> tuple[str, int] | None:
     frame = (ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15))
     frame.pack(fill="both", expand=True)
 
-    Label = ttkb.Label if ttkb else tk.Label
-    Entry = ttkb.Entry if ttkb else tk.Entry
-    Button = ttkb.Button if ttkb else tk.Button
-    Combo = ttkb.Combobox if ttkb else tk.ttk.Combobox
+    Label: Any = ttkb.Label if ttkb else tk.Label
+    Entry: Any = ttkb.Entry if ttkb else tk.Entry
+    Button: Any = ttkb.Button if ttkb else tk.Button
+    Combo: Any = ttkb.Combobox if ttkb else tk_ttk.Combobox
 
     # Format
     Label(frame, text="Format:").grid(row=0, column=0, sticky="w", pady=(0, 8))
@@ -1063,7 +921,7 @@ def _show_export_dialog() -> tuple[str, int] | None:
     return None
 
 
-def _run_export_impl(book: xw.Book) -> None:
+def _run_export_impl(book: Any) -> None:
     """Export selected picture(s) at high resolution."""
     shapes = _get_selected_shapes(book)
     if not shapes:
@@ -1252,13 +1110,14 @@ def run_standard_curve() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_standard_curve_impl(book: xw.Book) -> None:
+def _run_standard_curve_impl(book: Any) -> None:
     """Read wide-format standard data, fit curve, optionally back-calculate samples.
 
     Input: wide DataFrame where column headers are concentration values and
     rows are OD replicates (same format as CCK-8 / other presets).
     """
     import numpy as np
+
     from .tools.standard_curve import back_calculate, wide_to_conc_od
     from .tools.standard_curve_dialog import StandardCurveDialog
 
@@ -1325,8 +1184,8 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
         if sample_df is not None:
             result_df = sample_df.copy()
             for col in result_df.columns:
-                od_vals = pd.to_numeric(result_df[col], errors="coerce").to_numpy()
-                result_df[col] = back_calculate(fit, od_vals)
+                od_series = pd.Series(pd.to_numeric(result_df[col], errors="coerce"))
+                result_df[col] = back_calculate(fit, od_series.to_numpy())
 
             out_row = _write_transformed_data(
                 sheet, out_row, out_col, result_df,
@@ -1335,10 +1194,11 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
 
     # 3. Insert standard curve chart
     import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+
     from .styles import get_prism_context
 
+    matplotlib.use("Agg")
+    plt = import_module("matplotlib.pyplot")
     cfg = PrismConfig.load()
     with get_prism_context(cfg.journal_preset, cfg.base_theme):
         fig, ax = plt.subplots(figsize=(4.5, 3.5), dpi=cfg.dpi)
@@ -1382,7 +1242,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
-def _select_sample_data(book: xw.Book, sheet) -> "pd.DataFrame | None":
+def _select_sample_data(book: Any, sheet) -> pd.DataFrame | None:
     """Prompt user to select a sample OD region in Excel via InputBox.
 
     Returns a wide DataFrame (columns = sample group names, rows = OD replicates),
@@ -1424,7 +1284,7 @@ def run_transform_only() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_transform_only_impl(book: xw.Book) -> None:
+def _run_transform_only_impl(book: Any) -> None:
     """Apply preset transform and write processed data only (no stats/plot)."""
     sheet = book.selection.sheet
     handler = DataHandler()
@@ -1467,7 +1327,7 @@ def _run_transform_only_impl(book: xw.Book) -> None:
             from .presets.qpcr import QPCRPreset
             preset_cls = QPCRPreset
 
-        preset = preset_cls()
+        preset = cast(Any, preset_cls())
         options = _build_preset_options(config)
         target_dfs = preset.transform_labeled(wb_labels, df_wide, options)
 
@@ -1491,8 +1351,7 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         return
 
     # Single-target mode
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
+    df_wide, _preset = _application_analysis.transform_dataframe(df_wide, config)
 
     current_row = start_row
     if include_stats:
