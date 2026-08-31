@@ -1,0 +1,24 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
+    <ribbon startFromScratch="false">
+        <tabs>
+            <tab id="xstarsTab" label="XSTARS">
+                <group id="xstarsAnalysisGroup" label="分析">
+                    <button id="xstarsRun"
+                            label="Run"
+                            screentip="配置并运行 XSTARS 分析"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsQuickRun"
+                            label="Quick Run"
+                            screentip="使用当前设置运行 XSTARS 分析"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
+            </tab>
+        </tabs>
+    </ribbon>
+</customUI>

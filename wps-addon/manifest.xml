@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JsPlugin>
+  <ApiVersion>1.0.0</ApiVersion>
+  <Name>xstars-wps-addon</Name>
+  <Description>Official XSTARS add-in for WPS Spreadsheet (et).</Description>
+</JsPlugin>
