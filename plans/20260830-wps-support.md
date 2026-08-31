@@ -16,6 +16,7 @@
 | rev 1（批准） | 2026-08-30 | 用户对本精确 rev 明确回复「批准」；进入 `/feature-impl` 实施，从 M1（Gate 0 收尾）开始，每 Milestone 验证闸门通过后才进入下一个。 |
 | rev 1（白名单扩展） | 2026-08-31 | 用户批准将 `poc/wps/addin/package.json` 纳入 T1.3 文件白名单，仅限 PoC 版本号随 Milestone 递增（本次 1.2.2→1.2.3）；背景：M0.4 实机步骤 4 发现 WPS 内嵌浏览器不支持 `window.prompt`（返回 null 被误判为取消，commit `97820ce` 已改用宿主原生 `InputBox(Type=2)`），且同版本重装会跳过解压，需版本递增触发重新提取。 |
 | rev 1（白名单扩展二） | 2026-08-31 | M4 实施中发现 §9.1 未列 `wps-addon/` 的官方 wpsjs 壳文件（index.html/manifest.xml/vite.config.js/scripts/inject-config.cjs）；编排器据旧计划「官方脚手架实际文件名可微调」条款批准补入 §9.1 新建表（零业务逻辑壳，否则 T4.3 无法打包实机验证），待用户确认。 |
+| rev 1（T5.4 范围定案） | 2026-08-31 | 用户选择方案 A：M5.4 高分辨率导出按 M0.4 O3 结论完整实现——worker 生成图表时 best-effort 持久化轻量重渲染 payload（~/.xstars/artifacts，由 worker 下发 pictureId、加载项重命名 Shape 关联），导出时 Python 重渲染（XSTARS 图主路径，真细节）；任意图片剪贴板重编码为 bonus。§7 T5.4 文本更新；`worker.py`/`analysis.py` 的 M5 修改与 `inject-config.cjs` 端口读取纳入范围。 |
 
 ---
 
@@ -300,10 +301,10 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
   - 验收：设置跨 WPS 重启持久化；故障用例不崩溃且日志可定位。
   - 依赖：T5.1；支撑 G6、R5、R6。
 
-- [ ] **T5.4 完成高分辨率导出（采用 M0.4 选定路径）**
-  - 文件：`xstars/application/export.py`（新建）、`tests/test_wps_export.py`（新建）、`wps-addon/main.js`（修改）
-  - 修改：实现 M0.4 验证的 Shape 识别/剪贴板重编码（或获准的 COM fallback）；严格校验格式、DPI 与目标路径。
-  - 验收：选中图片导出 PNG/TIFF/JPG/PDF；独立读取验证 DPI、像素与文件有效性。
+- [ ] **T5.4 完成高分辨率导出（2026-08-31 用户定案方案 A：重渲染主路径 + 剪贴板 bonus）**
+  - 文件：`xstars/application/export.py`（新建）、`tests/test_wps_export.py`（新建）、`wps-addon/main.js`（修改）、`xstars/application/worker.py`（修改）、`xstars/application/analysis.py`（修改）
+  - 修改：生成图表时 best-effort 持久化轻量重渲染 payload（清洗数据+配置快照，`~/.xstars/artifacts/`，由 worker 下发 pictureId、加载项重命名 Shape 关联，不阻断出图）；导出命令对 XSTARS 图加载 payload 重渲染目标 DPI（主路径，真细节）；任意选中图片走剪贴板重编码（bonus）；payload 缺失/损坏给出可诊断错误；严格校验格式、DPI 与目标路径。
+  - 验收：XSTARS 图导出 PNG/TIFF/JPG/PDF 为重渲染输出（独立验证 DPI、像素与文件有效性）；非 XSTARS 图走剪贴板路径；DPI 按请求值精确。
   - 依赖：T5.1、M0.4 结论（M1）、M4；支撑 G2、G12、R9。
 
 - [ ] **T5.5 实机验证预设/导出/设置（责任人：用户）**
