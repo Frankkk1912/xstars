@@ -21,7 +21,7 @@ from ..plot_engine import PlotEngine, export_figure
 from ..presets import BasePreset, get_preset
 from ..presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
 from ..presets.elisa import ELISAOptions
-from ..presets.qpcr import QPCROptions
+from ..presets.qpcr import QPCROptions, QPCRPreset
 from ..presets.wb import WBOptions
 from ..stats_engine import StatsEngine, StatsResult
 from ..styles import get_prism_context
@@ -231,12 +231,32 @@ def transform_dataframe(
     return transformed, preset
 
 
+def _stats_input_frame(
+    transformed: pd.DataFrame, preset: BasePreset | None
+) -> pd.DataFrame:
+    """Return the space in which hypothesis tests should run.
+
+    For qPCR, fold-change values (2^-ΔΔCt) live on a nonlinear ratio scale,
+    so the decision tree is evaluated on the linear log2 fold-change space
+    (identically −ΔΔCt) instead — matching the Prism/ΔΔCt convention of
+    testing on ΔCt and reporting 2^-ΔΔCt.  ``log2(2^-ΔΔCt) = -ΔΔCt`` holds
+    exactly, so the log view can be recovered from the fold-change frame
+    without extra preset state.
+    """
+    if isinstance(preset, QPCRPreset):
+        values = np.log2(transformed.to_numpy(dtype=float))
+        return pd.DataFrame(
+            values, index=transformed.index, columns=transformed.columns
+        )
+    return transformed
+
+
 def analyze_dataframe(df_wide: pd.DataFrame, config: PrismConfig) -> AnalysisResult:
     """Run the shared transform → stats → plot pipeline without host I/O."""
     transformed, preset = transform_dataframe(df_wide, config)
     _populate_cck8_fit_info(transformed, config, preset)
 
-    stats_result = StatsEngine(config).analyze(transformed)
+    stats_result = StatsEngine(config).analyze(_stats_input_frame(transformed, preset))
     figure = PlotEngine(config).plot(transformed, stats_result)
     if config.export_path:
         export_figure(figure, config.export_path, config.export_dpi)
@@ -358,7 +378,7 @@ def split_selection_labels(
 
     first_column = pd.Series(raw.iloc[:, 0])
     numeric_first = pd.Series(pd.to_numeric(first_column, errors="coerce"))
-    is_labeled = int(numeric_first.isna().sum()) > len(first_column) // 2
+    is_labeled = numeric_first.isna().sum() > len(first_column) // 2
     if not is_labeled:
         return None, DataHandler.clean(raw)
 
@@ -397,7 +417,9 @@ def _analyze_labeled(
     current_row = start_row
     for index, (target_name, transformed) in enumerate(target_frames, start=1):
         DataHandler.validate(transformed)
-        stats_result = StatsEngine(config).analyze(transformed)
+        stats_result = StatsEngine(config).analyze(
+            _stats_input_frame(transformed, preset)
+        )
         render_config = replace(config, title=str(target_name), export_path="")
         figure = PlotEngine(render_config).plot(transformed, stats_result)
 
@@ -454,9 +476,7 @@ def _analyze_labeled(
     images: list[ImageWriteback] = []
     image_row = current_row
     for index, target in enumerate(targets, start=1):
-        width_inches, height_inches = (
-            float(value) for value in target.figure.get_size_inches()
-        )
+        width_inches, height_inches = target.figure.get_size_inches()
         width_points = width_inches * 72
         height_points = height_inches * 72
         images.append(
@@ -706,9 +726,7 @@ def elisa_selections(
 ) -> AnalysisResult:
     """Fit standards then back-calculate and analyze a second sample selection."""
     standard_frame, conc, od = prepare_elisa_standard(standard_payload)
-    fit = fit_result or fit_standard_curve(
-        conc, od, config.preset_elisa_fit_method
-    )
+    fit = fit_result or fit_standard_curve(conc, od, config.preset_elisa_fit_method)
     config.experiment_preset = ExperimentPreset.ELISA
     config.elisa_fit_result = fit
     sample_frame = DataHandler.from_selection_payload(sample_payload)
@@ -773,18 +791,24 @@ def transform_selection(
         DataHandler.validate(frame)
         preset = get_preset(config.experiment_preset)
         options = build_preset_options(config)
-        if preset is None or options is None or not hasattr(preset, "transform_labeled"):
+        if (
+            preset is None
+            or options is None
+            or not hasattr(preset, "transform_labeled")
+        ):
             raise ValueError("The selected preset does not support labeled data.")
-        target_data = list(
-            cast(Any, preset).transform_labeled(labels, frame, options)
-        )
+        target_data = list(cast(Any, preset).transform_labeled(labels, frame, options))
         if not target_data:
             raise ValueError("Labeled transform produced no target data.")
         tables: list[TableWriteback] = []
         current_row = row
         for target_name, transformed in target_data:
             if include_stats:
-                stats = StatsEngine(config).analyze(transformed).to_dataframe()
+                stats = (
+                    StatsEngine(config)
+                    .analyze(_stats_input_frame(transformed, preset))
+                    .to_dataframe()
+                )
                 tables.extend(
                     [
                         TableWriteback(
@@ -823,11 +847,15 @@ def transform_selection(
             ),
         )
 
-    transformed, _preset = transform_dataframe(frame, config)
+    transformed, preset = transform_dataframe(frame, config)
     tables = []
     current_row = row
     if include_stats:
-        stats = StatsEngine(config).analyze(transformed).to_dataframe()
+        stats = (
+            StatsEngine(config)
+            .analyze(_stats_input_frame(transformed, preset))
+            .to_dataframe()
+        )
         tables.append(
             TableWriteback(
                 start_cell=cell_to_a1(current_row, column),
@@ -837,7 +865,9 @@ def transform_selection(
         current_row += len(stats) + 2
     tables.extend(
         [
-            TableWriteback(start_cell=cell_to_a1(current_row, column), values=[[title]]),
+            TableWriteback(
+                start_cell=cell_to_a1(current_row, column), values=[[title]]
+            ),
             TableWriteback(
                 start_cell=cell_to_a1(current_row + 1, column),
                 values=dataframe_values(transformed),

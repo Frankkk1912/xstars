@@ -457,8 +457,12 @@ class ApplicationAnalysisTests(unittest.TestCase):
             sample_payload=samples,
         )
         self.assertEqual(result.fit_result.method, "linear")
-        self.assertEqual(result.writeback_plan.tables[2].values, [["Back-Calculated Concentrations"]])
-        self.assertEqual(result.writeback_plan.tables[3].values[0], ["Control", "Treatment"])
+        self.assertEqual(
+            result.writeback_plan.tables[2].values, [["Back-Calculated Concentrations"]]
+        )
+        self.assertEqual(
+            result.writeback_plan.tables[3].values[0], ["Control", "Treatment"]
+        )
         self.assertIn("back-calculated", result.writeback_plan.status_message)
 
     def test_elisa_can_reuse_dialog_fit_and_append_standard_curve_image(self):
@@ -483,7 +487,9 @@ class ApplicationAnalysisTests(unittest.TestCase):
             show_fit_curve=True,
         )
         self.assertEqual(len(result.writeback_plan.images), 2)
-        self.assertEqual(result.writeback_plan.images[1].source_key, "standard_curve_figure")
+        self.assertEqual(
+            result.writeback_plan.images[1].source_key, "standard_curve_figure"
+        )
         self.assertIn("standard_curve_figure", result.figure_sources)
         self.assertEqual(
             list(result.render_data_sources["standard_curve_figure"].columns),
@@ -513,7 +519,9 @@ class ApplicationAnalysisTests(unittest.TestCase):
             output_start_cell="A13",
             include_stats=True,
         )
-        self.assertEqual([name for name, _frame in result.target_data], ["Target-A", "Target-B"])
+        self.assertEqual(
+            [name for name, _frame in result.target_data], ["Target-A", "Target-B"]
+        )
         self.assertEqual(
             [table.values[0][0] for table in result.writeback_plan.tables[::2]],
             [
@@ -546,3 +554,113 @@ class ApplicationAnalysisTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QPCRStatsSpaceTests(unittest.TestCase):
+    """qPCR hypothesis tests run on the linear log2 fold-change (−ΔΔCt) space,
+    while processed data and the y-axis remain in 2^-ΔΔCt fold-change units."""
+
+    def tearDown(self):
+        plt.close("all")
+
+    def test_engine_pvalues_match_manual_log2_space_analysis(self):
+        scipy_stats = import_module("scipy.stats")
+        np_module = import_module("numpy")
+
+        payload = SelectionPayload(
+            values=[
+                ["Control", "siRNA", "OE"],
+                [0.0, 3.3, -2.8],
+                [0.4, 3.1, -2.9],
+                [-0.2, 3.4, -2.7],
+            ],
+            address="A1:C4",
+            sheet="qPCR",
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_input_format="delta_ct",
+            preset_control_group="Control",
+        )
+
+        result = analyze_selection(payload, config, output_start_cell="A10")
+
+        # Fold-change space is what gets written back and plotted…
+        self.assertTrue((result.transformed_data > 0).all().all())
+        # …but the decision tree runs on the linear −ΔΔCt space.
+        self.assertIn("ANOVA", result.stats_result.decision_path)
+
+        log2fc = np_module.log2(result.transformed_data.to_numpy(dtype=float))
+        tukey = scipy_stats.tukey_hsd(log2fc[:, 0], log2fc[:, 1], log2fc[:, 2])
+        engine_ps = [pair.p_value for pair in result.stats_result.pairs]
+        manual_ps = [
+            float(tukey.pvalue[0][1]),
+            float(tukey.pvalue[0][2]),
+            float(tukey.pvalue[1][2]),
+        ]
+        self.assertEqual(len(engine_ps), len(manual_ps))
+        for engine_p, manual_p in zip(engine_ps, manual_ps, strict=True):
+            self.assertAlmostEqual(engine_p, manual_p, delta=1e-12)
+
+    def test_labeled_mode_pvalues_match_manual_log2_space_analysis(self):
+        scipy_stats = import_module("scipy.stats")
+        np_module = import_module("numpy")
+
+        # Every group has variable ΔCt so the parametric path is taken;
+        # a constant-ΔCt group would legitimately fall back to Kruskal-Wallis.
+        payload = SelectionPayload(
+            values=[
+                ["Gene", "Control", "Treatment_A", "Treatment_B"],
+                ["Gene-A", 25.0, 26.9, 24.0],
+                ["Gene-A", 25.5, 27.5, 24.4],
+                ["Gene-A", 24.7, 27.1, 23.7],
+                ["GAPDH", 20.0, 20.1, 20.0],
+                ["GAPDH", 20.2, 20.0, 20.2],
+                ["GAPDH", 19.9, 20.4, 19.9],
+            ],
+            address="A1:D7",
+            sheet="qPCR",
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_has_reference=True,
+            preset_reference_gene="GAPDH",
+            preset_control_group="Control",
+        )
+        result = analyze_selection(
+            payload,
+            config,
+            output_start_cell="A13",
+        )
+
+        self.assertEqual(len(result.target_results), 1)
+        for target in result.target_results:
+            self.assertIn("ANOVA", target.stats_result.decision_path)
+            log2fc = np_module.log2(target.transformed_data.to_numpy(dtype=float))
+            columns = list(target.transformed_data.columns)
+            tukey = scipy_stats.tukey_hsd(*[log2fc[:, i] for i in range(len(columns))])
+            for pair, (i, j) in zip(
+                target.stats_result.pairs, [(0, 1), (0, 2), (1, 2)], strict=True
+            ):
+                self.assertAlmostEqual(
+                    pair.p_value, float(tukey.pvalue[i][j]), delta=1e-12
+                )
+
+    def test_qpcr_geo_stats_derive_from_log_space(self):
+        np_module = import_module("numpy")
+        pd_module = import_module("pandas")
+        plot_engine = import_module("xstars.plot_engine")
+
+        config = PrismConfig(experiment_preset=ExperimentPreset.QPCR)
+        engine = plot_engine.PlotEngine(config)
+
+        # Fold-change replicates whose log2 values are 0.0, 1.0, 2.0
+        series = pd_module.Series([1.0, 2.0, 4.0])
+        geo, lower, upper = engine._qpcr_geo_stats(series)
+
+        self.assertAlmostEqual(geo, 2.0)  # 2^(mean([0,1,2])) = 2
+        # SEM in log space = 0.5774 → asymmetric endpoints 2^(1±0.5774)
+        sem_log = np_module.std([0.0, 1.0, 2.0], ddof=1) / np_module.sqrt(3)
+        self.assertAlmostEqual(geo - 2.0 ** (1.0 - sem_log), lower)
+        self.assertAlmostEqual(2.0 ** (1.0 + sem_log) - geo, upper)
+        self.assertGreater(upper, lower)  # right-skewed on linear axis
