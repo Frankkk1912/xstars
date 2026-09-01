@@ -18,6 +18,7 @@
 | rev 1（白名单扩展二） | 2026-08-31 | M4 实施中发现 §9.1 未列 `wps-addon/` 的官方 wpsjs 壳文件（index.html/manifest.xml/vite.config.js/scripts/inject-config.cjs）；编排器据旧计划「官方脚手架实际文件名可微调」条款批准补入 §9.1 新建表（零业务逻辑壳，否则 T4.3 无法打包实机验证），待用户确认。 |
 | rev 1（T5.4 范围定案） | 2026-08-31 | 用户选择方案 A：M5.4 高分辨率导出按 M0.4 O3 结论完整实现——worker 生成图表时 best-effort 持久化轻量重渲染 payload（~/.xstars/artifacts，由 worker 下发 pictureId、加载项重命名 Shape 关联），导出时 Python 重渲染（XSTARS 图主路径，真细节）；任意图片剪贴板重编码为 bonus。§7 T5.4 文本更新；`worker.py`/`analysis.py` 的 M5 修改与 `inject-config.cjs` 端口读取纳入范围。 |
 | rev 1（范围修订） | 2026-08-31 | ① T5.5 实机矩阵全部通过（WB/qPCR 标签、ELISA、预设、主题设置、导出；过程中修复标签列检测缺失与 job 目录误删两缺陷）；② 用户决定：M6（独立安装器/文档/离线加固）**移出本 PR 范围**，延后到功能改进稳定后的独立 PR；③ M7 调整为「Excel↔WPS 功能一致性核验 + fresh-context Review」，合并决策留待用户。 |
+| rev 1（M7 收尾核验） | 2026-09-02 | 本地分支快进至 `1c19a63`（用户批准的 PR #3 qPCR log 空间统计已并入本 PR，独立 Review 闭环）；编排器在当前 HEAD 重跑全量自动化验证门（271 pytest / 48 node / self-test / compileall / `git diff --check` / VBA 零 diff 全绿；5 个 warning 经 `4cbabd5` 对照确认为既有，无新增）；fresh-context Review 第 4 轮 3 reviewer（正确性/安全/测试质量）并行审查全部 CLEAN；§7 T7.1–T7.3 补证据后勾选。 |
 
 ---
 
@@ -336,23 +337,26 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
 
 ### M7 — 全模板阻断验收 + fresh-context Review + 合并准备
 
-- [ ] **T7.1 执行专业版阻断矩阵与个人版 Beta 矩阵（责任人：用户）**
+- [x] **T7.1 执行专业版阻断矩阵与个人版 Beta 矩阵（责任人：用户）**
   - 文件：`docs/wps-validation.md`（新建）
   - 修改：逐 Sheet、逐功能、逐系统记录版本/命令/截图/文件哈希与结果。
   - 验收：专业版全部阻断项通过；个人版差异明确记录。
   - 依赖：M6 通过；支撑 G10、R14。
+  - 收尾记录（2026-09-02，按 2026-08-31 范围修订执行）：专业版阻断项由 T5.5 全模板实机矩阵覆盖（用户逐项确认，PR #1 M5 收尾评论）；Excel↔WPS 一致性由 characterization 测试 + 契约零漂移核验锁定（第 4 轮 Review 证实 35 命令枚举/16 错误码零漂移）；原 `docs/wps-validation.md` 与个人版专项 Beta 矩阵随 M6 延后（O6 保持开放）。
 
-- [ ] **T7.2 完成 fresh-context Review、修复与最终 diff 检查**
+- [x] **T7.2 完成 fresh-context Review、修复与最终 diff 检查**
   - 文件：所有变更文件、Draft PR
   - 修改：并行审查正确性/回归、测试、可维护性，并增加安全、用户流程与安装/文档契约审查；仅由单一 fix worker 处理「现在值得修复」。
   - 验收：无 Blocker 或立即值得修复项；最多三轮；父 Agent 检查最终 diff。
   - 依赖：T7.1；支撑 G10。
+  - 收尾记录（2026-09-02）：共 4 轮——R1–R3（`ff14449`/`308b6a4` 修复 sheet-context Blocker、对话框对齐、generation 取消竞态）+ R4 于 `1c19a63` 由 3 个 fresh-context reviewer（正确性回归 / 安全边界 / 测试与可维护性）并行审查当前最终 diff，全部 `VERDICT: CLEAN`，无 Blocker、无「现在值得修复」；接受的残余：P2 快照过期取消竞态（已记录）。
 
-- [ ] **T7.3 合并准备（转 Ready 条件确认；合并本身留待用户）**
+- [x] **T7.3 合并准备（转 Ready 条件确认；合并本身留待用户）**
   - 文件：Draft PR #1（无代码变更）
   - 修改：确认全部门禁通过、VBA/Excel 零 diff、无未批准任务被错误标记完成；准备转 Ready 与 squash merge 说明。
   - 验收：转 Ready 条件清单逐项满足；**合并动作由用户决定并执行**。
   - 依赖：T7.2；支撑 G10、R13。
+  - 收尾记录（2026-09-02）：全量自动化门在 `1c19a63` 重跑通过（271 pytest + 48 node + self-test + compileall + `git diff --check` + 提交物卫生）；`ribbon/*.bas`、`customUI14.xml`、`XSTARS_Templates.xlsx` 与 main 零 diff；PR 保持 Draft，转 Ready 与合并留待用户。
 
 ---
 
