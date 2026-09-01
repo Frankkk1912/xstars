@@ -5,11 +5,10 @@ import pandas as pd
 import pytest
 
 from xstars.config import DoseAxisScale, ExperimentPreset, PrismConfig
-from xstars.presets import BasePreset, get_preset, register_preset, _REGISTRY
-from xstars.presets.wb import WBOptions, WBPreset
-from xstars.presets.qpcr import QPCROptions, QPCRPreset
+from xstars.presets import _REGISTRY, BasePreset, get_preset
 from xstars.presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset, CCK8Result
-
+from xstars.presets.qpcr import QPCROptions, QPCRPreset
+from xstars.presets.wb import WBOptions, WBPreset
 
 # ── Registry tests ──────────────────────────────────────────────────────
 
@@ -518,8 +517,17 @@ class TestPresetIntegration:
         opts = QPCROptions(control_group="Control")
         transformed = preset.transform(df, opts)
 
+        # Fold-change output must be strictly positive
+        assert (transformed > 0).all().all()
+
+        # Stats now run on log2(fold change) = −ΔΔCt space
+        log2_df = pd.DataFrame(
+            np.log2(transformed.to_numpy(dtype=float)),
+            index=transformed.index,
+            columns=transformed.columns,
+        )
         engine = StatsEngine()
-        result = engine.analyze(transformed)
+        result = engine.analyze(log2_df)
         assert len(result.pairs) >= 1
 
     def test_wb_to_plot(self):
@@ -550,6 +558,7 @@ class TestPresetIntegration:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         rng = np.random.default_rng(42)
@@ -606,6 +615,7 @@ class TestPresetIntegration:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         # Narrow range: 1, 2, 5, 8 — ratio = 8, below 10x threshold
@@ -640,6 +650,7 @@ class TestPresetIntegration:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         concentrations = [1.0, 2.0, 5.0, 8.0]  # max/min = 8 <= 100
@@ -672,6 +683,7 @@ class TestPresetIntegration:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         concentrations = [0.1, 1.0, 10.0, 100.0]  # max/min = 1000
