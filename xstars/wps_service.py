@@ -249,19 +249,29 @@ class SubprocessJobRunner:
         _restrict_permissions(self.jobs_root, 0o700)
         cleanup_stale_jobs(self.jobs_root)
         self._active_lock = threading.Lock()
+        self._job_generation = 0
+        self._active_generation: int | None = None
+        self._active_state = "completed"
         self._active_process: Any | None = None
         self._active_cancel_path: Path | None = None
-        self._cancel_requested = False
+        self._pending_cancel_generation: int | None = None
 
     def cancel_current(self, *, grace: float = 3.0) -> bool:
         """Signal and, after a short grace, terminate the sole active worker."""
         with self._active_lock:
+            generation = self._active_generation
+            if generation is None or self._active_state == "completed":
+                return False
             process = self._active_process
             cancel_path = self._active_cancel_path
-            if process is None or cancel_path is None:
-                self._cancel_requested = True
+            if (
+                self._active_state == "starting"
+                or process is None
+                or cancel_path is None
+            ):
+                self._pending_cancel_generation = generation
                 return True
-        cancel_path.touch()
+            cancel_path.touch()
         deadline = time.monotonic() + max(0.0, grace)
         poll = getattr(process, "poll", None)
         while callable(poll) and poll() is None and time.monotonic() < deadline:
@@ -282,28 +292,48 @@ class SubprocessJobRunner:
         worker_request["cancelPath"] = str(cancel_path)
         _atomic_write_request(request_path, worker_request)
 
-        process = subprocess.Popen(
-            [
-                self.python_executable,
-                "-m",
-                "xstars.cli",
-                "worker",
-                "--request",
-                str(request_path),
-                "--result",
-                str(result_path),
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            shell=False,
-        )
+        with self._active_lock:
+            self._job_generation += 1
+            generation = self._job_generation
+            self._active_generation = generation
+            self._active_state = "starting"
+            self._active_process = None
+            self._active_cancel_path = cancel_path
+            self._pending_cancel_generation = None
+        try:
+            process = subprocess.Popen(
+                [
+                    self.python_executable,
+                    "-m",
+                    "xstars.cli",
+                    "worker",
+                    "--request",
+                    str(request_path),
+                    "--result",
+                    str(result_path),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+        except Exception:
+            with self._active_lock:
+                if self._active_generation == generation:
+                    self._active_state = "completed"
+                    self._active_cancel_path = None
+                    self._pending_cancel_generation = None
+            request_path.unlink(missing_ok=True)
+            result_path.unlink(missing_ok=True)
+            cancel_path.unlink(missing_ok=True)
+            shutil.rmtree(job_directory, ignore_errors=True)
+            raise
         with self._active_lock:
             self._active_process = process
-            self._active_cancel_path = cancel_path
-            if self._cancel_requested:
+            self._active_state = "active"
+            if self._pending_cancel_generation == generation:
                 cancel_path.touch()
-                self._cancel_requested = False
+            self._pending_cancel_generation = None
         timed_out = False
         try:
             return_code = process.wait(timeout=self.timeout)
@@ -341,10 +371,11 @@ class SubprocessJobRunner:
             return result
         finally:
             with self._active_lock:
-                if self._active_process is process:
+                if self._active_generation == generation:
+                    self._active_state = "completed"
                     self._active_process = None
                     self._active_cancel_path = None
-                    self._cancel_requested = False
+                    self._pending_cancel_generation = None
             request_path.unlink(missing_ok=True)
             result_path.unlink(missing_ok=True)
             cancel_path.unlink(missing_ok=True)
@@ -615,7 +646,10 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
                 "sampleSelection must be an object",
             )
             return None
-        if command in {Command.ELISA, Command.STANDARD_CURVE} and "sampleSelection" in payload:
+        if (
+            command in {Command.ELISA, Command.STANDARD_CURVE}
+            and "sampleSelection" in payload
+        ):
             sample_data = payload.get("sampleSelection")
             if not isinstance(sample_data, Mapping):
                 self._send_error(
@@ -658,23 +692,24 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/cancel":
             cancel = getattr(self._wps_server.runner, "cancel_current", None)
             cancelled = bool(
-                self._wps_server.job_lock.locked()
-                and callable(cancel)
-                and cancel()
+                self._wps_server.job_lock.locked() and callable(cancel) and cancel()
             )
-            deadline = time.monotonic() + 4.0
-            while self._wps_server.job_lock.locked() and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self._send_json(
-                200,
-                {
-                    "version": SCHEMA_VERSION,
-                    "ok": True,
-                    "status": "cancelled" if cancelled else "idle",
-                    "cancelled": cancelled,
-                    "busy": self._wps_server.job_lock.locked(),
-                },
-            )
+            if cancelled:
+                deadline = time.monotonic() + 4.0
+                while (
+                    self._wps_server.job_lock.locked() and time.monotonic() < deadline
+                ):
+                    time.sleep(0.02)
+            response = {
+                "version": SCHEMA_VERSION,
+                "ok": True,
+                "status": "cancelled" if cancelled else "idle",
+                "cancelled": cancelled,
+                "busy": self._wps_server.job_lock.locked(),
+            }
+            if not cancelled:
+                response["reason"] = "no-active-job"
+            self._send_json(200, response)
             return
         request = self._read_command()
         if request is None:

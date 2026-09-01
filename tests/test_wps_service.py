@@ -435,6 +435,114 @@ def test_cancel_endpoint_stops_active_job_and_releases_single_task_lock():
     assert second[0] == 200
 
 
+def test_late_cancel_after_completed_generation_does_not_cancel_next_job(tmp_path):
+    class CompletedProcess:
+        returncode = 0
+
+        def __init__(self, command):
+            result_index = command.index("--result") + 1
+            self.result_path = Path(command[result_index])
+            self.cancel_path = self.result_path.parent / "cancel"
+            self.saw_cancel = False
+
+        def wait(self, timeout):
+            self.saw_cancel = self.cancel_path.exists()
+            self.result_path.write_text(
+                json.dumps(
+                    {
+                        "version": SCHEMA_VERSION,
+                        "ok": True,
+                        "status": "ok",
+                        "writebackPlan": {
+                            "version": SCHEMA_VERSION,
+                            "tables": [],
+                            "images": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return self.returncode
+
+    class CompletionWindowRunner(SubprocessJobRunner):
+        def __init__(self, jobs_root):
+            super().__init__(jobs_root, timeout=1)
+            self.completed = threading.Event()
+            self.release_response = threading.Event()
+            self.run_count = 0
+
+        def run(self, request):
+            result = super().run(request)
+            self.run_count += 1
+            if self.run_count == 1:
+                self.completed.set()
+                assert self.release_response.wait(timeout=5)
+            return result
+
+    processes = []
+
+    def start_process(command, **_kwargs):
+        process = CompletedProcess(command)
+        processes.append(process)
+        return process
+
+    runner = CompletionWindowRunner(tmp_path / "jobs")
+    first_response = []
+    with (
+        mock.patch.object(_service.subprocess, "Popen", side_effect=start_process),
+        _running_server(runner=runner) as service,
+    ):
+        first = threading.Thread(
+            target=lambda: first_response.append(
+                _request(
+                    service,
+                    "/command",
+                    method="POST",
+                    payload=_payload(),
+                    headers=_auth(),
+                )
+            )
+        )
+        first.start()
+        try:
+            assert runner.completed.wait(timeout=5)
+            assert runner._active_state == "completed"
+            assert service.job_lock.locked() is True
+
+            status, _headers, cancellation = _request(
+                service, "/cancel", method="POST", headers=_auth()
+            )
+            assert status == 200
+            assert cancellation == {
+                "version": SCHEMA_VERSION,
+                "ok": True,
+                "status": "idle",
+                "cancelled": False,
+                "busy": True,
+                "reason": "no-active-job",
+            }
+            assert runner._pending_cancel_generation is None
+        finally:
+            runner.release_response.set()
+            first.join(timeout=5)
+
+        assert not first.is_alive()
+        assert first_response[0][0] == 200
+        second = _request(
+            service,
+            "/command",
+            method="POST",
+            payload=_payload(),
+            headers=_auth(),
+        )
+
+    assert second[0] == 200
+    assert runner._job_generation == 2
+    assert len(processes) == 2
+    assert processes[1].saw_cancel is False
+    assert runner._pending_cancel_generation is None
+
+
 def test_single_task_lock_returns_busy_for_concurrent_request():
     runner = BlockingRunner()
     first_response = []
@@ -722,7 +830,9 @@ def test_worker_standard_curve_stages_dialog_before_optional_sample(tmp_path):
             tmp_path,
             standard_dialog=mock.Mock(side_effect=AssertionError("dialog reopened")),
         )
-    assert executed["writebackPlan"]["tables"][2]["values"] == [["Back-Calculated Concentrations"]]
+    assert executed["writebackPlan"]["tables"][2]["values"] == [
+        ["Back-Calculated Concentrations"]
+    ]
 
 
 def test_worker_standard_curve_dialog_choice_controls_back_calculation(tmp_path):
@@ -764,7 +874,9 @@ def test_worker_standard_curve_dialog_choice_controls_back_calculation(tmp_path)
             tmp_path,
             standard_dialog=lambda _selection, _config: (fit, True),
         )
-    assert result["writebackPlan"]["tables"][2]["values"] == [["Back-Calculated Concentrations"]]
+    assert result["writebackPlan"]["tables"][2]["values"] == [
+        ["Back-Calculated Concentrations"]
+    ]
     assert Path(result["writebackPlan"]["images"][0]["artifact"]["path"]).is_file()
 
 
@@ -783,7 +895,12 @@ def test_worker_elisa_dialog_choice_adds_standard_curve_artifact(tmp_path):
         },
         "sampleSelection": {
             "version": SCHEMA_VERSION,
-            "values": [["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42], [0.19, 0.38]],
+            "values": [
+                ["Control", "Treatment"],
+                [0.2, 0.4],
+                [0.21, 0.42],
+                [0.19, 0.38],
+            ],
             "address": "E1:F4",
             "sheet": "ELISA",
         },
@@ -795,10 +912,12 @@ def test_worker_elisa_dialog_choice_adds_standard_curve_artifact(tmp_path):
         __import__("numpy").array([0.1, 1.0, 10.0], dtype=float),
         "linear",
     )
-    picture_ids = iter([
-        "XSTARS_20260831_abcdef123456",
-        "XSTARS_20260831_abcdef789012",
-    ])
+    picture_ids = iter(
+        [
+            "XSTARS_20260831_abcdef123456",
+            "XSTARS_20260831_abcdef789012",
+        ]
+    )
     fake_export = SimpleNamespace(
         new_picture_id=lambda: next(picture_ids),
         persist_render_payload=mock.Mock(),
@@ -816,7 +935,9 @@ def test_worker_elisa_dialog_choice_adds_standard_curve_artifact(tmp_path):
     assert len(images) == 2
     assert len({image["pictureId"] for image in images}) == 2
     assert all(Path(image["artifact"]["path"]).is_file() for image in images)
-    persisted_frames = [call.args[1] for call in fake_export.persist_render_payload.call_args_list]
+    persisted_frames = [
+        call.args[1] for call in fake_export.persist_render_payload.call_args_list
+    ]
     assert list(persisted_frames[1].columns) == ["1", "10", "100"]
 
 
@@ -1005,12 +1126,43 @@ def test_subprocess_runner_cancel_touches_cancel_and_kills_after_grace(tmp_path)
     process = ActiveProcess()
     cancel_path = tmp_path / "jobs" / "active" / "cancel"
     cancel_path.parent.mkdir()
+    runner._job_generation = 1
+    runner._active_generation = 1
+    runner._active_state = "active"
     runner._active_process = process
     runner._active_cancel_path = cancel_path
 
     assert runner.cancel_current(grace=0) is True
     assert cancel_path.is_file()
     assert process.killed is True
+
+
+def test_subprocess_runner_active_generation_allows_cooperative_cancel(tmp_path):
+    runner = SubprocessJobRunner(tmp_path / "jobs", timeout=1)
+    cancel_path = tmp_path / "jobs" / "active" / "cancel"
+    cancel_path.parent.mkdir()
+
+    class CooperativeProcess:
+        def __init__(self):
+            self.killed = False
+
+        def poll(self):
+            return 0 if cancel_path.exists() else None
+
+        def kill(self):
+            self.killed = True
+
+    process = CooperativeProcess()
+    runner._job_generation = 1
+    runner._active_generation = 1
+    runner._active_state = "active"
+    runner._active_process = process
+    runner._active_cancel_path = cancel_path
+
+    assert runner.cancel_current(grace=1) is True
+    assert cancel_path.is_file()
+    assert process.killed is False
+    assert runner._pending_cancel_generation is None
 
 
 def test_worker_timeout_signals_cancel_kills_process_and_cleans_job(tmp_path):
