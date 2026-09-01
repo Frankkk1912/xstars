@@ -17,6 +17,7 @@
 | rev 1（白名单扩展） | 2026-08-31 | 用户批准将 `poc/wps/addin/package.json` 纳入 T1.3 文件白名单，仅限 PoC 版本号随 Milestone 递增（本次 1.2.2→1.2.3）；背景：M0.4 实机步骤 4 发现 WPS 内嵌浏览器不支持 `window.prompt`（返回 null 被误判为取消，commit `97820ce` 已改用宿主原生 `InputBox(Type=2)`），且同版本重装会跳过解压，需版本递增触发重新提取。 |
 | rev 1（白名单扩展二） | 2026-08-31 | M4 实施中发现 §9.1 未列 `wps-addon/` 的官方 wpsjs 壳文件（index.html/manifest.xml/vite.config.js/scripts/inject-config.cjs）；编排器据旧计划「官方脚手架实际文件名可微调」条款批准补入 §9.1 新建表（零业务逻辑壳，否则 T4.3 无法打包实机验证），待用户确认。 |
 | rev 1（T5.4 范围定案） | 2026-08-31 | 用户选择方案 A：M5.4 高分辨率导出按 M0.4 O3 结论完整实现——worker 生成图表时 best-effort 持久化轻量重渲染 payload（~/.xstars/artifacts，由 worker 下发 pictureId、加载项重命名 Shape 关联），导出时 Python 重渲染（XSTARS 图主路径，真细节）；任意图片剪贴板重编码为 bonus。§7 T5.4 文本更新；`worker.py`/`analysis.py` 的 M5 修改与 `inject-config.cjs` 端口读取纳入范围。 |
+| rev 1（范围修订） | 2026-08-31 | ① T5.5 实机矩阵全部通过（WB/qPCR 标签、ELISA、预设、主题设置、导出；过程中修复标签列检测缺失与 job 目录误删两缺陷）；② 用户决定：M6（独立安装器/文档/离线加固）**移出本 PR 范围**，延后到功能改进稳定后的独立 PR；③ M7 调整为「Excel↔WPS 功能一致性核验 + fresh-context Review」，合并决策留待用户。 |
 
 ---
 
@@ -179,9 +180,9 @@
 | M2 — Excel characterization + application 契约 | [x] | M1 通过 | 自动化：142 基线 + 新契约/刻画/抽取测试全绿；实机：真实 Excel 模板 smoke test 无回归 | 先锁行为再抽取；对应旧 M1.1–M1.3 |
 | M3 — 本地 broker + worker | [x] | M2 | 自动化：HTTP/安全/生命周期/worker 取消超时崩溃测试全绿；证明未暴露 `0.0.0.0`；旧 CLI 语法测试通过 | 服务自启动归安装器（T6.1）；对应旧 M2.1–M2.2 |
 | M4 — WPS Ribbon + Run/Quick 垂直切片 | [x] | M3 | 自动化：`node --test` 全绿；实机：真实 Ribbon + Data Sheet Run/Quick + 保存重开 | 首个垂直切片；对应旧 M3.1–M3.2 |
-| M5 — 预设/ELISA 落地/主题设置/高分辨率导出 | [ ] | M4；M0.4 选定路径 | 自动化：预设/导出/设置测试全绿；实机：模板对应 Sheet 逐项 + 设置持久化 + 导出矩阵 | 采用 M0.4 选定交互与导出路径；对应旧 M4.1–M4.4 |
-| M6 — 独立安装器/用户文档/离线加固 | [ ] | M5 | 自动化：`build.ps1` 可复现；实机：干净 Win10/11 x64 安装/升级/卸载 | 服务自启动在此落地；对应旧 M5.1–M5.2 |
-| M7 — 全模板阻断验收 + fresh-context Review + 合并准备 | [ ] | M6 | 实机：专业版阻断矩阵全绿、个人版 Beta 报告；自动化全绿 + `git diff --check` + VBA 零 diff；Review 无 Blocker | 合并本身留待用户；对应旧 M6.1–M6.3 |
+| M5 — 预设/ELISA 落地/主题设置/高分辨率导出 | [x] | M4；M0.4 选定路径 | 自动化：预设/导出/设置测试全绿；实机：模板对应 Sheet 逐项 + 设置持久化 + 导出矩阵 | 采用 M0.4 选定交互与导出路径；对应旧 M4.1–M4.4 |
+| M6 — 独立安装器/用户文档/离线加固 | [ ]（延后） | M5 | —— | **2026-08-31 用户决定：移出本 PR 范围**，延后到功能改进稳定后的独立 PR；本 PR 保持 Draft，交付物不含安装器 |
+| M7 — Excel↔WPS 功能一致性核验 + fresh-context Review + 合并准备 | [ ] | M5 | 功能一致性矩阵（Excel 入口 vs WPS 实现）+ 全量自动化 + Review 无 Blocker | 原「全模板阻断验收」中的安装器相关项随 M6 延后；合并决策留待用户 |
 
 Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初始 Status 均为 `[ ]`。
 
@@ -307,7 +308,7 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
   - 验收：XSTARS 图导出 PNG/TIFF/JPG/PDF 为重渲染输出（独立验证 DPI、像素与文件有效性）；非 XSTARS 图走剪贴板路径；DPI 按请求值精确。
   - 依赖：T5.1、M0.4 结论（M1）、M4；支撑 G2、G12、R9。
 
-- [ ] **T5.5 实机验证预设/导出/设置（责任人：用户）**
+- [x] **T5.5 实机验证预设/导出/设置（责任人：用户）**
   - 文件：Draft PR #1（记录）；无代码文件新增
   - 修改：模板对应 Sheet 逐项、设置持久化、导出矩阵（4 格式 × 96/300/600 DPI）。
   - 验收：逐项通过或有获批豁免并回填。
