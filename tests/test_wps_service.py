@@ -666,7 +666,8 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
         "source": "render_payload",
     }
     fake_export = SimpleNamespace(
-        render_payload_export=mock.Mock(return_value=exported)
+        render_payload_export=mock.Mock(return_value=exported),
+        validate_export_request=lambda fmt, dpi: (fmt, dpi),
     )
     export_request = {
         "version": SCHEMA_VERSION,
@@ -679,14 +680,20 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
         },
         "cancelPath": str((tmp_path / "cancel").resolve()),
     }
+    chosen_export_path = tmp_path / "my_chart.png"
     with (
         mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
         mock.patch.object(worker, "import_module", return_value=fake_export),
+        mock.patch("xstars.application.export.validate_export_request", return_value=("png", 300)),
     ):
-        export_result = worker.execute_request(export_request, tmp_path)
+        export_result = worker.execute_request(
+            export_request,
+            tmp_path,
+            ask_export_path=lambda **kw: str(chosen_export_path),
+        )
     assert export_result["export"] == exported
     fake_export.render_payload_export.assert_called_once_with(
-        "XSTARS_20260831_abcdef123456", "png", 300
+        "XSTARS_20260831_abcdef123456", "png", 300, output_path=chosen_export_path
     )
 
 

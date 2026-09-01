@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime, timezone
 from importlib import import_module
+from pathlib import Path
+from unittest import mock
 
 import matplotlib
 from PIL import Image
@@ -193,3 +195,193 @@ def test_payload_config_rejects_unknown_fields_instead_of_executing_them(tmp_pat
             exports_root=tmp_path / "exports",
         )
     assert malformed.value.code is ErrorCode.PAYLOAD_CORRUPT
+
+
+# ---------------------------------------------------------------------------
+# New tests: user-chosen output path, cancellation, extension normalisation,
+# and Tk-unavailable fallback.
+# ---------------------------------------------------------------------------
+
+_worker = import_module("xstars.application.worker")
+_ask_export_path = _worker._ask_export_path
+
+
+def _setup_artifacts(tmp_path: Path) -> str:
+    """Persist a minimal render payload and return the picture_id."""
+    picture_id = "XSTARS_20260831_abcdef123456"
+    _frame, config, result = _analysis()
+    persist_render_payload(
+        picture_id,
+        result.transformed_data,
+        config,
+        result.figure,
+        artifacts_root=tmp_path / "artifacts",
+    )
+    return picture_id
+
+
+def test_render_payload_export_writes_to_user_chosen_path(tmp_path):
+    """output_path overrides the automatic naming scheme."""
+    picture_id = _setup_artifacts(tmp_path)
+    chosen = tmp_path / "my_export" / "result.png"
+    exported = render_payload_export(
+        picture_id,
+        "png",
+        300,
+        artifacts_root=tmp_path / "artifacts",
+        output_path=chosen,
+    )
+    assert Path(exported["path"]).resolve() == chosen.resolve()
+    assert chosen.is_file()
+    assert chosen.stat().st_size > 100
+    assert exported["source"] == "render_payload"
+
+
+def test_render_payload_export_appends_extension_when_mismatched(tmp_path):
+    """If the user omits or mismatches the extension, the correct one is appended."""
+    picture_id = _setup_artifacts(tmp_path)
+    # Path without any extension
+    stem_only = tmp_path / "noext"
+    exported = render_payload_export(
+        picture_id,
+        "png",
+        300,
+        artifacts_root=tmp_path / "artifacts",
+        output_path=stem_only,
+    )
+    result_path = Path(exported["path"])
+    assert result_path.suffix == ".png"
+    assert result_path.is_file()
+
+    # Path with wrong extension (e.g. user chose .txt)
+    wrong_ext = tmp_path / "chart.txt"
+    exported2 = render_payload_export(
+        picture_id,
+        "tiff",
+        150,
+        artifacts_root=tmp_path / "artifacts",
+        output_path=wrong_ext,
+    )
+    result_path2 = Path(exported2["path"])
+    assert result_path2.suffix == ".tiff"
+    assert result_path2.is_file()
+
+
+def test_clipboard_export_writes_to_user_chosen_path(tmp_path):
+    """output_path overrides automatic naming for clipboard export."""
+    source = Image.new("RGB", (96, 48), (0, 128, 255))
+    chosen = tmp_path / "clip_export.png"
+    exported = export_clipboard_image(
+        "png",
+        150,
+        image_grabber=lambda: source,
+        output_path=chosen,
+    )
+    assert Path(exported["path"]).resolve() == chosen.resolve()
+    assert chosen.is_file()
+    assert exported["source"] == "clipboard"
+
+
+def test_ask_export_path_returns_none_on_user_cancel(tmp_path):
+    """A dialog that returns '' (user hit Cancel) maps to None."""
+    result = _ask_export_path(
+        "png",
+        "my_stem",
+        exports_root=tmp_path,
+        _dialog_fn=lambda **kw: "",   # simulate Cancel
+    )
+    assert result is None
+
+
+def test_ask_export_path_returns_path_on_confirm(tmp_path):
+    """A dialog that returns a non-empty string becomes a Path."""
+    chosen_str = str(tmp_path / "my_chart.png")
+    result = _ask_export_path(
+        "png",
+        "my_stem",
+        exports_root=tmp_path,
+        _dialog_fn=lambda **kw: chosen_str,
+    )
+    assert result == Path(chosen_str)
+
+
+def test_worker_export_cancelled_when_dialog_returns_none(tmp_path):
+    """User cancel from save-as dialog → {cancelled: True} result, no file written."""
+    from xstars.application.contracts import SCHEMA_VERSION
+
+    _setup_artifacts(tmp_path / "artifacts" / "dummy")
+    # We don't need real artifacts for cancel path; worker cancels before export.
+    export_request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_export",
+        "config": {},
+        "export": {
+            "pictureId": "XSTARS_20260831_abcdef123456",
+            "format": "png",
+            "dpi": 300,
+        },
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    with mock.patch(
+        "xstars.application.export.validate_export_request", return_value=("png", 300)
+    ):
+        result = _worker.execute_request(
+            export_request,
+            tmp_path,
+            ask_export_path=lambda **kw: None,   # simulate cancel
+        )
+    assert result["ok"] is True
+    assert result["export"] == {"cancelled": True}
+    assert "Exported" not in result["writebackPlan"]["statusMessage"]
+
+
+def test_worker_export_fallback_to_auto_name_when_tk_unavailable(tmp_path):
+    """When _ask_export_path raises (Tk unavailable), fallback to auto-naming."""
+    from xstars.application.contracts import SCHEMA_VERSION
+
+    picture_id = _setup_artifacts(tmp_path)
+    auto_result = {
+        "path": str(tmp_path / "auto.png"),
+        "format": "png",
+        "dpi": 300,
+        "source": "render_payload",
+    }
+    fake_export_mod = mock.MagicMock()
+    fake_export_mod.validate_export_request.return_value = ("png", 300)
+    fake_export_mod.render_payload_export.return_value = auto_result
+
+    export_request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_export",
+        "config": {},
+        "export": {
+            "pictureId": picture_id,
+            "format": "png",
+            "dpi": 300,
+        },
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+
+    def _raising_ask(**kw):
+        raise RuntimeError("Tk unavailable in headless CI")
+
+    with (
+        mock.patch.object(_worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(_worker, "import_module", return_value=fake_export_mod),
+        mock.patch(
+            "xstars.application.export.validate_export_request", return_value=("png", 300)
+        ),
+    ):
+        result = _worker.execute_request(
+            export_request,
+            tmp_path,
+            ask_export_path=_raising_ask,
+        )
+
+    assert result["ok"] is True
+    assert result["export"]["path"] == auto_result["path"]
+    assert "fallback" in result["export"]
+    fake_export_mod.render_payload_export.assert_called_once()
+    # output_path=None means auto-naming was used
+    call_kwargs = fake_export_mod.render_payload_export.call_args.kwargs
+    assert call_kwargs.get("output_path") is None

@@ -232,6 +232,75 @@ def _standard_curve_dialog(selection: SelectionPayload, _config: PrismConfig) ->
     return chosen.fit_result, bool(chosen.back_calculate)
 
 
+_EXPORT_FILETYPES: dict[str, list[tuple[str, str]]] = {
+    "png": [("PNG Image", "*.png"), ("All Files", "*.*")],
+    "tiff": [("TIFF Image", "*.tiff;*.tif"), ("All Files", "*.*")],
+    "jpg": [("JPEG Image", "*.jpg;*.jpeg"), ("All Files", "*.*")],
+    "pdf": [("PDF Document", "*.pdf"), ("All Files", "*.*")],
+}
+_EXPORT_DEFAULT_EXT: dict[str, str] = {
+    "png": ".png",
+    "tiff": ".tiff",
+    "jpg": ".jpg",
+    "pdf": ".pdf",
+}
+
+
+def _ask_export_path(
+    image_format: str,
+    default_stem: str,
+    *,
+    exports_root: Path | None = None,
+    _dialog_fn: Any = None,
+) -> Path | None:
+    """Open a native Tk save-as dialog and return the chosen absolute path.
+
+    Returns *None* when the user cancels.  The path is not validated here
+    beyond asserting it is non-empty (Tkinter already enforces an absolute
+    path on Windows).
+
+    *_dialog_fn* is injected in tests to avoid opening a real window.
+    """
+    _require_main_thread_dialog()
+    root_dir = (exports_root or Path.home() / ".xstars" / "exports").expanduser().resolve(strict=False)
+    root_dir.mkdir(parents=True, exist_ok=True)
+    default_name = f"{default_stem}{_EXPORT_DEFAULT_EXT[image_format]}"
+    filetypes = _EXPORT_FILETYPES[image_format]
+    if _dialog_fn is None:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+
+            def _real_dialog() -> str:
+                return filedialog.asksaveasfilename(
+                    parent=root,
+                    title="Save Export As",
+                    initialdir=str(root_dir),
+                    initialfile=default_name,
+                    defaultextension=_EXPORT_DEFAULT_EXT[image_format],
+                    filetypes=filetypes,
+                )
+
+            chosen = _real_dialog()
+            root.destroy()
+        except Exception:  # Tk unavailable — caller handles None
+            return None
+    else:
+        chosen = _dialog_fn(
+            initialdir=str(root_dir),
+            initialfile=default_name,
+            defaultextension=_EXPORT_DEFAULT_EXT[image_format],
+            filetypes=filetypes,
+        )
+    if not chosen:
+        return None
+    return Path(chosen)
+
+
 def _elisa_dialog(selection: SelectionPayload, base_config: PrismConfig) -> tuple[PrismConfig, Any, bool]:
     _require_main_thread_dialog()
     from ..presets.elisa_dialog import ELISADialog
@@ -447,6 +516,7 @@ def execute_request(
     elisa_dialog: Callable[
         [SelectionPayload, PrismConfig], tuple[PrismConfig, Any, bool]
     ] = _elisa_dialog,
+    ask_export_path: Callable[..., Path | None] | None = None,
 ) -> dict[str, Any]:
     """Execute one validated WPS command and return JSON-safe output."""
     if threading.current_thread() is not threading.main_thread():
@@ -468,20 +538,58 @@ def execute_request(
         if not isinstance(export_request, Mapping):
             raise ContractError(ErrorCode.INVALID_REQUEST, "export must be an object")
         export_module = import_module("xstars.application.export")
-        if export_request.get("clipboard") is True:
+        image_format_raw = export_request.get("format")
+        dpi_raw = export_request.get("dpi")
+        # Validate format/dpi up-front so we know the extension before the dialog.
+        from .export import validate_export_request as _vex
+        image_format_validated, _dpi_validated = _vex(image_format_raw, dpi_raw)
+        # Choose a default stem: pictureId (without "XSTARS_" prefix for readability)
+        # or timestamp if clipboard path.
+        is_clipboard = export_request.get("clipboard") is True
+        picture_id = export_request.get("pictureId")
+        if is_clipboard or not isinstance(picture_id, str):
+            from datetime import datetime, timezone
+            default_stem = f"export_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}"
+        else:
+            default_stem = picture_id
+        # Open native save-as dialog on the worker main thread.
+        _dialog_fn = ask_export_path  # may be a test stub
+        fallback_reason: str | None = None
+        chosen_path: Path | None
+        try:
+            chosen_path = _ask_export_path(
+                image_format_validated,
+                default_stem,
+                _dialog_fn=_dialog_fn,
+            )
+        except Exception as _dlg_exc:  # noqa: BLE001
+            # Tk completely unavailable — fall back to auto-naming.
+            chosen_path = None
+            fallback_reason = f"Tk dialog unavailable: {_dlg_exc}"
+        if chosen_path is None and fallback_reason is None:
+            # User cancelled the dialog.
+            return _success(
+                command,
+                WritebackPlan(status_message="XSTARS: Export cancelled"),
+                export={"cancelled": True},
+            )
+        if is_clipboard:
             exported = export_module.export_clipboard_image(
-                export_request.get("format"),
-                export_request.get("dpi"),
+                image_format_raw,
+                dpi_raw,
+                output_path=chosen_path,
             )
         else:
-            picture_id = export_request.get("pictureId")
             if not isinstance(picture_id, str):
                 raise ContractError(ErrorCode.PAYLOAD_MISSING, "selected Shape has no XSTARS pictureId")
             exported = export_module.render_payload_export(
                 picture_id,
-                export_request.get("format"),
-                export_request.get("dpi"),
+                image_format_raw,
+                dpi_raw,
+                output_path=chosen_path,
             )
+        if fallback_reason:
+            exported["fallback"] = fallback_reason
         return _success(
             command,
             WritebackPlan(status_message=f"XSTARS: Exported to {exported['path']}"),

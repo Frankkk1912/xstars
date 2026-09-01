@@ -231,6 +231,14 @@ def _output_path(picture_id: str, image_format: str, dpi: int, exports_root: Pat
     return root / f"{picture_id}_{dpi}dpi.{image_format}"
 
 
+def _ensure_extension(path: Path, image_format: str) -> Path:
+    """Append the correct extension if the path does not already end with it."""
+    ext = ".jpg" if image_format == "jpg" else f".{image_format}"
+    if path.suffix.lower() != ext:
+        path = path.with_name(path.name + ext)
+    return path
+
+
 def render_payload_export(
     picture_id: str,
     image_format: Any,
@@ -238,8 +246,14 @@ def render_payload_export(
     *,
     artifacts_root: Path = DEFAULT_ARTIFACTS_ROOT,
     exports_root: Path = DEFAULT_EXPORTS_ROOT,
+    output_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Load a trusted payload and re-render it at the requested DPI."""
+    """Load a trusted payload and re-render it at the requested DPI.
+
+    When *output_path* is supplied (must be an absolute path from a local
+    file-chooser dialog) it is used instead of the automatic naming scheme.
+    The extension is normalised to match *image_format* if needed.
+    """
     image_format, dpi = validate_export_request(image_format, dpi)
     payload = load_render_payload(picture_id, artifacts_root=artifacts_root)
     data = payload["data"]
@@ -266,7 +280,14 @@ def render_payload_export(
         float(payload["figure"]["heightInches"]),
         forward=True,
     )
-    output = _output_path(picture_id, image_format, dpi, exports_root)
+    if output_path is not None:
+        if not output_path.is_absolute():
+            raise ContractError(ErrorCode.EXPORT_PATH, "output_path must be absolute")
+        output = _ensure_extension(output_path, image_format)
+        with suppress(OSError):
+            output.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output = _output_path(picture_id, image_format, dpi, exports_root)
     save_format = "jpeg" if image_format == "jpg" else image_format
     try:
         figure.savefig(output, format=save_format, dpi=dpi)
@@ -292,8 +313,14 @@ def export_clipboard_image(
     *,
     exports_root: Path = DEFAULT_EXPORTS_ROOT,
     image_grabber: Callable[[], Any] | None = None,
+    output_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Bonus path for arbitrary selected pictures copied by the WPS add-in."""
+    """Bonus path for arbitrary selected pictures copied by the WPS add-in.
+
+    When *output_path* is supplied (must be an absolute path from a local
+    file-chooser dialog) it is used instead of the automatic naming scheme.
+    The extension is normalised to match *image_format* if needed.
+    """
     image_format, dpi = validate_export_request(image_format, dpi)
     if image_grabber is None:
         from PIL import ImageGrab
@@ -321,7 +348,14 @@ def export_clipboard_image(
             exported = background
         else:
             exported = exported.convert("RGB")
-    output = _output_path(new_picture_id(), image_format, dpi, exports_root)
+    if output_path is not None:
+        if not output_path.is_absolute():
+            raise ContractError(ErrorCode.EXPORT_PATH, "output_path must be absolute")
+        output = _ensure_extension(output_path, image_format)
+        with suppress(OSError):
+            output.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output = _output_path(new_picture_id(), image_format, dpi, exports_root)
     kwargs: dict[str, Any] = {"dpi": (dpi, dpi)}
     if image_format == "tiff":
         kwargs["compression"] = "tiff_lzw"
