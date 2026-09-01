@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from xstars.application.contracts import SCHEMA_VERSION
+from xstars.application.contracts import SCHEMA_VERSION, TransformOptions
 from xstars.config import ExperimentPreset, JournalPreset, PrismConfig
 
 pytest = import_module("pytest")
@@ -283,6 +283,50 @@ def test_preset_elisa_export_and_setting_commands_are_shape_validated():
         assert runner.calls[-1]["command"] == "run_set_theme_nature"
 
 
+def test_standard_curve_stages_and_options_are_shape_validated():
+    runner = FakeRunner()
+    with _running_server(runner=runner) as service:
+        configure = _payload("run_standard_curve")
+        configure["stage"] = "configure"
+        status = _request(
+            service, "/command", method="POST", payload=configure, headers=_auth()
+        )[0]
+        assert status == 200
+        assert runner.calls[-1]["stage"] == "configure"
+
+        execute = _payload("run_standard_curve")
+        execute.update(
+            {
+                "stage": "execute",
+                "curveOptions": {
+                    "fitMethod": "linear",
+                    "backCalculate": False,
+                },
+            }
+        )
+        status = _request(
+            service, "/command", method="POST", payload=execute, headers=_auth()
+        )[0]
+        assert status == 200
+        assert runner.calls[-1]["curveOptions"]["fitMethod"] == "linear"
+
+        invalid = _payload("run_standard_curve")
+        invalid.update(
+            {
+                "stage": "execute",
+                "curveOptions": {
+                    "fitMethod": "__import__",
+                    "backCalculate": False,
+                },
+            }
+        )
+        status, _headers, result = _request(
+            service, "/command", method="POST", payload=invalid, headers=_auth()
+        )
+        assert status == 400
+        assert result["error"]["code"] == "INVALID_REQUEST"
+
+
 def test_elisa_requires_second_selection_and_export_rejects_extra_fields():
     with _running_server() as service:
         status, _headers, result = _request(
@@ -323,6 +367,72 @@ def test_valid_command_is_normalized_before_runner_dispatch():
     assert runner.calls[0]["command"] == "run_quick"
     assert runner.calls[0]["selection"]["address"] == "$A$1:$B$4"
     assert "cancelPath" not in runner.calls[0]
+
+
+def test_cancel_endpoint_requires_authentication():
+    with _running_server() as service:
+        status, _headers, result = _request(
+            service,
+            "/cancel",
+            method="POST",
+            headers={"Origin": "null"},
+        )
+    assert status == 401
+    assert result["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_cancel_endpoint_stops_active_job_and_releases_single_task_lock():
+    class CancelableRunner(BlockingRunner):
+        def cancel_current(self, *, grace=3.0):
+            self.release.set()
+            self.response = {
+                "version": SCHEMA_VERSION,
+                "ok": False,
+                "status": "cancelled",
+                "error": {"code": "CANCELLED", "message": "request cancelled"},
+            }
+            return True
+
+    runner = CancelableRunner()
+    first_response = []
+    with _running_server(runner=runner) as service:
+        first = threading.Thread(
+            target=lambda: first_response.append(
+                _request(
+                    service,
+                    "/command",
+                    method="POST",
+                    payload=_payload(),
+                    headers=_auth(),
+                )
+            )
+        )
+        first.start()
+        assert runner.entered.wait(timeout=5)
+        status, _headers, cancelled = _request(
+            service, "/cancel", method="POST", headers=_auth()
+        )
+        first.join(timeout=5)
+        health = _request(service, "/health")[2]
+        second = _request(
+            service,
+            "/command",
+            method="POST",
+            payload=_payload(),
+            headers=_auth(),
+        )
+    assert status == 200
+    assert cancelled == {
+        "version": SCHEMA_VERSION,
+        "ok": True,
+        "status": "cancelled",
+        "cancelled": True,
+        "busy": False,
+    }
+    assert not first.is_alive()
+    assert first_response[0][2]["status"] == "cancelled"
+    assert health["busy"] is False
+    assert second[0] == 200
 
 
 def test_single_task_lock_returns_busy_for_concurrent_request():
@@ -470,6 +580,244 @@ def test_worker_routes_preset_setting_and_export_commands_without_host_io(tmp_pa
     fake_export.render_payload_export.assert_called_once_with(
         "XSTARS_20260831_abcdef123456", "png", 300
     )
+
+
+def test_worker_transform_uses_specialized_dialog_and_include_stats(tmp_path):
+    worker = import_module("xstars.application.worker")
+    request = _payload("run_transform_only")
+    request["cancelPath"] = str((tmp_path / "cancel").resolve())
+    chosen = []
+
+    def choose_transform(_selection, config):
+        chosen.append(True)
+        return config, TransformOptions(include_stats=True)
+
+    with mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()):
+        result = worker.execute_request(
+            request,
+            tmp_path,
+            transform_dialog=choose_transform,
+        )
+    assert chosen == [True]
+    assert len(result["writebackPlan"]["tables"]) == 3
+    assert "with statistics" in result["writebackPlan"]["statusMessage"]
+    assert "Ribbon" in result["writebackPlan"]["statusMessage"]
+
+
+def test_transform_dialog_preconfigures_labeled_reference_mode():
+    worker = import_module("xstars.application.worker")
+    ui = import_module("xstars.ui_dialog")
+    selection = worker.SelectionPayload.from_dict(
+        {
+            "version": SCHEMA_VERSION,
+            "values": [
+                ["Protein", "Control", "Treatment"],
+                ["Target", 1.0, 2.0],
+                ["GAPDH", 3.0, 3.1],
+            ],
+            "address": "A1:C3",
+            "sheet": "WB",
+        }
+    )
+    observed = {}
+    dialog = mock.Mock()
+
+    def make_dialog(_groups, _sizes, *, base_config):
+        observed["config"] = base_config
+        dialog.show.return_value = base_config
+        return dialog
+
+    with mock.patch.object(ui, "TransformOnlyDialog", side_effect=make_dialog):
+        config, _options = worker._transform_dialog(selection, PrismConfig())
+    assert config.preset_has_reference is True
+    assert config.preset_control_group == "Control"
+
+
+def test_wps_settings_dialog_disables_file_export_without_changing_default(tmp_path):
+    worker = import_module("xstars.application.worker")
+    ui = import_module("xstars.ui_dialog")
+    selection = worker.SelectionPayload.from_dict(_payload()["selection"])
+    chosen = PrismConfig(export_path="C:/must-not-survive.png")
+    dialog = mock.Mock()
+    dialog.show.return_value = chosen
+    with mock.patch.object(ui, "SettingsDialog", return_value=dialog) as constructor:
+        result = worker._dialog_config(selection, PrismConfig())
+    assert result.export_path == ""
+    assert constructor.call_args.kwargs["hide_file_export"] is True
+    assert ui.SettingsDialog.__init__.__defaults__[-1] is False
+
+    hidden = ui.SettingsDialog([], {}, base_config=PrismConfig(), hide_file_export=True)
+    hidden._export_var = SimpleNamespace(get=lambda: True)
+    hidden._export_fmt_combo = mock.Mock()
+    hidden._export_dpi_combo = mock.Mock()
+    hidden._export_entry = mock.Mock()
+    hidden._browse_btn = mock.Mock()
+    hidden._toggle_export()
+    for widget in (
+        hidden._export_fmt_combo,
+        hidden._export_dpi_combo,
+        hidden._export_entry,
+        hidden._browse_btn,
+    ):
+        widget.configure.assert_called_once_with(state="disabled")
+
+
+def test_worker_standard_curve_stages_dialog_before_optional_sample(tmp_path):
+    worker = import_module("xstars.application.worker")
+    curve = import_module("xstars.tools.standard_curve")
+    standard = {
+        "version": SCHEMA_VERSION,
+        "values": [[1, 10, 100], [0.1, 1.0, 10.0], [0.11, 1.1, 10.1]],
+        "address": "A1:C3",
+        "sheet": "Curve",
+    }
+    fit = curve.fit_standard_curve(
+        __import__("numpy").array([1, 10, 100], dtype=float),
+        __import__("numpy").array([0.1, 1.0, 10.0], dtype=float),
+        "linear",
+    )
+    configure = {
+        "version": SCHEMA_VERSION,
+        "command": "run_standard_curve",
+        "selection": standard,
+        "stage": "configure",
+        "config": {},
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    with mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()):
+        configured = worker.execute_request(
+            configure,
+            tmp_path,
+            standard_dialog=lambda _selection, _config: (fit, True),
+        )
+    assert configured["writebackPlan"]["images"] == []
+    assert configured["continuation"] == {
+        "fitMethod": "linear",
+        "backCalculate": True,
+    }
+
+    execute = dict(configure)
+    execute.update(
+        {
+            "stage": "execute",
+            "curveOptions": configured["continuation"],
+            "sampleSelection": {
+                "version": SCHEMA_VERSION,
+                "values": [["Control", "Treatment"], [0.2, 0.4], [0.3, 0.5]],
+                "address": "E1:F3",
+                "sheet": "Curve",
+            },
+        }
+    )
+    fake_export = SimpleNamespace(
+        new_picture_id=lambda: "XSTARS_20260831_abcdef123456",
+        persist_render_payload=mock.Mock(),
+    )
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(worker, "import_module", return_value=fake_export),
+    ):
+        executed = worker.execute_request(
+            execute,
+            tmp_path,
+            standard_dialog=mock.Mock(side_effect=AssertionError("dialog reopened")),
+        )
+    assert executed["writebackPlan"]["tables"][2]["values"] == [["Back-Calculated Concentrations"]]
+
+
+def test_worker_standard_curve_dialog_choice_controls_back_calculation(tmp_path):
+    worker = import_module("xstars.application.worker")
+    curve = import_module("xstars.tools.standard_curve")
+    request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_standard_curve",
+        "selection": {
+            "version": SCHEMA_VERSION,
+            "values": [[1, 10, 100], [0.1, 1.0, 10.0], [0.11, 1.1, 10.1]],
+            "address": "A1:C3",
+            "sheet": "Curve",
+        },
+        "sampleSelection": {
+            "version": SCHEMA_VERSION,
+            "values": [["Control", "Treatment"], [0.2, 0.4], [0.3, 0.5]],
+            "address": "E1:F3",
+            "sheet": "Curve",
+        },
+        "config": {},
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    fit = curve.fit_standard_curve(
+        __import__("numpy").array([1, 10, 100], dtype=float),
+        __import__("numpy").array([0.1, 1.0, 10.0], dtype=float),
+        "linear",
+    )
+    fake_export = SimpleNamespace(
+        new_picture_id=lambda: "XSTARS_20260831_abcdef123456",
+        persist_render_payload=mock.Mock(),
+    )
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(worker, "import_module", return_value=fake_export),
+    ):
+        result = worker.execute_request(
+            request,
+            tmp_path,
+            standard_dialog=lambda _selection, _config: (fit, True),
+        )
+    assert result["writebackPlan"]["tables"][2]["values"] == [["Back-Calculated Concentrations"]]
+    assert Path(result["writebackPlan"]["images"][0]["artifact"]["path"]).is_file()
+
+
+def test_worker_elisa_dialog_choice_adds_standard_curve_artifact(tmp_path):
+    import_module("matplotlib.pyplot").close("all")
+    worker = import_module("xstars.application.worker")
+    curve = import_module("xstars.tools.standard_curve")
+    request = {
+        "version": SCHEMA_VERSION,
+        "command": "run_elisa",
+        "selection": {
+            "version": SCHEMA_VERSION,
+            "values": [[1, 10, 100], [0.1, 1.0, 10.0], [0.11, 1.1, 10.1]],
+            "address": "A1:C3",
+            "sheet": "ELISA",
+        },
+        "sampleSelection": {
+            "version": SCHEMA_VERSION,
+            "values": [["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42], [0.19, 0.38]],
+            "address": "E1:F4",
+            "sheet": "ELISA",
+        },
+        "config": {},
+        "cancelPath": str((tmp_path / "cancel").resolve()),
+    }
+    fit = curve.fit_standard_curve(
+        __import__("numpy").array([1, 10, 100], dtype=float),
+        __import__("numpy").array([0.1, 1.0, 10.0], dtype=float),
+        "linear",
+    )
+    picture_ids = iter([
+        "XSTARS_20260831_abcdef123456",
+        "XSTARS_20260831_abcdef789012",
+    ])
+    fake_export = SimpleNamespace(
+        new_picture_id=lambda: next(picture_ids),
+        persist_render_payload=mock.Mock(),
+    )
+    with (
+        mock.patch.object(worker.PrismConfig, "load", return_value=PrismConfig()),
+        mock.patch.object(worker, "import_module", return_value=fake_export),
+    ):
+        result = worker.execute_request(
+            request,
+            tmp_path,
+            elisa_dialog=lambda _selection, config: (config, fit, True),
+        )
+    images = result["writebackPlan"]["images"]
+    assert len(images) == 2
+    assert len({image["pictureId"] for image in images}) == 2
+    assert all(Path(image["artifact"]["path"]).is_file() for image in images)
+    persisted_frames = [call.args[1] for call in fake_export.persist_render_payload.call_args_list]
+    assert list(persisted_frames[1].columns) == ["1", "10", "100"]
 
 
 def test_worker_labeled_wb_persists_one_artifact_and_render_payload_per_target(
@@ -639,6 +987,30 @@ def test_external_image_artifact_does_not_preserve_job_directory(tmp_path):
     assert _service._should_preserve_job_directory(result, job_directory) is False
     assert not job_directory.exists()
     assert external_artifact.is_file()
+
+
+def test_subprocess_runner_cancel_touches_cancel_and_kills_after_grace(tmp_path):
+    runner = SubprocessJobRunner(tmp_path / "jobs", timeout=1)
+
+    class ActiveProcess:
+        def __init__(self):
+            self.killed = False
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.killed = True
+
+    process = ActiveProcess()
+    cancel_path = tmp_path / "jobs" / "active" / "cancel"
+    cancel_path.parent.mkdir()
+    runner._active_process = process
+    runner._active_cancel_path = cancel_path
+
+    assert runner.cancel_current(grace=0) is True
+    assert cancel_path.is_file()
+    assert process.killed is True
 
 
 def test_worker_timeout_signals_cancel_kills_process_and_cleans_job(tmp_path):

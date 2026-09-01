@@ -433,6 +433,98 @@ class ApplicationAnalysisTests(unittest.TestCase):
         )
         self.assertIn("ELISA (linear", elisa.writeback_plan.status_message)
 
+    def test_standard_curve_selected_fit_can_back_calculate_samples(self):
+        standard = SelectionPayload(
+            values=[[1, 10, 100], [0.1, 1.0, 10.0], [0.11, 1.1, 10.1]],
+            address="A1:C3",
+            sheet="Curve",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.3, 0.5]],
+            address="E1:F3",
+            sheet="Curve",
+        )
+        selected = standard_curve_selection(
+            standard,
+            PrismConfig(preset_elisa_fit_method="linear"),
+            output_start_cell="A6",
+        )
+        result = standard_curve_selection(
+            standard,
+            PrismConfig(preset_elisa_fit_method="auto"),
+            output_start_cell="A6",
+            fit_result=selected.fit_result,
+            sample_payload=samples,
+        )
+        self.assertEqual(result.fit_result.method, "linear")
+        self.assertEqual(result.writeback_plan.tables[2].values, [["Back-Calculated Concentrations"]])
+        self.assertEqual(result.writeback_plan.tables[3].values[0], ["Control", "Treatment"])
+        self.assertIn("back-calculated", result.writeback_plan.status_message)
+
+    def test_elisa_can_reuse_dialog_fit_and_append_standard_curve_image(self):
+        standard = SelectionPayload(
+            values=[[1, 10, 100], [0.1, 1.0, 10.0], [0.11, 1.1, 10.1]],
+            address="A1:C3",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42], [0.19, 0.38]],
+            address="E1:F4",
+            sheet="ELISA",
+        )
+        config = PrismConfig(preset_elisa_fit_method="linear")
+        selected = standard_curve_selection(standard, config, output_start_cell="A6")
+        result = elisa_selections(
+            standard,
+            samples,
+            config,
+            output_start_cell="A6",
+            fit_result=selected.fit_result,
+            show_fit_curve=True,
+        )
+        self.assertEqual(len(result.writeback_plan.images), 2)
+        self.assertEqual(result.writeback_plan.images[1].source_key, "standard_curve_figure")
+        self.assertIn("standard_curve_figure", result.figure_sources)
+        self.assertEqual(
+            list(result.render_data_sources["standard_curve_figure"].columns),
+            ["1", "10", "100"],
+        )
+
+    def test_transform_only_can_include_statistics(self):
+        result = transform_selection(
+            _selection(),
+            PrismConfig(),
+            output_start_cell="E5",
+            include_stats=True,
+        )
+        self.assertEqual(result.writeback_plan.tables[0].start_cell, "E5")
+        self.assertEqual(result.writeback_plan.tables[1].values, [["Processed Data"]])
+        self.assertIn("with statistics", result.writeback_plan.status_message)
+
+    def test_transform_only_labeled_wb_builds_per_target_tables_without_images(self):
+        result = transform_selection(
+            _wb_labeled_selection(),
+            PrismConfig(
+                experiment_preset=ExperimentPreset.WB,
+                preset_has_reference=True,
+                preset_reference_protein="GAPDH",
+                preset_control_group="Control",
+            ),
+            output_start_cell="A13",
+            include_stats=True,
+        )
+        self.assertEqual([name for name, _frame in result.target_data], ["Target-A", "Target-B"])
+        self.assertEqual(
+            [table.values[0][0] for table in result.writeback_plan.tables[::2]],
+            [
+                "Statistics — Target-A",
+                "Processed Data — Target-A",
+                "Statistics — Target-B",
+                "Processed Data — Target-B",
+            ],
+        )
+        self.assertEqual(result.writeback_plan.images, [])
+
     def test_transform_only_returns_data_table_plan_without_host_calls(self):
         result = transform_selection(
             _selection(),

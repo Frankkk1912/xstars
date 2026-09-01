@@ -46,7 +46,6 @@
     "run_qpcr",
     "run_cck8",
     "run_transform_only",
-    "run_standard_curve",
   ]);
   const PICTURE_ID = /^XSTARS_[0-9]{8}_[0-9a-z]{8,32}$/;
 
@@ -92,6 +91,11 @@
         : SELECTION_COMMANDS.includes(command)
           ? modules.spreadsheet.readSelection(application)
           : null;
+      const expectedContext = supplied.expectedContext || selection || {
+        sheet: application && application.ActiveSheet
+          ? application.ActiveSheet.Name
+          : "",
+      };
       const response = await getClient(modules.service).command(
         command,
         selection,
@@ -101,6 +105,7 @@
       const writeback = modules.spreadsheet.executeWritebackPlan(
         application,
         response.writebackPlan,
+        expectedContext,
       );
       return { response, selection, writeback };
     } catch (error) {
@@ -133,9 +138,78 @@
         modules.spreadsheet.setStatus(application, "XSTARS: ELISA 已取消");
         return { cancelled: true, stage: "sample" };
       }
+      if (sample.sheet !== standard.sheet) {
+        throw new Error(`ELISA 样本区必须与标准品区位于同一工作表“${standard.sheet}”`);
+      }
       return await runCommand("run_elisa", {
         selection: standard,
+        expectedContext: standard,
         extra: { sampleSelection: sample },
+      });
+    } catch (error) {
+      return reportError(application, modules, error);
+    }
+  }
+
+  async function runStandardCurve() {
+    const application = root.Application;
+    let modules;
+    try {
+      modules = dependencies();
+      modules.spreadsheet.setStatus(application, "XSTARS: 请选择标准品区域…");
+      const standard = modules.spreadsheet.promptRange(
+        application,
+        "请框选标准品区域（首行为浓度表头）",
+        "XSTARS Standard Curve — 标准品",
+      );
+      if (!standard) {
+        modules.spreadsheet.setStatus(application, "XSTARS: Standard Curve 已取消");
+        return { cancelled: true, stage: "standard" };
+      }
+      modules.spreadsheet.setStatus(application, "XSTARS: 正在配置标准曲线…");
+      const configured = await getClient(modules.service).command(
+        "run_standard_curve",
+        standard,
+        {},
+        { stage: "configure" },
+      );
+      modules.spreadsheet.executeWritebackPlan(
+        application,
+        configured.writebackPlan,
+        standard,
+      );
+      const curveOptions = configured.continuation;
+      if (
+        !curveOptions ||
+        typeof curveOptions.fitMethod !== "string" ||
+        typeof curveOptions.backCalculate !== "boolean"
+      ) {
+        throw new Error("Standard Curve 配置响应无效");
+      }
+      let sample = null;
+      if (curveOptions.backCalculate) {
+        modules.spreadsheet.setStatus(application, "XSTARS: 请选择待反算样本区域…");
+        sample = modules.spreadsheet.promptRange(
+          application,
+          "请框选待反算样本区域（首行为分组表头）",
+          "XSTARS Standard Curve — 样本",
+        );
+        if (!sample) {
+          modules.spreadsheet.setStatus(application, "XSTARS: Standard Curve 已取消");
+          return { cancelled: true, stage: "sample" };
+        }
+        if (sample.sheet !== standard.sheet) {
+          throw new Error(`样本区必须与标准品区位于同一工作表“${standard.sheet}”`);
+        }
+      }
+      return await runCommand("run_standard_curve", {
+        selection: standard,
+        expectedContext: standard,
+        extra: {
+          stage: "execute",
+          curveOptions,
+          ...(sample ? { sampleSelection: sample } : {}),
+        },
       });
     } catch (error) {
       return reportError(application, modules, error);
@@ -211,6 +285,8 @@
       void runElisa();
     } else if (command === "run_export") {
       void runExport();
+    } else if (command === "run_standard_curve") {
+      void runStandardCurve();
     } else if (command) {
       void runCommand(command);
     }
@@ -232,5 +308,6 @@
     runCommand,
     runElisa,
     runExport,
+    runStandardCurve,
   });
 })(typeof window === "undefined" ? globalThis : window);

@@ -37,6 +37,7 @@ from .analysis import (
     elisa_selections,
     guess_blank,
     guess_control,
+    prepare_elisa_standard,
     split_selection_labels,
     standard_curve_selection,
     transform_selection,
@@ -49,6 +50,8 @@ from .contracts import (
     ContractError,
     ErrorCode,
     SelectionPayload,
+    StandardCurveOptions,
+    TransformOptions,
     WritebackPlan,
     cell_to_a1,
     parse_cell,
@@ -163,12 +166,16 @@ def _output_start_cell(selection: SelectionPayload) -> str:
     return cell_to_a1(start_row + len(selection.values) + 2, start_column)
 
 
+def _require_main_thread_dialog() -> None:
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError("Tkinter dialogs must run on the worker main thread")
+
+
 def _dialog_config(
     selection: SelectionPayload, base_config: PrismConfig
 ) -> PrismConfig:
-    """Show the existing settings dialog on the current (main) thread."""
-    if threading.current_thread() is not threading.main_thread():
-        raise RuntimeError("Tkinter dialogs must run on the worker main thread")
+    """Show general WPS settings without the unsupported file-export controls."""
+    _require_main_thread_dialog()
     _labels, frame = split_selection_labels(selection)
     from ..ui_dialog import SettingsDialog  # GUI import remains worker-only.
 
@@ -176,11 +183,65 @@ def _dialog_config(
         DataHandler.group_names(frame),
         DataHandler.group_sizes(frame),
         base_config=base_config,
+        hide_file_export=True,
     )
     chosen = dialog.show()
     if chosen is None:
         raise WorkerCancelled("settings dialog cancelled")
+    chosen.export_path = ""
     return chosen
+
+
+def _transform_dialog(
+    selection: SelectionPayload, base_config: PrismConfig
+) -> tuple[PrismConfig, TransformOptions]:
+    _require_main_thread_dialog()
+    labels, frame = split_selection_labels(selection)
+    from ..ui_dialog import TransformOnlyDialog
+
+    groups = DataHandler.group_names(frame)
+    if not base_config.preset_control_group and groups:
+        base_config.preset_control_group = guess_control(groups)
+    if labels is not None:
+        base_config.preset_has_reference = True
+    chosen = TransformOnlyDialog(
+        groups,
+        DataHandler.group_sizes(frame),
+        base_config=base_config,
+    ).show()
+    if chosen is None:
+        raise WorkerCancelled("transform dialog cancelled")
+    return chosen, TransformOptions(bool(getattr(chosen, "_include_stats", False)))
+
+
+def _standard_curve_dialog(selection: SelectionPayload, _config: PrismConfig) -> tuple[Any, bool]:
+    _require_main_thread_dialog()
+    from ..tools.standard_curve import wide_to_conc_od
+    from ..tools.standard_curve_dialog import StandardCurveDialog
+
+    frame = DataHandler.from_selection_payload(selection)
+    conc, od = wide_to_conc_od(frame)
+    chosen = StandardCurveDialog(
+        conc,
+        od,
+        DataHandler.group_names(frame),
+        DataHandler.group_sizes(frame),
+    ).show()
+    if chosen is None or chosen.fit_result is None:
+        raise WorkerCancelled("standard curve dialog cancelled")
+    return chosen.fit_result, bool(chosen.back_calculate)
+
+
+def _elisa_dialog(selection: SelectionPayload, base_config: PrismConfig) -> tuple[PrismConfig, Any, bool]:
+    _require_main_thread_dialog()
+    from ..presets.elisa_dialog import ELISADialog
+
+    _frame, conc, od = prepare_elisa_standard(selection)
+    chosen = ELISADialog(conc, od, base_config=base_config).show()
+    if chosen is None or chosen.fit_result is None:
+        raise WorkerCancelled("ELISA dialog cancelled")
+    config = chosen.config or base_config
+    return config, chosen.fit_result, bool(chosen.show_fit_curve)
 
 
 _SELECTION_COMMANDS = {
@@ -198,7 +259,6 @@ _DIALOG_COMMANDS = {
     Command.WB,
     Command.QPCR,
     Command.CCK8,
-    Command.TRANSFORM_ONLY,
 }
 _PRESET_COMMANDS = {
     Command.WB: ExperimentPreset.WB,
@@ -331,24 +391,47 @@ def _finalize_analysis(
         if isinstance(result, AnalysisResult)
         else result.standard_data
     )
-    # Analysis/writeback remains usable; later export reports a stable missing-payload error.
-    with suppress(Exception):
-        export_module.persist_render_payload(
-            picture_id,
-            frame,
-            config,
-            result.figure,
-            renderer=renderer,
+    figure_sources = (
+        result.figure_sources
+        if isinstance(result, AnalysisResult)
+        else {"primary_figure": result.figure}
+    )
+    render_data_sources = (
+        result.render_data_sources
+        if isinstance(result, AnalysisResult)
+        else {"primary_figure": result.standard_data}
+    )
+    for index, image in enumerate(result.writeback_plan.images, start=1):
+        source_key = image.source_key or "primary_figure"
+        figure = figure_sources.get(source_key)
+        if figure is None:
+            raise ValueError(f"missing figure source: {source_key}")
+        image_artifact = (
+            artifact_path
+            if index == 1
+            else artifact_path.with_stem(f"{artifact_path.stem}_{index}")
         )
-    for image in result.writeback_plan.images:
-        image.picture_id = picture_id
+        if not image_artifact.is_file():
+            figure.savefig(image_artifact, format="png", dpi=config.export_dpi)
+        image_picture_id = picture_id if index == 1 else export_module.new_picture_id()
+        image_renderer = "standard_curve" if source_key == "standard_curve_figure" else renderer
+        payload_frame = render_data_sources.get(source_key, frame)
+        with suppress(Exception):
+            export_module.persist_render_payload(
+                image_picture_id,
+                payload_frame,
+                config,
+                figure,
+                renderer=image_renderer,
+            )
+        image.picture_id = image_picture_id
         image.artifact = Artifact(
-            path=str(artifact_path),
+            path=str(image_artifact),
             format=ArtifactFormat.PNG,
             dpi=config.export_dpi,
         )
         image.source_key = None
-    plt.close(result.figure)
+        plt.close(figure)
     return _success(command, result.writeback_plan)
 
 
@@ -357,6 +440,13 @@ def execute_request(
     job_directory: Path,
     *,
     dialog_config: Callable[[SelectionPayload, PrismConfig], PrismConfig] = _dialog_config,
+    transform_dialog: Callable[
+        [SelectionPayload, PrismConfig], tuple[PrismConfig, TransformOptions]
+    ] = _transform_dialog,
+    standard_dialog: Callable[[SelectionPayload, PrismConfig], tuple[Any, bool]] = _standard_curve_dialog,
+    elisa_dialog: Callable[
+        [SelectionPayload, PrismConfig], tuple[PrismConfig, Any, bool]
+    ] = _elisa_dialog,
 ) -> dict[str, Any]:
     """Execute one validated WPS command and return JSON-safe output."""
     if threading.current_thread() is not threading.main_thread():
@@ -405,20 +495,83 @@ def execute_request(
         raise ContractError(ErrorCode.INVALID_SELECTION, "selection must be an object")
     selection = SelectionPayload.from_dict(selection_data)
     _configure_preset(command, selection, config)
+    transform_options = TransformOptions()
+    selected_fit = None
+    back_calculate_samples = False
+    show_fit_curve = False
+    stage = request.get("stage")
     if command in _DIALOG_COMMANDS:
         config = dialog_config(selection, config)
+    elif command is Command.TRANSFORM_ONLY:
+        config, transform_options = transform_dialog(selection, config)
+    elif command is Command.STANDARD_CURVE and stage == "configure":
+        selected_fit, back_calculate_samples = standard_dialog(selection, config)
+        _check_cancelled(cancel_path)
+        continuation = StandardCurveOptions(
+            fit_method=selected_fit.method,
+            back_calculate=back_calculate_samples,
+        )
+        return _success(
+            command,
+            WritebackPlan(status_message="XSTARS: Standard Curve 设置已确认"),
+            continuation=continuation.to_dict(),
+        )
+    elif command is Command.STANDARD_CURVE and stage == "execute":
+        raw_options = request.get("curveOptions")
+        if not isinstance(raw_options, Mapping):
+            raise ContractError(
+                ErrorCode.INVALID_REQUEST, "curveOptions must be an object"
+            )
+        curve_options = StandardCurveOptions.from_dict(raw_options)
+        config.preset_elisa_fit_method = curve_options.fit_method
+        back_calculate_samples = curve_options.back_calculate
+    elif command is Command.STANDARD_CURVE:
+        selected_fit, back_calculate_samples = standard_dialog(selection, config)
+    elif command is Command.ELISA:
+        config, selected_fit, show_fit_curve = elisa_dialog(selection, config)
+    if selected_fit is not None and isinstance(getattr(selected_fit, "method", None), str):
+        config.preset_elisa_fit_method = selected_fit.method
     _check_cancelled(cancel_path)
 
     artifact_path = (job_directory / "chart.png").resolve()
-    config.export_path = str(artifact_path)
-    config.export_format = "png"
+    requested_export_path = config.export_path
+    if command is Command.ELISA and requested_export_path:
+        # This path came from the local Tk file chooser, not the HTTP request.
+        config.export_path = requested_export_path
+    else:
+        config.export_path = str(artifact_path)
+        config.export_format = "png"
     output_start = _output_start_cell(selection)
     if command is Command.TRANSFORM_ONLY:
-        transformed = transform_selection(selection, config, output_start_cell=output_start)
+        config.export_path = ""
+        transformed = transform_selection(
+            selection,
+            config,
+            output_start_cell=output_start,
+            include_stats=transform_options.include_stats,
+        )
+        transformed.writeback_plan.status_message += (
+            "；高分辨率图片请使用 Ribbon 的 Export 按钮"
+        )
         return _success(command, transformed.writeback_plan)
     if command is Command.STANDARD_CURVE:
         config.export_path = ""
-        result = standard_curve_selection(selection, config, output_start_cell=output_start)
+        sample = None
+        if back_calculate_samples:
+            sample_data = request.get("sampleSelection")
+            if not isinstance(sample_data, Mapping):
+                raise ContractError(
+                    ErrorCode.INVALID_SELECTION,
+                    "已启用样本反算，但未提供样本选区；请重试并选择样本区域",
+                )
+            sample = SelectionPayload.from_dict(sample_data)
+        result = standard_curve_selection(
+            selection,
+            config,
+            output_start_cell=output_start,
+            fit_result=selected_fit,
+            sample_payload=sample,
+        )
         return _finalize_analysis(command, result, config, artifact_path, renderer="standard_curve")
     if command is Command.ELISA:
         sample_data = request.get("sampleSelection")
@@ -430,6 +583,8 @@ def execute_request(
             sample,
             config,
             output_start_cell=output_start,
+            fit_result=selected_fit,
+            show_fit_curve=show_fit_curve,
         )
     else:
         result = analyze_selection(
@@ -437,6 +592,10 @@ def execute_request(
             config,
             output_start_cell=output_start,
             include_processed_data=command in _PRESET_COMMANDS,
+        )
+    if command in _DIALOG_COMMANDS or command is Command.ELISA:
+        result.writeback_plan.status_message += (
+            "；高分辨率图片请使用 Ribbon 的 Export 按钮"
         )
     _check_cancelled(cancel_path)
     return _finalize_analysis(command, result, config, artifact_path)

@@ -165,6 +165,35 @@ test("WritebackPlan writes resized ranges and inserts a named picture at its anc
   assert.equal(application.StatusBar, "XSTARS: Quick Run complete");
 });
 
+test("WritebackPlan rejects a changed ActiveSheet before any write", () => {
+  const writes = [];
+  const application = {
+    ActiveSheet: {
+      Name: "Other",
+      Range: (...args) => {
+        writes.push(args);
+        return {};
+      },
+    },
+    StatusBar: false,
+  };
+  const { api } = loadSpreadsheet(application);
+
+  assert.throws(
+    () => api.executeWritebackPlan(
+      application,
+      {
+        version: "1.0",
+        tables: [{ startCell: "A1", values: [[1]] }],
+        images: [],
+      },
+      { sheet: "Data" },
+    ),
+    /请切回“Data”.*未写入任何内容/,
+  );
+  assert.deepEqual(writes, []);
+});
+
 test("image writeback uses native dimensions when width and height are omitted", () => {
   const calls = [];
   const application = {

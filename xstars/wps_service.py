@@ -25,6 +25,7 @@ from .application.contracts import (
     ContractError,
     ErrorCode,
     SelectionPayload,
+    StandardCurveOptions,
 )
 
 LOOPBACK_HOST = "127.0.0.1"
@@ -247,6 +248,27 @@ class SubprocessJobRunner:
         self.jobs_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         _restrict_permissions(self.jobs_root, 0o700)
         cleanup_stale_jobs(self.jobs_root)
+        self._active_lock = threading.Lock()
+        self._active_process: Any | None = None
+        self._active_cancel_path: Path | None = None
+        self._cancel_requested = False
+
+    def cancel_current(self, *, grace: float = 3.0) -> bool:
+        """Signal and, after a short grace, terminate the sole active worker."""
+        with self._active_lock:
+            process = self._active_process
+            cancel_path = self._active_cancel_path
+            if process is None or cancel_path is None:
+                self._cancel_requested = True
+                return True
+        cancel_path.touch()
+        deadline = time.monotonic() + max(0.0, grace)
+        poll = getattr(process, "poll", None)
+        while callable(poll) and poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if callable(poll) and poll() is None:
+            process.kill()
+        return True
 
     def run(self, request: Mapping[str, Any]) -> dict[str, Any]:
         cleanup_stale_jobs(self.jobs_root)
@@ -276,6 +298,12 @@ class SubprocessJobRunner:
             stderr=subprocess.DEVNULL,
             shell=False,
         )
+        with self._active_lock:
+            self._active_process = process
+            self._active_cancel_path = cancel_path
+            if self._cancel_requested:
+                cancel_path.touch()
+                self._cancel_requested = False
         timed_out = False
         try:
             return_code = process.wait(timeout=self.timeout)
@@ -312,6 +340,11 @@ class SubprocessJobRunner:
             result["jobId"] = job_id
             return result
         finally:
+            with self._active_lock:
+                if self._active_process is process:
+                    self._active_process = None
+                    self._active_cancel_path = None
+                    self._cancel_requested = False
             request_path.unlink(missing_ok=True)
             result_path.unlink(missing_ok=True)
             cancel_path.unlink(missing_ok=True)
@@ -408,7 +441,7 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
             return
-        if self.path != "/command":
+        if self.path not in {"/command", "/cancel"}:
             self._send_error(404, "NOT_FOUND", "endpoint not found")
             return
         requested_method = self.headers.get("Access-Control-Request-Method", "POST")
@@ -481,6 +514,8 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             "command",
             "selection",
             "sampleSelection",
+            "stage",
+            "curveOptions",
             "config",
             "export",
         }
@@ -507,8 +542,15 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             return None
         if (
             ("selection" in payload and command not in _SELECTION_COMMANDS)
-            or ("sampleSelection" in payload and command is not Command.ELISA)
+            or (
+                "sampleSelection" in payload
+                and command not in {Command.ELISA, Command.STANDARD_CURVE}
+            )
             or ("export" in payload and command is not Command.EXPORT)
+            or (
+                ("stage" in payload or "curveOptions" in payload)
+                and command is not Command.STANDARD_CURVE
+            )
         ):
             self._send_error(
                 400,
@@ -535,7 +577,45 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             except ContractError as exc:
                 self._send_error(400, exc.code, str(exc))
                 return None
-        if command is Command.ELISA:
+        if command is Command.STANDARD_CURVE and "stage" in payload:
+            stage = payload.get("stage")
+            if stage not in {"configure", "execute"}:
+                self._send_error(
+                    400, ErrorCode.INVALID_REQUEST, "standard curve stage is invalid"
+                )
+                return None
+            normalized["stage"] = stage
+            if stage == "execute":
+                curve_options = payload.get("curveOptions")
+                if not isinstance(curve_options, Mapping):
+                    self._send_error(
+                        400,
+                        ErrorCode.INVALID_REQUEST,
+                        "curveOptions must be an object",
+                    )
+                    return None
+                try:
+                    normalized["curveOptions"] = StandardCurveOptions.from_dict(
+                        curve_options
+                    ).to_dict()
+                except ContractError as exc:
+                    self._send_error(400, exc.code, str(exc))
+                    return None
+            elif "curveOptions" in payload:
+                self._send_error(
+                    400,
+                    ErrorCode.INVALID_REQUEST,
+                    "curveOptions are only allowed for execute stage",
+                )
+                return None
+        if command is Command.ELISA and "sampleSelection" not in payload:
+            self._send_error(
+                400,
+                ErrorCode.INVALID_SELECTION,
+                "sampleSelection must be an object",
+            )
+            return None
+        if command in {Command.ELISA, Command.STANDARD_CURVE} and "sampleSelection" in payload:
             sample_data = payload.get("sampleSelection")
             if not isinstance(sample_data, Mapping):
                 self._send_error(
@@ -569,11 +649,32 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
             return
-        if self.path != "/command":
+        if self.path not in {"/command", "/cancel"}:
             self._send_error(404, "NOT_FOUND", "endpoint not found")
             return
         if not self._authenticated():
             self._send_error(401, "UNAUTHORIZED", "a valid bearer token is required")
+            return
+        if self.path == "/cancel":
+            cancel = getattr(self._wps_server.runner, "cancel_current", None)
+            cancelled = bool(
+                self._wps_server.job_lock.locked()
+                and callable(cancel)
+                and cancel()
+            )
+            deadline = time.monotonic() + 4.0
+            while self._wps_server.job_lock.locked() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self._send_json(
+                200,
+                {
+                    "version": SCHEMA_VERSION,
+                    "ok": True,
+                    "status": "cancelled" if cancelled else "idle",
+                    "cancelled": cancelled,
+                    "busy": self._wps_server.job_lock.locked(),
+                },
+            )
             return
         request = self._read_command()
         if request is None:

@@ -249,6 +249,65 @@ class SelectionPayload:
             raise ContractError(ErrorCode.INVALID_REQUEST, f"Missing field: {exc.args[0]}") from exc
 
 
+_STANDARD_CURVE_METHODS = {
+    "auto",
+    "four_pl",
+    "three_pl",
+    "linear",
+    "log_linear_reg",
+    "interpolation",
+}
+
+
+@dataclass
+class StandardCurveOptions:
+    """Serializable choices returned by the staged standard-curve dialog."""
+
+    fit_method: str = "auto"
+    back_calculate: bool = True
+
+    def __post_init__(self) -> None:
+        if self.fit_method not in _STANDARD_CURVE_METHODS:
+            raise ContractError(ErrorCode.INVALID_REQUEST, "fitMethod is invalid")
+        if not isinstance(self.back_calculate, bool):
+            raise ContractError(ErrorCode.INVALID_REQUEST, "backCalculate must be a boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fitMethod": self.fit_method,
+            "backCalculate": self.back_calculate,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> StandardCurveOptions:
+        if not isinstance(data, Mapping) or set(data) - {"fitMethod", "backCalculate"}:
+            raise ContractError(ErrorCode.INVALID_REQUEST, "standard curve options are invalid")
+        return cls(
+            fit_method=data.get("fitMethod", "auto"),
+            back_calculate=data.get("backCalculate", True),
+        )
+
+
+@dataclass
+class TransformOptions:
+    """Transient transform-only choices shared by host adapters."""
+
+    include_stats: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.include_stats, bool):
+            raise ContractError(ErrorCode.INVALID_REQUEST, "includeStats must be a boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"includeStats": self.include_stats}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> TransformOptions:
+        if not isinstance(data, Mapping) or set(data) - {"includeStats"}:
+            raise ContractError(ErrorCode.INVALID_REQUEST, "transform options are invalid")
+        return cls(include_stats=data.get("includeStats", False))
+
+
 @dataclass
 class TableWriteback:
     start_cell: str

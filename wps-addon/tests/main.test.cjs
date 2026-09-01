@@ -147,6 +147,52 @@ test("Run and Quick Run serialize selection, call the broker, and execute Writeb
   });
 });
 
+test("an async command refuses writeback after ActiveSheet changes", async () => {
+  const host = makeHost();
+  let resolveCommand;
+  let commandStarted;
+  const started = new Promise((resolve) => {
+    commandStarted = resolve;
+  });
+  const pending = new Promise((resolve) => {
+    resolveCommand = resolve;
+  });
+  const { context, alerts } = loadAddin((url) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    commandStarted();
+    return pending;
+  }, host.application);
+
+  const request = context.window.XstarsWpsAddin.runCommand("run_quick");
+  await started;
+  const wrongSheetWrites = [];
+  host.application.ActiveSheet = {
+    Name: "Other",
+    Range: (...args) => {
+      wrongSheetWrites.push(args);
+      return {};
+    },
+  };
+  resolveCommand(jsonResponse({
+    ok: true,
+    writebackPlan: {
+      version: "1.0",
+      tables: [{ startCell: "D2", values: [[1]] }],
+      images: [],
+      statusMessage: "done",
+    },
+  }));
+
+  const result = await request;
+
+  assert.match(result.message, /请切回“Data”/);
+  assert.deepEqual(wrongSheetWrites, []);
+  assert.equal(host.tableWrites.length, 0);
+  assert.equal(alerts.length, 1);
+});
+
 test("OnAction dispatches the approved Quick Run control asynchronously", async () => {
   const host = makeHost();
   let resolveCommand;
@@ -259,6 +305,141 @@ test("ELISA uses two Type=8 InputBox ranges and sends both selections", async ()
   assert.equal(commandBody.command, "run_elisa");
   assert.equal(commandBody.selection.address, "$A$1:$C$4");
   assert.equal(commandBody.sampleSelection.address, "$E$1:$F$4");
+});
+
+test("Standard Curve uses two Type=8 selections and sends samples for optional back-calculation", async () => {
+  const host = makeHost();
+  const ranges = [
+    {
+      Address: () => "$A$1:$C$3",
+      Rows: { Count: 3 },
+      Columns: { Count: 3 },
+      Value2: [[1, 10, 100], [0.1, 1, 10], [0.11, 1.1, 10.1]],
+      Worksheet: host.application.ActiveSheet,
+    },
+    {
+      Address: () => "$E$1:$F$3",
+      Rows: { Count: 3 },
+      Columns: { Count: 2 },
+      Value2: [["Control", "Treatment"], [0.2, 0.4], [0.3, 0.5]],
+      Worksheet: host.application.ActiveSheet,
+    },
+  ];
+  const inputTypes = [];
+  host.application.InputBox = (...args) => {
+    inputTypes.push(args[7]);
+    return ranges.shift();
+  };
+  const commandBodies = [];
+  const { context } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    const body = JSON.parse(init.body);
+    commandBodies.push(body);
+    if (body.stage === "configure") {
+      return jsonResponse({
+        ok: true,
+        continuation: { fitMethod: "linear", backCalculate: true },
+        writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "configured" },
+      });
+    }
+    return jsonResponse({
+      ok: true,
+      writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "done" },
+    });
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runStandardCurve();
+
+  assert.equal(result.response.ok, true);
+  assert.deepEqual(inputTypes, [8, 8]);
+  assert.deepEqual(commandBodies.map((body) => body.stage), ["configure", "execute"]);
+  assert.equal(commandBodies[1].command, "run_standard_curve");
+  assert.equal(commandBodies[1].selection.address, "$A$1:$C$3");
+  assert.equal(commandBodies[1].sampleSelection.address, "$E$1:$F$3");
+  assert.deepEqual(commandBodies[1].curveOptions, {
+    fitMethod: "linear",
+    backCalculate: true,
+  });
+});
+
+test("Standard Curve sample-selection cancellation sends no execute-stage request", async () => {
+  const host = makeHost();
+  let prompts = 0;
+  host.application.InputBox = () => {
+    prompts += 1;
+    return prompts === 1
+      ? {
+          Address: () => "$A$1:$C$3",
+          Rows: { Count: 3 },
+          Columns: { Count: 3 },
+          Value2: [[1, 10, 100], [0.1, 1, 10], [0.11, 1.1, 10.1]],
+          Worksheet: host.application.ActiveSheet,
+        }
+      : false;
+  };
+  const stages = [];
+  const { context } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    const body = JSON.parse(init.body);
+    stages.push(body.stage);
+    return jsonResponse({
+      ok: true,
+      continuation: { fitMethod: "linear", backCalculate: true },
+      writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "configured" },
+    });
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runStandardCurve();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    cancelled: true,
+    stage: "sample",
+  });
+  assert.deepEqual(stages, ["configure"]);
+});
+
+test("Standard Curve skips the second InputBox when back-calculation is disabled", async () => {
+  const host = makeHost();
+  let prompts = 0;
+  host.application.InputBox = () => {
+    prompts += 1;
+    return {
+      Address: () => "$A$1:$C$3",
+      Rows: { Count: 3 },
+      Columns: { Count: 3 },
+      Value2: [[1, 10, 100], [0.1, 1, 10], [0.11, 1.1, 10.1]],
+      Worksheet: host.application.ActiveSheet,
+    };
+  };
+  const bodies = [];
+  const { context } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    return body.stage === "configure"
+      ? jsonResponse({
+          ok: true,
+          continuation: { fitMethod: "linear", backCalculate: false },
+          writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "configured" },
+        })
+      : jsonResponse({
+          ok: true,
+          writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "done" },
+        });
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runStandardCurve();
+
+  assert.equal(result.response.ok, true);
+  assert.equal(prompts, 1);
+  assert.equal(bodies[1].sampleSelection, undefined);
+  assert.equal(bodies[1].curveOptions.backCalculate, false);
 });
 
 test("ELISA cancellation is friendly and sends no service request", async () => {

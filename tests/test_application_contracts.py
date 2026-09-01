@@ -21,7 +21,9 @@ from xstars.application import (
     ErrorDTO,
     ImageWriteback,
     SelectionPayload,
+    StandardCurveOptions,
     TableWriteback,
+    TransformOptions,
     WritebackPlan,
     cell_to_a1,
     ensure_path_within,
@@ -170,6 +172,32 @@ class ContractTests(unittest.TestCase):
         decoded = json.loads(json.dumps(error.to_dict()))
         self.assertEqual(ErrorDTO.from_dict(decoded), error)
         self.assertEqual(decoded["code"], "INVALID_SELECTION")
+
+    def test_standard_curve_options_round_trip_and_validation(self):
+        options = StandardCurveOptions.from_dict(
+            {"fitMethod": "four_pl", "backCalculate": False}
+        )
+        self.assertEqual(
+            options.to_dict(),
+            {"fitMethod": "four_pl", "backCalculate": False},
+        )
+        with self.assertRaises(ContractError):
+            StandardCurveOptions.from_dict(
+                {"fitMethod": "exec", "backCalculate": True}
+            )
+        with self.assertRaises(ContractError):
+            StandardCurveOptions.from_dict(
+                {"fitMethod": "linear", "backCalculate": "yes"}
+            )
+
+    def test_transform_options_round_trip_and_validation(self):
+        options = TransformOptions.from_dict({"includeStats": True})
+        self.assertTrue(options.include_stats)
+        self.assertEqual(options.to_dict(), {"includeStats": True})
+        with self.assertRaises(ContractError):
+            TransformOptions.from_dict({"includeStats": "yes"})
+        with self.assertRaises(ContractError):
+            TransformOptions.from_dict({"includeStats": False, "extra": True})
 
     def test_cell_conversion_is_stable(self):
         self.assertEqual(parse_cell("$XFD$1048576"), (1_048_576, 16_384))

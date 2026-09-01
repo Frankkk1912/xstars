@@ -27,6 +27,7 @@ from ..stats_engine import StatsEngine, StatsResult
 from ..styles import get_prism_context
 from ..tools.standard_curve import (
     CurveFitResult,
+    back_calculate,
     fit_standard_curve,
     wide_to_conc_od,
 )
@@ -51,11 +52,17 @@ class AnalysisResult:
     figure: Any
     preset: BasePreset | None = None
     writeback_plan: WritebackPlan = field(default_factory=WritebackPlan)
+    extra_figures: dict[str, Any] = field(default_factory=dict)
+    extra_render_data: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     @property
     def figure_sources(self) -> dict[str, Any]:
-        """In-process figure registry used by the Excel plan executor."""
-        return {"primary_figure": self.figure}
+        """In-process figure registry used by host plan executors."""
+        return {"primary_figure": self.figure, **self.extra_figures}
+
+    @property
+    def render_data_sources(self) -> dict[str, pd.DataFrame]:
+        return {"primary_figure": self.transformed_data, **self.extra_render_data}
 
 
 @dataclass
@@ -92,6 +99,7 @@ class TransformResult:
 
     transformed_data: pd.DataFrame
     writeback_plan: WritebackPlan
+    target_data: list[tuple[str, pd.DataFrame]] = field(default_factory=list)
 
 
 @dataclass
@@ -102,6 +110,10 @@ class StandardCurveResult:
     fit_result: CurveFitResult
     figure: Any
     writeback_plan: WritebackPlan
+
+    @property
+    def figure_sources(self) -> dict[str, Any]:
+        return {"primary_figure": self.figure}
 
 
 def guess_control(groups: list[str]) -> str:
@@ -524,14 +536,16 @@ def _curve_parameter_values(fit: CurveFitResult) -> list[list[Any]]:
 def plot_standard_curve(
     standard_data: pd.DataFrame,
     config: PrismConfig,
+    *,
+    fit_result: CurveFitResult | None = None,
 ) -> tuple[CurveFitResult, Any]:
-    """Fit and plot numeric wide standard data without host interaction."""
+    """Fit (or reuse a selected fit) and plot numeric wide standard data."""
     numeric = standard_data.copy()
     for column in numeric.columns:
         numeric[column] = pd.to_numeric(numeric[column], errors="coerce")
     numeric = numeric.dropna(how="all").reset_index(drop=True)
     conc, od = wide_to_conc_od(numeric)
-    fit = fit_standard_curve(conc, od, config.preset_elisa_fit_method)
+    fit = fit_result or fit_standard_curve(conc, od, config.preset_elisa_fit_method)
 
     from matplotlib import pyplot as plt
 
@@ -570,31 +584,60 @@ def standard_curve_selection(
     *,
     output_start_cell: str,
     image_name: str = "XSTARS_StdCurve_1",
+    fit_result: CurveFitResult | None = None,
+    sample_payload: SelectionPayload | None = None,
 ) -> StandardCurveResult:
-    """Fit a standard curve and construct its parameter-table/image plan."""
+    """Fit a standard curve and optionally back-calculate a sample selection."""
     frame = DataHandler.from_selection_payload(payload)
     if frame.shape[1] < 2:
         raise ValueError("Select at least two concentration columns.")
-    fit, figure = plot_standard_curve(frame, config)
+    fit, figure = plot_standard_curve(frame, config, fit_result=fit_result)
     row, column = parse_cell(output_start_cell)
     parameter_values = _curve_parameter_values(fit)
+    tables = [
+        TableWriteback(
+            start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]
+        ),
+        TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
+    ]
+    current_row = row + len(parameter_values) + 2
+    if sample_payload is not None:
+        samples = DataHandler.from_selection_payload(sample_payload)
+        calculated = samples.copy()
+        for sample_column in calculated.columns:
+            od_values = pd.Series(
+                pd.to_numeric(calculated[sample_column], errors="coerce"),
+                dtype=float,
+            )
+            calculated[sample_column] = back_calculate(
+                fit, od_values.to_numpy(dtype=float)
+            )
+        tables.extend(
+            [
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row, column),
+                    values=[["Back-Calculated Concentrations"]],
+                ),
+                TableWriteback(
+                    start_cell=cell_to_a1(current_row + 1, column),
+                    values=dataframe_values(calculated),
+                ),
+            ]
+        )
+        current_row += len(calculated) + 3
     plan = WritebackPlan(
-        tables=[
-            TableWriteback(
-                start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]
-            ),
-            TableWriteback(
-                start_cell=cell_to_a1(row + 1, column), values=parameter_values
-            ),
-        ],
+        tables=tables,
         images=[
             ImageWriteback(
-                anchor_cell=cell_to_a1(row + len(parameter_values) + 2, column),
+                anchor_cell=cell_to_a1(current_row, column),
                 name=image_name,
                 source_key="primary_figure",
             )
         ],
-        status_message=f"XSTARS: Standard curve fitted ({fit.method})",
+        status_message=(
+            f"XSTARS: Standard curve fitted ({fit.method})"
+            + ("; samples back-calculated" if sample_payload is not None else "")
+        ),
     )
     return StandardCurveResult(frame, fit, figure, plan)
 
@@ -613,15 +656,10 @@ def _elisa_standard_context(payload: SelectionPayload) -> str:
     return f"收到 {received_rows} 行 × {received_columns} 列；列头预览：[{preview}]"
 
 
-def elisa_selections(
+def prepare_elisa_standard(
     standard_payload: SelectionPayload,
-    sample_payload: SelectionPayload,
-    config: PrismConfig,
-    *,
-    output_start_cell: str,
-    image_name: str = "XSTARS_ELISA_1",
-) -> AnalysisResult:
-    """Fit standards then back-calculate and analyze a second sample selection."""
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+    """Validate an ELISA standard selection before opening the fit dialog."""
     standard_frame = DataHandler.from_selection_payload(standard_payload)
     standard_context = _elisa_standard_context(standard_payload)
     if standard_frame.shape[0] == 0:
@@ -653,7 +691,24 @@ def elisa_selections(
             f"标准品数据清洗后 {standard_frame.shape[0]} 行 × {standard_frame.shape[1]} 列；"
             f"{standard_context}）。",
         )
-    fit = fit_standard_curve(conc, od, config.preset_elisa_fit_method)
+    return standard_frame, conc, od
+
+
+def elisa_selections(
+    standard_payload: SelectionPayload,
+    sample_payload: SelectionPayload,
+    config: PrismConfig,
+    *,
+    output_start_cell: str,
+    image_name: str = "XSTARS_ELISA_1",
+    fit_result: CurveFitResult | None = None,
+    show_fit_curve: bool = False,
+) -> AnalysisResult:
+    """Fit standards then back-calculate and analyze a second sample selection."""
+    standard_frame, conc, od = prepare_elisa_standard(standard_payload)
+    fit = fit_result or fit_standard_curve(
+        conc, od, config.preset_elisa_fit_method
+    )
     config.experiment_preset = ExperimentPreset.ELISA
     config.elisa_fit_result = fit
     sample_frame = DataHandler.from_selection_payload(sample_payload)
@@ -676,6 +731,23 @@ def elisa_selections(
         TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
     ]
     r2 = f", R²={fit.r_squared:.4f}" if fit.r_squared is not None else ""
+    if show_fit_curve:
+        _curve_fit, curve_figure = plot_standard_curve(
+            standard_frame, config, fit_result=fit
+        )
+        result.extra_figures["standard_curve_figure"] = curve_figure
+        result.extra_render_data["standard_curve_figure"] = standard_frame
+        analysis_image = result.writeback_plan.images[0]
+        analysis_row, _analysis_column = parse_cell(analysis_image.anchor_cell)
+        height_points = float(result.figure.get_size_inches()[1]) * 72
+        curve_anchor_row = analysis_row + ceil(height_points / 15) + 1
+        result.writeback_plan.images.append(
+            ImageWriteback(
+                anchor_cell=cell_to_a1(curve_anchor_row, column),
+                name="XSTARS_ELISA_StdCurve_1",
+                source_key="standard_curve_figure",
+            )
+        )
     result.writeback_plan.status_message = (
         f"XSTARS: ELISA ({fit.method}{r2}) — {result.stats_result.decision_path}"
     )
@@ -688,19 +760,95 @@ def transform_selection(
     *,
     output_start_cell: str,
     title: str = "Processed Data",
+    include_stats: bool = False,
 ) -> TransformResult:
-    """Apply only the selected preset and describe the table writeback."""
-    frame = DataHandler.from_selection_payload(payload)
-    transformed, _preset = transform_dataframe(frame, config)
+    """Apply a preset only, including Excel-equivalent labeled/stat outputs."""
+    labels, frame = split_selection_labels(payload)
     row, column = parse_cell(output_start_cell)
-    plan = WritebackPlan(
-        tables=[
-            TableWriteback(start_cell=cell_to_a1(row, column), values=[[title]]),
+    if (
+        labels is not None
+        and config.preset_has_reference
+        and config.experiment_preset in (ExperimentPreset.WB, ExperimentPreset.QPCR)
+    ):
+        DataHandler.validate(frame)
+        preset = get_preset(config.experiment_preset)
+        options = build_preset_options(config)
+        if preset is None or options is None or not hasattr(preset, "transform_labeled"):
+            raise ValueError("The selected preset does not support labeled data.")
+        target_data = list(
+            cast(Any, preset).transform_labeled(labels, frame, options)
+        )
+        if not target_data:
+            raise ValueError("Labeled transform produced no target data.")
+        tables: list[TableWriteback] = []
+        current_row = row
+        for target_name, transformed in target_data:
+            if include_stats:
+                stats = StatsEngine(config).analyze(transformed).to_dataframe()
+                tables.extend(
+                    [
+                        TableWriteback(
+                            start_cell=cell_to_a1(current_row, column),
+                            values=[[f"Statistics — {target_name}"]],
+                        ),
+                        TableWriteback(
+                            start_cell=cell_to_a1(current_row + 1, column),
+                            values=dataframe_values(stats),
+                        ),
+                    ]
+                )
+                current_row += len(stats) + 3
+            tables.extend(
+                [
+                    TableWriteback(
+                        start_cell=cell_to_a1(current_row, column),
+                        values=[[f"Processed Data — {target_name}"]],
+                    ),
+                    TableWriteback(
+                        start_cell=cell_to_a1(current_row + 1, column),
+                        values=dataframe_values(transformed),
+                    ),
+                ]
+            )
+            current_row += len(transformed) + 3
+        normalized_targets = [(str(name), data) for name, data in target_data]
+        return TransformResult(
+            transformed_data=normalized_targets[0][1],
+            target_data=normalized_targets,
+            writeback_plan=WritebackPlan(
+                tables=tables,
+                status_message=(
+                    f"XSTARS: Transform only — {len(normalized_targets)} target(s) processed"
+                ),
+            ),
+        )
+
+    transformed, _preset = transform_dataframe(frame, config)
+    tables = []
+    current_row = row
+    if include_stats:
+        stats = StatsEngine(config).analyze(transformed).to_dataframe()
+        tables.append(
             TableWriteback(
-                start_cell=cell_to_a1(row + 1, column),
+                start_cell=cell_to_a1(current_row, column),
+                values=dataframe_values(stats),
+            )
+        )
+        current_row += len(stats) + 2
+    tables.extend(
+        [
+            TableWriteback(start_cell=cell_to_a1(current_row, column), values=[[title]]),
+            TableWriteback(
+                start_cell=cell_to_a1(current_row + 1, column),
                 values=dataframe_values(transformed),
             ),
-        ],
-        status_message="XSTARS: Transform only — data written",
+        ]
     )
-    return TransformResult(transformed_data=transformed, writeback_plan=plan)
+    suffix = " with statistics" if include_stats else ""
+    return TransformResult(
+        transformed_data=transformed,
+        writeback_plan=WritebackPlan(
+            tables=tables,
+            status_message=f"XSTARS: Transform only — data written{suffix}",
+        ),
+    )

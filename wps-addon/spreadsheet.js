@@ -77,12 +77,22 @@
     }
     const rowCount = Number(range.Rows.Count);
     const columnCount = Number(range.Columns.Count);
-    return {
+    const result = {
       version: "1.0",
       values: normalizeSelectionValues(range.Value2, rowCount, columnCount),
       address: getRangeAddress(range),
       sheet: sheet.Name,
     };
+    let workbook = null;
+    try {
+      workbook = sheet.Parent || null;
+    } catch {
+      workbook = null;
+    }
+    if (workbook && typeof workbook.Name === "string" && workbook.Name.trim()) {
+      result.workbook = workbook.Name.trim();
+    }
+    return result;
   }
 
   function readSelection(application) {
@@ -193,7 +203,7 @@
     }
   }
 
-  function executeWritebackPlan(application, plan) {
+  function executeWritebackPlan(application, plan, expectedContext) {
     if (!plan || typeof plan !== "object") {
       throw new Error("服务响应缺少 WritebackPlan");
     }
@@ -203,6 +213,33 @@
     const sheet = application && application.ActiveSheet;
     if (!sheet || typeof sheet.Range !== "function") {
       throw new Error("无法访问活动工作表");
+    }
+    const expected = expectedContext || {};
+    if (
+      typeof expected.sheet === "string" &&
+      expected.sheet.trim() &&
+      sheet.Name !== expected.sheet
+    ) {
+      throw new Error(
+        `活动工作表已切换；请切回“${expected.sheet}”后重试，XSTARS 未写入任何内容`,
+      );
+    }
+    let activeWorkbook = null;
+    try {
+      activeWorkbook = sheet.Parent || null;
+    } catch {
+      activeWorkbook = null;
+    }
+    if (
+      typeof expected.workbook === "string" &&
+      expected.workbook.trim() &&
+      activeWorkbook &&
+      typeof activeWorkbook.Name === "string" &&
+      activeWorkbook.Name !== expected.workbook
+    ) {
+      throw new Error(
+        `活动工作簿已切换；请切回“${expected.workbook}”后重试，XSTARS 未写入任何内容`,
+      );
     }
 
     const writtenRanges = [];

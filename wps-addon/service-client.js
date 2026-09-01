@@ -151,10 +151,34 @@
       throw new ServiceError("SERVICE_UNAVAILABLE", "health checks failed");
     }
 
+    async cancelCurrentJob() {
+      if (!this.baseUrl) {
+        return { cancelled: false, status: "idle" };
+      }
+      const { response, payload } = await readJsonResponse(
+        this.fetchImpl,
+        `${this.baseUrl}/cancel`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.config.token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+      if (!response.ok || !payload || payload.ok !== true) {
+        throw responseError(response, payload);
+      }
+      return payload;
+    }
+
     cancelActiveRequest() {
       if (!this.activeController) {
         return false;
       }
+      // The broker has a single active-job lock, so authenticated cancellation
+      // of "the current job" is unambiguous even though /command is blocking.
+      void this.cancelCurrentJob().catch(() => {});
       this.activeController.abort();
       return true;
     }
@@ -186,6 +210,12 @@
         const additional = extra || {};
         if (additional.sampleSelection) {
           body.sampleSelection = additional.sampleSelection;
+        }
+        if (additional.stage) {
+          body.stage = additional.stage;
+        }
+        if (additional.curveOptions) {
+          body.curveOptions = additional.curveOptions;
         }
         if (additional.export) {
           body.export = additional.export;

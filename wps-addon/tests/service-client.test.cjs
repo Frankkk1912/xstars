@@ -220,13 +220,24 @@ test("missing generated config fails diagnostically without a hard-coded token",
   );
 });
 
-test("cancel aborts an active browser request", async () => {
+test("cancel aborts an active browser request and asks the broker to stop its worker", async () => {
+  const calls = [];
   const api = loadClient((url, init) => {
+    calls.push(url);
     if (url.endsWith("/health")) {
       return Promise.resolve(jsonResponse({
         ok: true,
         service: "xstars-wps-service",
         port: 3892,
+      }));
+    }
+    if (url.endsWith("/cancel")) {
+      assert.equal(init.headers.Authorization, `Bearer ${token}`);
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        cancelled: true,
+        status: "cancelled",
+        busy: false,
       }));
     }
     return new Promise((_resolve, reject) => {
@@ -243,5 +254,7 @@ test("cancel aborts an active browser request", async () => {
 
   assert.equal(client.cancelActiveRequest(), true);
   await assert.rejects(request, (error) => error.code === "CANCELLED");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.filter((url) => url.endsWith("/cancel")).length, 1);
   assert.equal(client.cancelActiveRequest(), false);
 });
