@@ -31,6 +31,8 @@ from ..tools.standard_curve import (
     wide_to_conc_od,
 )
 from .contracts import (
+    ContractError,
+    ErrorCode,
     ImageWriteback,
     SelectionPayload,
     TableWriteback,
@@ -163,14 +165,18 @@ def build_preset_options(
     return None
 
 
-def apply_preset(df_wide: pd.DataFrame, config: PrismConfig) -> tuple[pd.DataFrame, BasePreset | None]:
+def apply_preset(
+    df_wide: pd.DataFrame, config: PrismConfig
+) -> tuple[pd.DataFrame, BasePreset | None]:
     """Apply the configured experiment transform without host I/O."""
     preset = get_preset(config.experiment_preset)
     if preset is None:
         return df_wide, None
     options = build_preset_options(config)
     if options is None:
-        raise ValueError(f"Missing options for preset {config.experiment_preset.value}.")
+        raise ValueError(
+            f"Missing options for preset {config.experiment_preset.value}."
+        )
     transformed = preset.transform(df_wide, options)
     if config.y_label == "Value":
         config.y_label = preset.default_y_label
@@ -191,7 +197,9 @@ def _populate_cck8_fit_info(
     options = build_preset_options(config)
     if not isinstance(options, CCK8Options):
         return
-    dose_columns = [column for column in transformed.columns if column != options.control_group]
+    dose_columns = [
+        column for column in transformed.columns if column != options.control_group
+    ]
     if options.concentrations and len(options.concentrations) == len(dose_columns):
         config.ic50_fit_info = CCK8FitInfo(
             concentrations=options.concentrations,
@@ -200,7 +208,9 @@ def _populate_cck8_fit_info(
         )
 
 
-def transform_dataframe(df_wide: pd.DataFrame, config: PrismConfig) -> tuple[pd.DataFrame, BasePreset | None]:
+def transform_dataframe(
+    df_wide: pd.DataFrame, config: PrismConfig
+) -> tuple[pd.DataFrame, BasePreset | None]:
     """Clean, transform, and validate a wide DataFrame without host access."""
     cleaned = DataHandler.clean(df_wide.copy())
     DataHandler.validate(cleaned)
@@ -275,7 +285,10 @@ def build_analysis_writeback_plan(
                 ]
                 if cck8.ic50_95ci:
                     ic50_values.append(
-                        ["IC50 95% CI", f"{cck8.ic50_95ci[0]:.4g} – {cck8.ic50_95ci[1]:.4g}"]
+                        [
+                            "IC50 95% CI",
+                            f"{cck8.ic50_95ci[0]:.4g} – {cck8.ic50_95ci[1]:.4g}",
+                        ]
                     )
                 tables.append(
                     TableWriteback(
@@ -456,8 +469,7 @@ def _analyze_labeled(
         tables=tables,
         images=images,
         status_message=(
-            f"XSTARS: {preset_label} labeled mode — "
-            f"{len(targets)} {kind}(s) analyzed"
+            f"XSTARS: {preset_label} labeled mode — {len(targets)} {kind}(s) analyzed"
         ),
     )
     return LabeledAnalysisResult(targets, preset, plan)
@@ -528,13 +540,17 @@ def plot_standard_curve(
             figsize=(config.fig_width, config.fig_height),
             dpi=config.dpi,
         )
-        axis.scatter(conc, od, color=config.palette[0], s=30, zorder=5, label="Standards")
+        axis.scatter(
+            conc, od, color=config.palette[0], s=30, zorder=5, label="Standards"
+        )
         positive = conc[conc > 0]
         if fit.method == "linear" or len(positive) < 2:
             x_fit = np.linspace(conc.min(), conc.max() * 1.1, 200)
         else:
             x_fit = np.geomspace(positive.min() * 0.5, positive.max() * 1.5, 200)
-        axis.plot(x_fit, fit.predict(x_fit), "-", color=config.palette[1], label=fit.method)
+        axis.plot(
+            x_fit, fit.predict(x_fit), "-", color=config.palette[1], label=fit.method
+        )
         if len(positive) >= 2 and positive.max() / positive.min() > 10:
             axis.set_xscale("log")
         axis.set_xlabel("Concentration")
@@ -564,8 +580,12 @@ def standard_curve_selection(
     parameter_values = _curve_parameter_values(fit)
     plan = WritebackPlan(
         tables=[
-            TableWriteback(start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]),
-            TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
+            TableWriteback(
+                start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]
+            ),
+            TableWriteback(
+                start_cell=cell_to_a1(row + 1, column), values=parameter_values
+            ),
         ],
         images=[
             ImageWriteback(
@@ -579,6 +599,20 @@ def standard_curve_selection(
     return StandardCurveResult(frame, fit, figure, plan)
 
 
+def _elisa_standard_context(payload: SelectionPayload) -> str:
+    """Return a bounded selection-shape and header preview for user errors."""
+    received_rows = len(payload.values)
+    received_columns = len(payload.values[0])
+    headers = []
+    for value in payload.values[0][:5]:
+        compact = " ".join(str(value).split())
+        headers.append(compact[:32] + ("…" if len(compact) > 32 else ""))
+    preview = ", ".join(repr(header) for header in headers)
+    if received_columns > 5:
+        preview += f", …（共 {received_columns} 列）"
+    return f"收到 {received_rows} 行 × {received_columns} 列；列头预览：[{preview}]"
+
+
 def elisa_selections(
     standard_payload: SelectionPayload,
     sample_payload: SelectionPayload,
@@ -589,7 +623,36 @@ def elisa_selections(
 ) -> AnalysisResult:
     """Fit standards then back-calculate and analyze a second sample selection."""
     standard_frame = DataHandler.from_selection_payload(standard_payload)
-    conc, od = wide_to_conc_od(standard_frame)
+    standard_context = _elisa_standard_context(standard_payload)
+    if standard_frame.shape[0] == 0:
+        raise ContractError(
+            ErrorCode.ANALYSIS_FAILED,
+            f"标准品区域只包含 {standard_frame.shape[1]} 列表头、没有 OD 数据行——"
+            f"请从浓度表头行开始框选并包含下方数据行（{standard_context}；清洗后有效数据 0 行）。",
+        )
+    if standard_frame.shape[1] < 2:
+        raise ContractError(
+            ErrorCode.ANALYSIS_FAILED,
+            f"标准品区域的浓度数值列不足 2 列（实际 {standard_frame.shape[1]} 列；"
+            f"{standard_context}）。请至少选择 2 个浓度列。",
+        )
+    try:
+        conc, od = wide_to_conc_od(standard_frame)
+    except ValueError as exc:
+        if "cannot be parsed as a concentration" not in str(exc):
+            raise
+        raise ContractError(
+            ErrorCode.ANALYSIS_FAILED,
+            f"标准品区域的列头无法解析为浓度数值（{standard_context}）。"
+            "请从浓度数值表头行开始选择，不要包含标题或说明文字。",
+        ) from exc
+    if len(conc) < 2:
+        raise ContractError(
+            ErrorCode.ANALYSIS_FAILED,
+            f"标准曲线拟合至少需要 2 个有效数据点，实际收到 {len(conc)} 个（"
+            f"标准品数据清洗后 {standard_frame.shape[0]} 行 × {standard_frame.shape[1]} 列；"
+            f"{standard_context}）。",
+        )
     fit = fit_standard_curve(conc, od, config.preset_elisa_fit_method)
     config.experiment_preset = ExperimentPreset.ELISA
     config.elisa_fit_result = fit
@@ -607,7 +670,9 @@ def elisa_selections(
         processed_data_title="Back-Calculated Concentrations",
     )
     result.writeback_plan.tables[0:0] = [
-        TableWriteback(start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]),
+        TableWriteback(
+            start_cell=cell_to_a1(row, column), values=[["Standard Curve Results"]]
+        ),
         TableWriteback(start_cell=cell_to_a1(row + 1, column), values=parameter_values),
     ]
     r2 = f", R²={fit.r_squared:.4f}" if fit.r_squared is not None else ""

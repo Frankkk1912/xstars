@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from xstars.application import SelectionPayload, WritebackPlan
+from xstars.application import ContractError, ErrorCode, SelectionPayload, WritebackPlan
 from xstars.config import ExperimentPreset, PrismConfig
 from xstars.data_handler import DataHandler
 
@@ -143,7 +143,10 @@ class ApplicationAnalysisTests(unittest.TestCase):
             result.writeback_plan.images[1].anchor_cell,
         )
         self.assertEqual(
-            [result.writeback_plan.tables[index].values[0][0] for index in (0, 2, 4, 6)],
+            [
+                result.writeback_plan.tables[index].values[0][0]
+                for index in (0, 2, 4, 6)
+            ],
             [
                 "Target-A",
                 "Processed Data — Target-A",
@@ -185,9 +188,10 @@ class ApplicationAnalysisTests(unittest.TestCase):
             ["Processed Data — Gene-A", "Processed Data — Gene-B"],
         )
         for target in result.target_results:
-            self.assertEqual(list(target.transformed_data.columns), [
-                "Control", "Treatment_A", "Treatment_B"
-            ])
+            self.assertEqual(
+                list(target.transformed_data.columns),
+                ["Control", "Treatment_A", "Treatment_B"],
+            )
             self.assertEqual(len(target.transformed_data), 3)
         self.assertIn("2 gene(s) analyzed", result.writeback_plan.status_message)
 
@@ -199,7 +203,9 @@ class ApplicationAnalysisTests(unittest.TestCase):
             image_name="XSTARS_Plot_7",
         )
 
-        self.assertEqual(list(result.transformed_data.columns), ["Control", "Treatment"])
+        self.assertEqual(
+            list(result.transformed_data.columns), ["Control", "Treatment"]
+        )
         self.assertEqual(len(result.stats_result.pairs), 1)
         self.assertIsNotNone(result.figure)
         self.assertEqual(result.writeback_plan.tables[0].start_cell, "D10")
@@ -237,7 +243,12 @@ class ApplicationAnalysisTests(unittest.TestCase):
             (
                 ExperimentPreset.QPCR,
                 SelectionPayload(
-                    values=[["Control", "Treatment"], [1.0, 0.0], [1.2, 0.2], [0.8, -0.1]],
+                    values=[
+                        ["Control", "Treatment"],
+                        [1.0, 0.0],
+                        [1.2, 0.2],
+                        [0.8, -0.1],
+                    ],
                     address="A1:B4",
                     sheet="qPCR",
                 ),
@@ -267,10 +278,122 @@ class ApplicationAnalysisTests(unittest.TestCase):
         for preset, selection, overrides, expected_label in cases:
             with self.subTest(preset=preset.value):
                 config = PrismConfig(experiment_preset=preset, **overrides)
-                result = analyze_selection(selection, config, output_start_cell="F8", include_processed_data=True)
+                result = analyze_selection(
+                    selection,
+                    config,
+                    output_start_cell="F8",
+                    include_processed_data=True,
+                )
                 self.assertGreaterEqual(len(result.writeback_plan.tables), 2)
                 self.assertIn(expected_label, config.y_label)
                 self.assertIsNotNone(result.preset)
+
+    def test_elisa_rejects_standard_headers_without_od_rows_with_context(self):
+        standard = SelectionPayload(
+            values=[[0, 15.6, 31.2]],
+            address="B4:D4",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42]],
+            address="L3:M5",
+            sheet="ELISA",
+        )
+
+        with self.assertRaises(ContractError) as caught:
+            elisa_selections(
+                standard,
+                samples,
+                PrismConfig(preset_elisa_fit_method="linear"),
+                output_start_cell="A8",
+            )
+
+        self.assertEqual(caught.exception.code, ErrorCode.ANALYSIS_FAILED)
+        message = str(caught.exception)
+        self.assertIn("没有 OD 数据行", message)
+        self.assertIn("收到 1 行 × 3 列", message)
+        self.assertIn("'0', '15.6', '31.2'", message)
+
+    def test_elisa_rejects_text_standard_headers_with_selection_context(self):
+        standard = SelectionPayload(
+            values=[
+                ["ELISA standard curve", "Instructions"],
+                [0.1, 1.0],
+                [0.2, 2.0],
+            ],
+            address="B1:C3",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42]],
+            address="L3:M5",
+            sheet="ELISA",
+        )
+
+        with self.assertRaises(ContractError) as caught:
+            elisa_selections(
+                standard,
+                samples,
+                PrismConfig(preset_elisa_fit_method="linear"),
+                output_start_cell="A8",
+            )
+
+        self.assertEqual(caught.exception.code, ErrorCode.ANALYSIS_FAILED)
+        message = str(caught.exception)
+        self.assertIn("列头无法解析为浓度数值", message)
+        self.assertIn("收到 3 行 × 2 列", message)
+        self.assertIn("不要包含标题或说明文字", message)
+
+    def test_elisa_rejects_fewer_than_two_standard_columns(self):
+        standard = SelectionPayload(
+            values=[[10], [0.1], [0.2]],
+            address="B4:B6",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42]],
+            address="L3:M5",
+            sheet="ELISA",
+        )
+
+        with self.assertRaises(ContractError) as caught:
+            elisa_selections(
+                standard,
+                samples,
+                PrismConfig(preset_elisa_fit_method="linear"),
+                output_start_cell="A8",
+            )
+
+        self.assertEqual(caught.exception.code, ErrorCode.ANALYSIS_FAILED)
+        message = str(caught.exception)
+        self.assertIn("浓度数值列不足 2 列", message)
+        self.assertIn("'10'", message)
+
+    def test_elisa_reports_effective_point_count_before_curve_fit(self):
+        standard = SelectionPayload(
+            values=[[1, 10], [0.5, None]],
+            address="B4:C5",
+            sheet="ELISA",
+        )
+        samples = SelectionPayload(
+            values=[["Control", "Treatment"], [0.2, 0.4], [0.21, 0.42]],
+            address="L3:M5",
+            sheet="ELISA",
+        )
+
+        with self.assertRaises(ContractError) as caught:
+            elisa_selections(
+                standard,
+                samples,
+                PrismConfig(preset_elisa_fit_method="linear"),
+                output_start_cell="A8",
+            )
+
+        self.assertEqual(caught.exception.code, ErrorCode.ANALYSIS_FAILED)
+        message = str(caught.exception)
+        self.assertIn("实际收到 1 个", message)
+        self.assertIn("清洗后 1 行 × 2 列", message)
+        self.assertIn("收到 2 行 × 2 列", message)
 
     def test_standard_curve_and_two_selection_elisa_are_host_independent(self):
         standard = SelectionPayload(
@@ -297,13 +420,17 @@ class ApplicationAnalysisTests(unittest.TestCase):
 
         curve = standard_curve_selection(standard, config, output_start_cell="A8")
         self.assertEqual(curve.fit_result.method, "linear")
-        self.assertEqual(curve.writeback_plan.tables[0].values, [["Standard Curve Results"]])
+        self.assertEqual(
+            curve.writeback_plan.tables[0].values, [["Standard Curve Results"]]
+        )
         self.assertEqual(curve.writeback_plan.images[0].source_key, "primary_figure")
 
         elisa = elisa_selections(standard, samples, config, output_start_cell="A8")
         self.assertEqual(config.experiment_preset, ExperimentPreset.ELISA)
         self.assertEqual(list(elisa.transformed_data.columns), ["Control", "Treatment"])
-        self.assertEqual(elisa.writeback_plan.tables[0].values, [["Standard Curve Results"]])
+        self.assertEqual(
+            elisa.writeback_plan.tables[0].values, [["Standard Curve Results"]]
+        )
         self.assertIn("ELISA (linear", elisa.writeback_plan.status_message)
 
     def test_transform_only_returns_data_table_plan_without_host_calls(self):
