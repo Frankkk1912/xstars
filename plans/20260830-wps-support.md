@@ -19,6 +19,7 @@
 | rev 1（T5.4 范围定案） | 2026-08-31 | 用户选择方案 A：M5.4 高分辨率导出按 M0.4 O3 结论完整实现——worker 生成图表时 best-effort 持久化轻量重渲染 payload（~/.xstars/artifacts，由 worker 下发 pictureId、加载项重命名 Shape 关联），导出时 Python 重渲染（XSTARS 图主路径，真细节）；任意图片剪贴板重编码为 bonus。§7 T5.4 文本更新；`worker.py`/`analysis.py` 的 M5 修改与 `inject-config.cjs` 端口读取纳入范围。 |
 | rev 1（范围修订） | 2026-08-31 | ① T5.5 实机矩阵全部通过（WB/qPCR 标签、ELISA、预设、主题设置、导出；过程中修复标签列检测缺失与 job 目录误删两缺陷）；② 用户决定：M6（独立安装器/文档/离线加固）**移出本 PR 范围**，延后到功能改进稳定后的独立 PR；③ M7 调整为「Excel↔WPS 功能一致性核验 + fresh-context Review」，合并决策留待用户。 |
 | rev 1（M7 收尾核验） | 2026-09-02 | 本地分支快进至 `1c19a63`（用户批准的 PR #3 qPCR log 空间统计已并入本 PR，独立 Review 闭环）；编排器在当前 HEAD 重跑全量自动化验证门（271 pytest / 48 node / self-test / compileall / `git diff --check` / VBA 零 diff 全绿；5 个 warning 经 `4cbabd5` 对照确认为既有，无新增）；fresh-context Review 第 4 轮 3 reviewer（正确性/安全/测试质量）并行审查全部 CLEAN；§7 T7.1–T7.3 补证据后勾选。 |
+| rev 1（M6 恢复执行） | 2026-09-02 | 用户宣布恢复执行 M6（回到初始 D-G 单 PR 策略）。T6.1/T6.2 已实现：`installer/wps/`（PyInstaller 双目标 spec、Inno Setup 6 脚本、build.ps1、stdlib helper）、`docs/wps-installation.md`、双语 README WPS 小节；官方离线 publish 机制取证（本机真实宿主 `%APPDATA%\kingsoft\wps\jsaddons` 布局）后采用 helper 回环安装页（127.0.0.1:3890）+ 安装后每实例 config.js 自动同步；token 改由 helper `secrets.token_urlsafe(32)` 生成；真实递归备份至 `%LOCALAPPDATA%\XSTARS-WPS\backup`。初审发现 2 Blocker（注册缺失/令牌熵）已由 fix worker 修复；M6 专项 Review 2 reviewer 全 CLEAN；本机验证门全绿并产出 `XSTARS_WPS_Setup_v1.0.4.exe`（64.06 MB，SHA-256 已记录）。T6.1/T6.2 保持未勾选，待 T6.3 实机验收。 |
 
 ---
 
@@ -182,7 +183,7 @@
 | M3 — 本地 broker + worker | [x] | M2 | 自动化：HTTP/安全/生命周期/worker 取消超时崩溃测试全绿；证明未暴露 `0.0.0.0`；旧 CLI 语法测试通过 | 服务自启动归安装器（T6.1）；对应旧 M2.1–M2.2 |
 | M4 — WPS Ribbon + Run/Quick 垂直切片 | [x] | M3 | 自动化：`node --test` 全绿；实机：真实 Ribbon + Data Sheet Run/Quick + 保存重开 | 首个垂直切片；对应旧 M3.1–M3.2 |
 | M5 — 预设/ELISA 落地/主题设置/高分辨率导出 | [x] | M4；M0.4 选定路径 | 自动化：预设/导出/设置测试全绿；实机：模板对应 Sheet 逐项 + 设置持久化 + 导出矩阵 | 采用 M0.4 选定交互与导出路径；对应旧 M4.1–M4.4 |
-| M6 — 独立安装器/用户文档/离线加固 | [ ]（延后） | M5 | —— | **2026-08-31 用户决定：移出本 PR 范围**，延后到功能改进稳定后的独立 PR；本 PR 保持 Draft，交付物不含安装器 |
+| M6 — 独立安装器/用户文档/离线加固 | [ ] | M5 | 自动化 + 实机：安装/升级/卸载 | **2026-08-31 曾延后；2026-09-02 用户恢复执行**。T6.1/T6.2 已实现并通过本机验证门 + M6 专项 Review（2 reviewer CLEAN）+ ISCC 构建冒烟（`XSTARS_WPS_Setup_v1.0.4.exe`）；待 T6.3 实机验收后勾选 |
 | M7 — Excel↔WPS 功能一致性核验 + fresh-context Review + 合并准备 | [x] | M5 | 功能一致性矩阵（Excel 入口 vs WPS 实现）+ 全量自动化 + Review 无 Blocker | 原「全模板阻断验收」中的安装器相关项随 M6 延后；合并决策留待用户。Review 三轮闭环：R1 1 Blocker+5 项 → R2 仅剩取消竞态 P1 → R3 generation 状态机修复（ff14449/308b6a4）；T5.6 实机复测通过（含导出另存为对话框 29680d0） |
 
 Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初始 Status 均为 `[ ]`。
@@ -322,12 +323,14 @@ Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初
   - 修改：打包 service/worker/add-in；生成每安装实例密钥并注入 `config.template.js`；按官方机制安装/升级/卸载加载项；**服务自启动由安装器编排**；用户级目录优先；备份并恢复其修改的加载项配置。
   - 验收：干净 Win10/11 x64 可安装、升级、卸载；不影响 Excel 或其他 WPS 加载项。
   - 依赖：M5 通过；支撑 G3、G9、R7。
+  - 进度（2026-09-02）：已实现（另含 `installer/wps/wps_helper.py`：stdlib helper，负责 token bootstrap/备份/每实例 config 同步/回环安装页；双目标 PyInstaller spec：无窗 service+worker exe 与控制台 helper）。机制取证：官方 publish 页需回环 HTTP 提供 7z（`poc/wps/README.md:41-51`），已由 helper install-page 模式承担；每实例 token 无法预置入不可变 7z，采用安装后向已安装目录自动同步（真实宿主 `%APPDATA%\kingsoft\wps\jsaddons` 布局证实 config.js 为明文文件）。本机验证门全绿；ISCC 产出 `XSTARS_WPS_Setup_v1.0.4.exe`。**待 T6.3 实机验收后勾选**。
 
 - [ ] **T6.2 完善用户文档与版本声明**
   - 文件：`docs/wps-installation.md`（新建）、`README.md`、`README.zh-CN.md`（修改）
   - 修改：记录专业版正式支持、个人版 Beta、版本基线、离线安装、故障诊断、卸载。
   - 验收：文档步骤在干净测试机可复现；不夸大个人版支持。
   - 依赖：T6.1；支撑 G9。
+  - 进度（2026-09-02）：三份文档均已按实际实现流程撰写（回环安装页、自动同步、自启动、卸载、备份位置、端口 3890/3892、EDR/未签名说明、个人版 Beta 定位）；M6 专项 Review 确认文档与实现一致。**待 T6.3 实机验收后勾选**。
 
 - [ ] **T6.3 实机验证安装/升级/卸载（责任人：用户）**
   - 文件：Draft PR #1（记录）；无代码文件新增

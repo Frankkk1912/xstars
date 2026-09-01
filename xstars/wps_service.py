@@ -300,18 +300,29 @@ class SubprocessJobRunner:
             self._active_process = None
             self._active_cancel_path = cancel_path
             self._pending_cancel_generation = None
+        if getattr(sys, "frozen", False) and self.python_executable == sys.executable:
+            worker_command = [
+                self.python_executable,
+                "worker",
+                "--request",
+                str(request_path),
+                "--result",
+                str(result_path),
+            ]
+        else:
+            worker_command = [
+                self.python_executable,
+                "-m",
+                "xstars.cli",
+                "worker",
+                "--request",
+                str(request_path),
+                "--result",
+                str(result_path),
+            ]
         try:
             process = subprocess.Popen(
-                [
-                    self.python_executable,
-                    "-m",
-                    "xstars.cli",
-                    "worker",
-                    "--request",
-                    str(request_path),
-                    "--result",
-                    str(result_path),
-                ],
+                worker_command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

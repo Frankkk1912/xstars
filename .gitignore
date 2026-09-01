@@ -39,6 +39,11 @@ warn-*.txt
 installer/output/
 installer/XSTARS.xlam
 installer/ExcelPrism.xlam
+installer/wps/build/
+installer/wps/dist/
+installer/wps/output/
+installer/wps/payload/
+installer/wps/*.exe
 XSTARS_Setup_v1.1.1.exe
 xstars_v1.1.1.zip
 poc/wps/.gate0-artifacts/
