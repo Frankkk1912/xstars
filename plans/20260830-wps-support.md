@@ -182,7 +182,7 @@
 | M4 — WPS Ribbon + Run/Quick 垂直切片 | [x] | M3 | 自动化：`node --test` 全绿；实机：真实 Ribbon + Data Sheet Run/Quick + 保存重开 | 首个垂直切片；对应旧 M3.1–M3.2 |
 | M5 — 预设/ELISA 落地/主题设置/高分辨率导出 | [x] | M4；M0.4 选定路径 | 自动化：预设/导出/设置测试全绿；实机：模板对应 Sheet 逐项 + 设置持久化 + 导出矩阵 | 采用 M0.4 选定交互与导出路径；对应旧 M4.1–M4.4 |
 | M6 — 独立安装器/用户文档/离线加固 | [ ]（延后） | M5 | —— | **2026-08-31 用户决定：移出本 PR 范围**，延后到功能改进稳定后的独立 PR；本 PR 保持 Draft，交付物不含安装器 |
-| M7 — Excel↔WPS 功能一致性核验 + fresh-context Review + 合并准备 | [ ] | M5 | 功能一致性矩阵（Excel 入口 vs WPS 实现）+ 全量自动化 + Review 无 Blocker | 原「全模板阻断验收」中的安装器相关项随 M6 延后；合并决策留待用户 |
+| M7 — Excel↔WPS 功能一致性核验 + fresh-context Review + 合并准备 | [x] | M5 | 功能一致性矩阵（Excel 入口 vs WPS 实现）+ 全量自动化 + Review 无 Blocker | 原「全模板阻断验收」中的安装器相关项随 M6 延后；合并决策留待用户。Review 三轮闭环：R1 1 Blocker+5 项 → R2 仅剩取消竞态 P1 → R3 generation 状态机修复（ff14449/308b6a4）；T5.6 实机复测通过（含导出另存为对话框 29680d0） |
 
 Milestone 总数：**7**（=7，满足 ≤7 目标、≤10 上限）。所有初始 Status 均为 `[ ]`。
 
