@@ -251,6 +251,16 @@ def _stats_input_frame(
     return transformed
 
 
+def stats_input_frame(df_wide: pd.DataFrame, config: PrismConfig) -> pd.DataFrame:
+    """Public config-based variant of :func:`_stats_input_frame`.
+
+    Routes the dataframe through the same log-space gate as the private helper
+    using the preset resolved from *config*.  Safe for non-qPCR configs — the
+    isinstance gate in ``_stats_input_frame`` returns the frame unchanged.
+    """
+    return _stats_input_frame(df_wide, get_preset(config.experiment_preset))
+
+
 def analyze_dataframe(df_wide: pd.DataFrame, config: PrismConfig) -> AnalysisResult:
     """Run the shared transform → stats → plot pipeline without host I/O."""
     transformed, preset = transform_dataframe(df_wide, config)

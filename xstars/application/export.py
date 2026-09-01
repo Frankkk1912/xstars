@@ -269,7 +269,9 @@ def render_payload_export(
 
             _fit, figure = plot_standard_curve(frame, config)
         else:
-            stats_result = StatsEngine(config).analyze(frame)
+            from .analysis import stats_input_frame
+
+            stats_result = StatsEngine(config).analyze(stats_input_frame(frame, config))
             figure = PlotEngine(config).plot(frame, stats_result)
     except ContractError:
         raise

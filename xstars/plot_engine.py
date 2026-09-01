@@ -170,6 +170,8 @@ class PlotEngine:
             capthick=1.0,
             zorder=6,
         )
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(groups)
 
     def _violin(
         self,
@@ -426,7 +428,6 @@ class PlotEngine:
         the statistics were computed on.
         """
         logs = np.log2(series.dropna().to_numpy(dtype=float))
-        logs = logs[~np.isnan(logs)]
         if logs.size == 0:
             return 0.0, 0.0, 0.0
         mean_log = float(np.mean(logs))
@@ -439,6 +440,8 @@ class PlotEngine:
     def _log_error_value(self, logs: np.ndarray) -> float:
         """Error-bar magnitude in log2 space for the configured error type."""
         n = logs.size
+        if n == 0:
+            return 0.0
         if self.config.error_bar == ErrorBarType.SEM:
             return float(np.std(logs, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
         if self.config.error_bar == ErrorBarType.SD:

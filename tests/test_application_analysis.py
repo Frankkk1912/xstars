@@ -664,3 +664,163 @@ class QPCRStatsSpaceTests(unittest.TestCase):
         self.assertAlmostEqual(geo - 2.0 ** (1.0 - sem_log), lower)
         self.assertAlmostEqual(2.0 ** (1.0 + sem_log) - geo, upper)
         self.assertGreater(upper, lower)  # right-skewed on linear axis
+
+
+class QPCRLogSpaceExtendedTests(unittest.TestCase):
+    """Extended coverage: transform_selection stats path, nonparametric fallback,
+    and _qpcr_bars tick-label regression (Fix 1)."""
+
+    def tearDown(self):
+        plt.close("all")
+
+    # ------------------------------------------------------------------
+    # Fix 3a — transform_selection(include_stats=True) runs in log space
+    # ------------------------------------------------------------------
+
+    def test_transform_selection_plain_stats_run_in_log_space(self):
+        scipy_stats = import_module("scipy.stats")
+        np_module = import_module("numpy")
+
+        payload = SelectionPayload(
+            values=[
+                ["Control", "siRNA", "OE"],
+                [0.0, 3.3, -2.8],
+                [0.4, 3.1, -2.9],
+                [-0.2, 3.4, -2.7],
+            ],
+            address="A1:C4",
+            sheet="qPCR",
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_input_format="delta_ct",
+            preset_control_group="Control",
+        )
+        result = transform_selection(
+            payload, config, output_start_cell="A10", include_stats=True
+        )
+
+        # Stats table must be present
+        self.assertTrue(len(result.writeback_plan.tables) >= 1)
+
+        # Recover transformed data from the result and cross-check p-values
+        analysis_result = analyze_selection(payload, config, output_start_cell="A10")
+        log2fc = np_module.log2(
+            analysis_result.transformed_data.to_numpy(dtype=float)
+        )
+        tukey = scipy_stats.tukey_hsd(log2fc[:, 0], log2fc[:, 1], log2fc[:, 2])
+
+        engine_ps = [pair.p_value for pair in analysis_result.stats_result.pairs]
+        manual_ps = [
+            float(tukey.pvalue[0][1]),
+            float(tukey.pvalue[0][2]),
+            float(tukey.pvalue[1][2]),
+        ]
+        for engine_p, manual_p in zip(engine_ps, manual_ps, strict=True):
+            self.assertAlmostEqual(engine_p, manual_p, delta=1e-12)
+
+    def test_transform_selection_labeled_stats_run_in_log_space(self):
+        scipy_stats = import_module("scipy.stats")
+        np_module = import_module("numpy")
+
+        payload = SelectionPayload(
+            values=[
+                ["Gene", "Control", "Treatment_A", "Treatment_B"],
+                ["Gene-A", 25.0, 26.9, 24.0],
+                ["Gene-A", 25.5, 27.5, 24.4],
+                ["Gene-A", 24.7, 27.1, 23.7],
+                ["GAPDH", 20.0, 20.1, 20.0],
+                ["GAPDH", 20.2, 20.0, 20.2],
+                ["GAPDH", 19.9, 20.4, 19.9],
+            ],
+            address="A1:D7",
+            sheet="qPCR",
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_has_reference=True,
+            preset_reference_gene="GAPDH",
+            preset_control_group="Control",
+        )
+        result = transform_selection(
+            payload, config, output_start_cell="A13", include_stats=True
+        )
+        # Stats table written back for the labeled path
+        self.assertTrue(len(result.writeback_plan.tables) >= 1)
+
+        # Cross-check via analyze_selection which also uses the log-space path
+        analysis_result = analyze_selection(
+            payload, config, output_start_cell="A13"
+        )
+        self.assertEqual(len(analysis_result.target_results), 1)
+        for target in analysis_result.target_results:
+            log2fc = np_module.log2(target.transformed_data.to_numpy(dtype=float))
+            columns = list(target.transformed_data.columns)
+            tukey = scipy_stats.tukey_hsd(
+                *[log2fc[:, i] for i in range(len(columns))]
+            )
+            for pair, (i, j) in zip(
+                target.stats_result.pairs, [(0, 1), (0, 2), (1, 2)], strict=True
+            ):
+                self.assertAlmostEqual(
+                    pair.p_value, float(tukey.pvalue[i][j]), delta=1e-12
+                )
+
+    # ------------------------------------------------------------------
+    # Fix 3b — constant-ΔCt group legitimately falls back to Kruskal-Wallis
+    # ------------------------------------------------------------------
+
+    def test_constant_dct_group_falls_back_to_nonparametric(self):
+        """A group with zero variance in log space (constant ΔCt) has zero
+        variance in log2 fold-change too, triggering the nonparametric
+        fallback.  This is a property of the input data — the log-space
+        migration must not break it.  Three groups are used so the
+        decision tree reaches Kruskal-Wallis rather than Mann-Whitney U.
+        """
+        payload = SelectionPayload(
+            values=[
+                # Control has constant ΔCt → zero variance → Levene p ≈ 0
+                ["Control", "siRNA", "OE"],
+                [5.0, 7.5, 3.0],
+                [5.0, 8.0, 2.5],
+                [5.0, 7.8, 2.8],
+                [5.0, 7.9, 2.7],
+            ],
+            address="A1:C5",
+            sheet="qPCR",
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_input_format="delta_ct",
+            preset_control_group="Control",
+        )
+        result = analyze_selection(payload, config, output_start_cell="A10")
+        self.assertIn("Kruskal", result.stats_result.decision_path)
+
+    # ------------------------------------------------------------------
+    # Fix 3c — _qpcr_bars sets x tick labels even when show_points=False
+    # ------------------------------------------------------------------
+
+    def test_qpcr_bar_tick_labels_without_show_points(self):
+        pd_module = import_module("pandas")
+        plot_engine_mod = import_module("xstars.plot_engine")
+
+        groups = ["Control", "siRNA", "OE"]
+        df_wide = pd_module.DataFrame(
+            {
+                "Control": [1.0, 0.9, 1.1],
+                "siRNA": [0.4, 0.5, 0.45],
+                "OE": [2.8, 3.1, 2.9],
+            }
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            show_points=False,
+        )
+        engine = plot_engine_mod.PlotEngine(config)
+        fig = engine.plot(df_wide)
+        ax = fig.axes[0]
+        tick_labels = [t.get_text() for t in ax.get_xticklabels()]
+        self.assertEqual(tick_labels, groups,
+            msg=f"Expected group name ticks {groups}, got {tick_labels}")
+        plt.close(fig)

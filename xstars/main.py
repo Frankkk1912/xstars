@@ -585,7 +585,9 @@ def _run_qpcr_labeled(
         handler.validate(fold_df)
 
         engine = StatsEngine(config)
-        stats_result = engine.analyze(fold_df)
+        stats_result = engine.analyze(
+            _application_analysis.stats_input_frame(fold_df, config)
+        )
 
         # Set title to gene name
         plot_config = PrismConfig(**{
@@ -1335,7 +1337,9 @@ def _run_transform_only_impl(book: Any) -> None:
         for target_name, fold_df in target_dfs:
             if include_stats:
                 engine = StatsEngine(config)
-                stats_result = engine.analyze(fold_df)
+                stats_result = engine.analyze(
+                    _application_analysis.stats_input_frame(fold_df, config)
+                )
                 stats_df = stats_result.to_dataframe()
                 dest = sheet.range((current_row, start_col))
                 dest.value = [[f"Statistics — {target_name}"]]
@@ -1356,7 +1360,9 @@ def _run_transform_only_impl(book: Any) -> None:
     current_row = start_row
     if include_stats:
         engine = StatsEngine(config)
-        stats_result = engine.analyze(df_wide)
+        stats_result = engine.analyze(
+            _application_analysis.stats_input_frame(df_wide, config)
+        )
         stats_df = stats_result.to_dataframe()
         dest = sheet.range((current_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
