@@ -5,21 +5,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.ticker import MaxNLocator
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from . import annotations as ann
-from .config import ChartType, DoseAxisScale, ErrorBarType, PrismConfig
+from .config import (
+    ChartType,
+    DoseAxisScale,
+    ErrorBarType,
+    ExperimentPreset,
+    PrismConfig,
+)
 from .stats_engine import StatsResult
 from .styles import get_journal_figsize, get_prism_context
 
 
-def export_figure(fig: "Figure", path: str, dpi: int = 300) -> None:
+def export_figure(fig: Figure, path: str, dpi: int = 300) -> None:
     """Save figure to file. Format is inferred from extension by matplotlib."""
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
 
@@ -34,7 +40,7 @@ class PlotEngine:
         self,
         df_wide: pd.DataFrame,
         stats_result: StatsResult | None = None,
-    ) -> "Figure":
+    ) -> Figure:
         """Dispatch to the correct chart builder and return the Figure."""
         cfg = self.config
 
@@ -84,24 +90,28 @@ class PlotEngine:
     ) -> None:
         cfg = self.config
         groups = list(df_wide.columns)
-        ci_param = self._seaborn_ci()
 
-        sns.barplot(
-            data=long_df,
-            x="Group",
-            y="Value",
-            hue="Group",
-            order=groups,
-            hue_order=groups,
-            palette=cfg.palette[: len(groups)],
-            errorbar=ci_param,
-            capsize=0.15,
-            edgecolor="black",
-            linewidth=0.8,
-            ax=ax,
-            alpha=0.7,
-            legend=False,
-        )
+        if self._is_qpcr():
+            self._qpcr_bars(ax, df_wide, groups)
+        else:
+            ci_param = self._seaborn_ci()
+
+            sns.barplot(
+                data=long_df,
+                x="Group",
+                y="Value",
+                hue="Group",
+                order=groups,
+                hue_order=groups,
+                palette=cfg.palette[: len(groups)],
+                errorbar=ci_param,
+                capsize=0.15,
+                edgecolor="black",
+                linewidth=0.8,
+                ax=ax,
+                alpha=0.7,
+                legend=False,
+            )
 
         if cfg.show_points:
             sns.stripplot(
@@ -115,6 +125,53 @@ class PlotEngine:
                 jitter=True,
                 ax=ax,
             )
+
+    def _qpcr_bars(
+        self,
+        ax: plt.Axes,
+        df_wide: pd.DataFrame,
+        groups: list[str],
+    ) -> None:
+        """qPCR bars: geometric mean with asymmetric error bars.
+
+        Statistics run on the log2 fold-change (−ΔΔCt) space, so the
+        displayed central tendency and error bars are derived there and
+        rotated back to the fold-change axis: bar height = 2^(mean log2FC),
+        error-bar endpoints = 2^(mean log2FC ± err) — visually asymmetric
+        on the linear fold-change axis, consistent with the tested space.
+        """
+        cfg = self.config
+        x_positions = np.arange(len(groups))
+        geo_means: list[float] = []
+        lower_errs: list[float] = []
+        upper_errs: list[float] = []
+        for group in groups:
+            geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
+            geo_means.append(geo)
+            lower_errs.append(lower)
+            upper_errs.append(upper)
+
+        ax.bar(
+            x_positions,
+            geo_means,
+            color=cfg.palette[: len(groups)],
+            edgecolor="black",
+            linewidth=0.8,
+            alpha=0.7,
+        )
+        ax.errorbar(
+            x_positions,
+            geo_means,
+            yerr=[lower_errs, upper_errs],
+            fmt="none",
+            ecolor="black",
+            elinewidth=1.0,
+            capsize=4,
+            capthick=1.0,
+            zorder=6,
+        )
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(groups)
 
     def _violin(
         self,
@@ -165,6 +222,15 @@ class PlotEngine:
         means = [df_wide[g].mean() for g in groups]
         errors = [self._error_value(df_wide[g].dropna()) for g in groups]
 
+        if self._is_qpcr():
+            geo_means, lower_err, upper_err = [], [], []
+            for group in groups:
+                geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
+                geo_means.append(geo)
+                lower_err.append(lower)
+                upper_err.append(upper)
+            means, errors = geo_means, [lower_err, upper_err]
+
         ax.errorbar(
             x_positions,
             means,
@@ -180,14 +246,12 @@ class PlotEngine:
         if cfg.show_points:
             for i, g in enumerate(groups):
                 vals = df_wide[g].dropna().to_numpy()
-                jitter = np.random.default_rng(42).uniform(
-                    -0.05, 0.05, size=len(vals)
-                )
+                jitter = np.random.default_rng(42).uniform(-0.05, 0.05, size=len(vals))
                 ax.scatter(
                     np.full_like(vals, i, dtype=float) + jitter,
                     vals,
                     color="black",
-                    s=cfg.point_size ** 2,
+                    s=cfg.point_size**2,
                     alpha=cfg.point_alpha,
                     zorder=5,
                 )
@@ -199,7 +263,7 @@ class PlotEngine:
     # Dose-response (IC50)
     # ------------------------------------------------------------------
 
-    def _dose_response_figure(self, df_wide: pd.DataFrame) -> "Figure":
+    def _dose_response_figure(self, df_wide: pd.DataFrame) -> Figure:
         """Generate a dose-response curve with fit and IC50 markers."""
         cfg = self.config
         fit_info = cfg.ic50_fit_info
@@ -217,20 +281,23 @@ class PlotEngine:
                 vals = df_wide[col].dropna().to_numpy()
                 x_pts = np.full_like(vals, conc[i])
                 ax.scatter(
-                    x_pts, vals,
+                    x_pts,
+                    vals,
                     color=cfg.palette[0],
-                    s=cfg.point_size ** 2,
+                    s=cfg.point_size**2,
                     alpha=cfg.point_alpha,
                     zorder=5,
                 )
 
             # Mean ± error bars
             means = np.array([df_wide[col].dropna().mean() for col in dose_cols])
-            errors = np.array([
-                self._error_value(df_wide[col].dropna()) for col in dose_cols
-            ])
+            errors = np.array(
+                [self._error_value(df_wide[col].dropna()) for col in dose_cols]
+            )
             ax.errorbar(
-                conc, means, yerr=errors,
+                conc,
+                means,
+                yerr=errors,
                 fmt="o",
                 color=cfg.palette[0],
                 capsize=4,
@@ -245,11 +312,12 @@ class PlotEngine:
             if scale == DoseAxisScale.AUTO:
                 use_log = (conc.max() / conc.min()) > 100
             else:
-                use_log = (scale == DoseAxisScale.LOG)
+                use_log = scale == DoseAxisScale.LOG
 
             # Draw fit curve based on method
             if method == "three_pl":
                 from .presets.cck8 import _three_param_logistic
+
                 if use_log:
                     x_fit = np.geomspace(conc.min() * 0.5, conc.max() * 2, 200)
                 else:
@@ -257,18 +325,38 @@ class PlotEngine:
                     x_fit = np.linspace(conc.min() - margin, conc.max() + margin, 200)
                     x_fit = x_fit[x_fit > 0]
                 y_fit = _three_param_logistic(
-                    x_fit, params["bottom"], params["ic50"], params["hill"],
+                    x_fit,
+                    params["bottom"],
+                    params["ic50"],
+                    params["hill"],
                 )
-                ax.plot(x_fit, y_fit, "-", color=cfg.palette[0], linewidth=1.5,
-                        label="3PL fit", zorder=4)
+                ax.plot(
+                    x_fit,
+                    y_fit,
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="3PL fit",
+                    zorder=4,
+                )
             elif method == "log_linear":
                 # Connect mean points with lines instead of a smooth curve
                 sort_idx = np.argsort(conc)
-                ax.plot(conc[sort_idx], means[sort_idx], "-", color=cfg.palette[0],
-                        linewidth=1.5, label="Interpolation", zorder=4)
+                ax.plot(
+                    conc[sort_idx],
+                    means[sort_idx],
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="Interpolation",
+                    zorder=4,
+                )
             else:
                 # Legacy 4PL
-                from .tools.standard_curve import four_param_logistic as _four_param_logistic
+                from .tools.standard_curve import (
+                    four_param_logistic as _four_param_logistic,
+                )
+
                 if use_log:
                     x_fit = np.geomspace(conc.min() * 0.5, conc.max() * 2, 200)
                 else:
@@ -276,18 +364,30 @@ class PlotEngine:
                     x_fit = np.linspace(conc.min() - margin, conc.max() + margin, 200)
                     x_fit = x_fit[x_fit > 0]
                 y_fit = _four_param_logistic(
-                    x_fit, params["bottom"], params["top"],
-                    params["ic50"], params["hill"],
+                    x_fit,
+                    params["bottom"],
+                    params["top"],
+                    params["ic50"],
+                    params["hill"],
                 )
-                ax.plot(x_fit, y_fit, "-", color=cfg.palette[0], linewidth=1.5,
-                        label="4PL fit", zorder=4)
+                ax.plot(
+                    x_fit,
+                    y_fit,
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="4PL fit",
+                    zorder=4,
+                )
 
             # Horizontal dashed line at 50%
             ax.axhline(y=50, linestyle="--", color="gray", linewidth=0.8, zorder=3)
 
             # Vertical dashed line at IC50
             ic50_val = params["ic50"]
-            ax.axvline(x=ic50_val, linestyle="--", color="gray", linewidth=0.8, zorder=3)
+            ax.axvline(
+                x=ic50_val, linestyle="--", color="gray", linewidth=0.8, zorder=3
+            )
 
             # IC50 text annotation
             ax.annotate(
@@ -315,12 +415,56 @@ class PlotEngine:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _is_qpcr(self) -> bool:
+        """Whether the current preset is the qPCR ΔΔCt transform."""
+        return self.config.experiment_preset is ExperimentPreset.QPCR
+
+    def _qpcr_geo_stats(self, series: pd.Series) -> tuple[float, float, float]:
+        """Geometric mean plus asymmetric error-bar offsets, in fold-change units.
+
+        The error magnitude is computed on log2(fold change) (= −ΔΔCt) with
+        the configured :class:`ErrorBarType`, then rotated back through the
+        exponential so the bar/error display stays consistent with the space
+        the statistics were computed on.
+        """
+        logs = np.log2(series.dropna().to_numpy(dtype=float))
+        if logs.size == 0:
+            return 0.0, 0.0, 0.0
+        mean_log = float(np.mean(logs))
+        err_log = self._log_error_value(logs)
+        geo_mean = 2.0**mean_log
+        lower = geo_mean - float(2.0 ** (mean_log - err_log))
+        upper = float(2.0 ** (mean_log + err_log)) - geo_mean
+        return geo_mean, lower, upper
+
+    def _log_error_value(self, logs: np.ndarray) -> float:
+        """Error-bar magnitude in log2 space for the configured error type."""
+        n = logs.size
+        if n == 0:
+            return 0.0
+        if self.config.error_bar == ErrorBarType.SEM:
+            return float(np.std(logs, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
+        if self.config.error_bar == ErrorBarType.SD:
+            return float(np.std(logs, ddof=1)) if n > 1 else 0.0
+        # 95% CI
+        from scipy import stats as sp_stats
+
+        if n < 3:
+            return 0.0
+        se = np.std(logs, ddof=1) / np.sqrt(n)
+        t_crit = sp_stats.t.ppf(0.975, df=n - 1)
+        return float(se * t_crit)
+
     def _resolve_figsize(self) -> tuple[float, float]:
         """Use journal-recommended size if available and user hasn't customized."""
         cfg = self.config
         journal_size = get_journal_figsize(cfg.journal_preset)
         defaults = PrismConfig()
-        if journal_size and cfg.fig_width == defaults.fig_width and cfg.fig_height == defaults.fig_height:
+        if (
+            journal_size
+            and cfg.fig_width == defaults.fig_width
+            and cfg.fig_height == defaults.fig_height
+        ):
             return journal_size
         return (cfg.fig_width, cfg.fig_height)
 
@@ -345,6 +489,7 @@ class PlotEngine:
             return float(np.std(vals, ddof=1)) if n > 1 else 0.0
         # 95% CI
         from scipy import stats as sp_stats
+
         if n < 3:
             return 0.0
         se = np.std(vals, ddof=1) / np.sqrt(n)

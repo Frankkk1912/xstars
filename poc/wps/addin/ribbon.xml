@@ -1,0 +1,62 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
+    <ribbon startFromScratch="false">
+        <tabs>
+            <tab id="xstarsGate0Tab" label="XSTARS Gate 0">
+                <group id="xstarsGate0Group" label="可行性探针">
+                    <button id="xstarsGate0Callback"
+                            label="验证加载项回调"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM02Probe"
+                            label="验证选区写回/图片"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
+                <group id="xstarsM03Group" label="服务生命周期">
+                    <button id="xstarsM03ServiceStart"
+                            label="拉起本地服务"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM03Dialog"
+                            label="测试 Tkinter 对话框"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM03PortConflict"
+                            label="端口冲突诊断"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
+                <group id="xstarsM04Group" label="M0.4 探针">
+                    <button id="xstarsM04InputBox"
+                            label="InputBox 选区探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM04TwoStage"
+                            label="两阶段选区探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                    <button id="xstarsM04ShapeExport"
+                            label="Shape 导出探针"
+                            onAction="OnAction"
+                            getImage="GetImage"
+                            visible="true"
+                            size="large"/>
+                </group>
+            </tab>
+        </tabs>
+    </ribbon>
+</customUI>

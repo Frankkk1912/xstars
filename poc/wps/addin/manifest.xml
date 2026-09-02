@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JsPlugin>
+  <ApiVersion>1.0.0</ApiVersion>
+  <Name>XSTARS Gate 0</Name>
+  <Description>Minimal spreadsheet add-in for the XSTARS WPS feasibility gate.</Description>
+</JsPlugin>

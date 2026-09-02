@@ -1,5 +1,14 @@
 """Tkinter settings dialog for XSTARS (ttkbootstrap modernized)."""
 
+# The optional ttkbootstrap branch and tkinter's dynamic widget keyword API are
+# intentionally runtime-checked; static stubs cannot model the shared surface.
+# pyright: reportMissingImports=false
+# pyright: reportPossiblyUnboundVariable=false
+# pyright: reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false
+# pyright: reportCallIssue=false
+# pyright: reportAssignmentType=false
+
 from __future__ import annotations
 
 import tkinter as tk
@@ -7,7 +16,7 @@ from tkinter import filedialog
 
 try:
     import ttkbootstrap as ttkb
-    from ttkbootstrap.constants import *
+    from ttkbootstrap.constants import *  # noqa: F403
     try:
         from ttkbootstrap.widgets.scrolled import ScrolledFrame
     except ImportError:
@@ -17,8 +26,16 @@ except ImportError:
     HAS_TTKB = False
 
 from .config import (
-    AnnotationFormat, BaseTheme, ChartType, DoseAxisScale, ErrorBarType,
-    ExperimentPreset, FitMethod, JournalPalette, JournalPreset, PalettePreset,
+    AnnotationFormat,
+    BaseTheme,
+    ChartType,
+    DoseAxisScale,
+    ErrorBarType,
+    ExperimentPreset,
+    FitMethod,
+    JournalPalette,
+    JournalPreset,
+    PalettePreset,
     PrismConfig,
 )
 
@@ -27,7 +44,8 @@ class SettingsDialog:
     """Modal dialog that lets the user tweak analysis settings.
 
     Returns an updated ``PrismConfig`` when the user clicks OK,
-    or ``None`` if cancelled.
+    or ``None`` if cancelled. WPS can disable file export while retaining the
+    Excel default by passing ``hide_file_export=True``.
     """
 
     def __init__(
@@ -35,9 +53,11 @@ class SettingsDialog:
         group_names: list[str],
         group_sizes: dict[str, int],
         base_config: PrismConfig | None = None,
+        hide_file_export: bool = False,
     ) -> None:
         self.group_names = group_names
         self.group_sizes = group_sizes
+        self.hide_file_export = hide_file_export
         # Load persisted settings as defaults, then overlay any explicit base_config
         saved = PrismConfig.load()
         if base_config is not None:
@@ -573,6 +593,15 @@ class SettingsDialog:
         )
         self._browse_btn.pack(side="left", padx=(4, 0))
         self._toggle_export()
+        if self.hide_file_export:
+            self._export_var.set(False)
+            self._toggle_export()
+            self._export_check.configure(state="disabled")
+            ttk.Label(
+                export_frame,
+                text="WPS：请使用 Ribbon 的 Export 按钮进行高分辨率导出。",
+                foreground="gray",
+            ).pack(anchor="w", padx=8, pady=(4, 0))
 
         # --- OK / Cancel buttons ---
         btn_frame = ttk.Frame(root)
@@ -665,7 +694,11 @@ class SettingsDialog:
             self._cck8_conc_frame.pack_forget()
 
     def _toggle_export(self) -> None:
-        state = "normal" if self._export_var.get() else "disabled"
+        state = (
+            "normal"
+            if self._export_var.get() and not self.hide_file_export
+            else "disabled"
+        )
         self._export_fmt_combo.configure(state=state if state == "disabled" else "readonly")
         self._export_dpi_combo.configure(state=state if state == "disabled" else "readonly")
         self._export_entry.configure(state=state)
@@ -773,7 +806,11 @@ class SettingsDialog:
             y_label=self._ylabel_var.get(),
             output_stats=self._output_stats_var.get(),
             output_data=self._output_data_var.get(),
-            export_path=self._export_path_var.get() if self._export_var.get() else "",
+            export_path=(
+                self._export_path_var.get()
+                if self._export_var.get() and not self.hide_file_export
+                else ""
+            ),
             export_format=self._export_fmt_labels.get(self._export_fmt_var.get(), "png"),
             export_dpi=int(self._export_dpi_var.get()),
             experiment_preset=exp_preset,
