@@ -123,10 +123,20 @@ if (-not $SkipWpsAddon) {
     Write-Host "`n[Step 2/3] Building WPS official offline add-in package..." -ForegroundColor Green
     Push-Location $WpsAddonDir
     try {
-        $NpmCmd = if (Get-Command "npm.cmd" -ErrorAction SilentlyContinue) { "npm.cmd" } else { "npm" }
-        & $NpmCmd run publish:offline
-        if ($LASTEXITCODE -ne 0) {
-            throw "WPS add-in offline build failed with exit code $LASTEXITCODE"
+        # Pin the production port to 3892 so the frozen 7z bakes the correct default
+        # regardless of any transient value in ~/.xstars/wps_service.json (a dev smoke
+        # test that started the service on another port can pollute it). Per-install
+        # drift is still corrected at install time by the helper sync-config watcher.
+        $PreviousWpsPort = $env:XSTARS_WPS_PORT
+        $env:XSTARS_WPS_PORT = "3892"
+        try {
+            $NpmCmd = if (Get-Command "npm.cmd" -ErrorAction SilentlyContinue) { "npm.cmd" } else { "npm" }
+            & $NpmCmd run publish:offline
+            if ($LASTEXITCODE -ne 0) {
+                throw "WPS add-in offline build failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            $env:XSTARS_WPS_PORT = $PreviousWpsPort
         }
     } finally {
         Pop-Location
