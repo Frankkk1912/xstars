@@ -237,14 +237,12 @@ class PlotEngine:
         if cfg.show_points:
             for i, g in enumerate(groups):
                 vals = df_wide[g].dropna().to_numpy()
-                jitter = np.random.default_rng(42).uniform(
-                    -0.05, 0.05, size=len(vals)
-                )
+                jitter = np.random.default_rng(42).uniform(-0.05, 0.05, size=len(vals))
                 ax.scatter(
                     np.full_like(vals, i, dtype=float) + jitter,
                     vals,
                     color="black",
-                    s=cfg.point_size ** 2,
+                    s=cfg.point_size**2,
                     alpha=cfg.point_alpha,
                     zorder=5,
                 )
@@ -274,20 +272,23 @@ class PlotEngine:
                 vals = df_wide[col].dropna().to_numpy()
                 x_pts = np.full_like(vals, conc[i])
                 ax.scatter(
-                    x_pts, vals,
+                    x_pts,
+                    vals,
                     color=cfg.palette[0],
-                    s=cfg.point_size ** 2,
+                    s=cfg.point_size**2,
                     alpha=cfg.point_alpha,
                     zorder=5,
                 )
 
             # Mean ± error bars
             means = np.array([df_wide[col].dropna().mean() for col in dose_cols])
-            errors = np.array([
-                self._error_value(df_wide[col].dropna()) for col in dose_cols
-            ])
+            errors = np.array(
+                [self._error_value(df_wide[col].dropna()) for col in dose_cols]
+            )
             ax.errorbar(
-                conc, means, yerr=errors,
+                conc,
+                means,
+                yerr=errors,
                 fmt="o",
                 color=cfg.palette[0],
                 capsize=4,
@@ -302,11 +303,12 @@ class PlotEngine:
             if scale == DoseAxisScale.AUTO:
                 use_log = (conc.max() / conc.min()) > 100
             else:
-                use_log = (scale == DoseAxisScale.LOG)
+                use_log = scale == DoseAxisScale.LOG
 
             # Draw fit curve based on method
             if method == "three_pl":
                 from .presets.cck8 import _three_param_logistic
+
                 if use_log:
                     x_fit = np.geomspace(conc.min() * 0.5, conc.max() * 2, 200)
                 else:
@@ -314,20 +316,38 @@ class PlotEngine:
                     x_fit = np.linspace(conc.min() - margin, conc.max() + margin, 200)
                     x_fit = x_fit[x_fit > 0]
                 y_fit = _three_param_logistic(
-                    x_fit, params["bottom"], params["ic50"], params["hill"],
+                    x_fit,
+                    params["bottom"],
+                    params["ic50"],
+                    params["hill"],
                 )
-                ax.plot(x_fit, y_fit, "-", color=cfg.palette[0], linewidth=1.5,
-                        label="3PL fit", zorder=4)
+                ax.plot(
+                    x_fit,
+                    y_fit,
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="3PL fit",
+                    zorder=4,
+                )
             elif method == "log_linear":
                 # Connect mean points with lines instead of a smooth curve
                 sort_idx = np.argsort(conc)
-                ax.plot(conc[sort_idx], means[sort_idx], "-", color=cfg.palette[0],
-                        linewidth=1.5, label="Interpolation", zorder=4)
+                ax.plot(
+                    conc[sort_idx],
+                    means[sort_idx],
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="Interpolation",
+                    zorder=4,
+                )
             else:
                 # Legacy 4PL
                 from .tools.standard_curve import (
                     four_param_logistic as _four_param_logistic,
                 )
+
                 if use_log:
                     x_fit = np.geomspace(conc.min() * 0.5, conc.max() * 2, 200)
                 else:
@@ -335,18 +355,30 @@ class PlotEngine:
                     x_fit = np.linspace(conc.min() - margin, conc.max() + margin, 200)
                     x_fit = x_fit[x_fit > 0]
                 y_fit = _four_param_logistic(
-                    x_fit, params["bottom"], params["top"],
-                    params["ic50"], params["hill"],
+                    x_fit,
+                    params["bottom"],
+                    params["top"],
+                    params["ic50"],
+                    params["hill"],
                 )
-                ax.plot(x_fit, y_fit, "-", color=cfg.palette[0], linewidth=1.5,
-                        label="4PL fit", zorder=4)
+                ax.plot(
+                    x_fit,
+                    y_fit,
+                    "-",
+                    color=cfg.palette[0],
+                    linewidth=1.5,
+                    label="4PL fit",
+                    zorder=4,
+                )
 
             # Horizontal dashed line at 50%
             ax.axhline(y=50, linestyle="--", color="gray", linewidth=0.8, zorder=3)
 
             # Vertical dashed line at IC50
             ic50_val = params["ic50"]
-            ax.axvline(x=ic50_val, linestyle="--", color="gray", linewidth=0.8, zorder=3)
+            ax.axvline(
+                x=ic50_val, linestyle="--", color="gray", linewidth=0.8, zorder=3
+            )
 
             # IC50 text annotation
             ax.annotate(
@@ -419,7 +451,11 @@ class PlotEngine:
         cfg = self.config
         journal_size = get_journal_figsize(cfg.journal_preset)
         defaults = PrismConfig()
-        if journal_size and cfg.fig_width == defaults.fig_width and cfg.fig_height == defaults.fig_height:
+        if (
+            journal_size
+            and cfg.fig_width == defaults.fig_width
+            and cfg.fig_height == defaults.fig_height
+        ):
             return journal_size
         return (cfg.fig_width, cfg.fig_height)
 
@@ -444,6 +480,7 @@ class PlotEngine:
             return float(np.std(vals, ddof=1)) if n > 1 else 0.0
         # 95% CI
         from scipy import stats as sp_stats
+
         if n < 3:
             return 0.0
         se = np.std(vals, ddof=1) / np.sqrt(n)
