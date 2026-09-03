@@ -11,7 +11,13 @@ from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
 from .presets import get_preset
 from .presets.wb import WBOptions
-from .presets.qpcr import QPCROptions
+from .presets.qpcr import (
+    PROCESSED_DATA_SUFFIX,
+    QPCROptions,
+    qpcr_stats_table,
+    stats_input_frame,
+    stats_input_frame_for_config,
+)
 from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
 from .presets.elisa import ELISAOptions, ELISAPreset
 from .stats_engine import StatsEngine
@@ -506,7 +512,7 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     # Stats
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame(df_wide, preset))
 
     # Plot
     plotter = PlotEngine(config)
@@ -522,6 +528,8 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
@@ -541,7 +549,10 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     # Write processed data
     if config.output_data:
-        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, "Processed Data")
+        title = "Processed Data"
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            title += PROCESSED_DATA_SUFFIX
+        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, title)
 
     # Insert chart below stats/data tables
     sheet.pictures.add(
@@ -665,7 +676,7 @@ def _run_qpcr_labeled(
         handler.validate(fold_df)
 
         engine = StatsEngine(config)
-        stats_result = engine.analyze(fold_df)
+        stats_result = engine.analyze(stats_input_frame(fold_df, preset))
 
         # Set title to gene name
         plot_config = PrismConfig(**{
@@ -697,7 +708,7 @@ def _run_qpcr_labeled(
 
         # Stats table
         if config.output_stats:
-            stats_df = stats_result.to_dataframe()
+            stats_df = qpcr_stats_table(stats_result.to_dataframe())
             dest = sheet.range((stats_start_row, stats_col))
             dest.value = [[gene_name]]
             stats_start_row += 1
@@ -708,7 +719,11 @@ def _run_qpcr_labeled(
         # Write processed data
         if config.output_data:
             stats_start_row = _write_transformed_data(
-                sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {gene_name}"
+                sheet,
+                stats_start_row,
+                stats_col,
+                fold_df,
+                f"Processed Data — {gene_name}{PROCESSED_DATA_SUFFIX}",
             )
 
     book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
@@ -779,7 +794,7 @@ def _run_impl(book: xw.Book) -> None:
 
     # 3. Statistics
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
 
     # 4. Plot
     plotter = PlotEngine(config)
@@ -796,6 +811,8 @@ def _run_impl(book: xw.Book) -> None:
 
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
@@ -840,7 +857,7 @@ def _run_quick_impl(book: xw.Book) -> None:
     handler.validate(df_wide)
 
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
 
     plotter = PlotEngine(config)
     fig = plotter.plot(df_wide, stats_result)
@@ -852,6 +869,8 @@ def _run_quick_impl(book: xw.Book) -> None:
     # Write stats summary table below the data selection
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
@@ -1475,16 +1494,21 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         for target_name, fold_df in target_dfs:
             if include_stats:
                 engine = StatsEngine(config)
-                stats_result = engine.analyze(fold_df)
+                stats_result = engine.analyze(stats_input_frame(fold_df, preset))
                 stats_df = stats_result.to_dataframe()
+                if preset_type is ExperimentPreset.QPCR:
+                    stats_df = qpcr_stats_table(stats_df)
                 dest = sheet.range((current_row, start_col))
                 dest.value = [[f"Statistics — {target_name}"]]
                 current_row += 1
                 dest = sheet.range((current_row, start_col))
                 dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
                 current_row += len(stats_df) + 2
+            title = f"Processed Data — {target_name}"
+            if preset_type is ExperimentPreset.QPCR:
+                title += PROCESSED_DATA_SUFFIX
             current_row = _write_transformed_data(
-                sheet, current_row, start_col, fold_df, f"Processed Data — {target_name}"
+                sheet, current_row, start_col, fold_df, title
             )
         count = len(target_dfs)
         book.app.status_bar = f"XSTARS: Transform only — {count} target(s) processed"
@@ -1497,11 +1521,16 @@ def _run_transform_only_impl(book: xw.Book) -> None:
     current_row = start_row
     if include_stats:
         engine = StatsEngine(config)
-        stats_result = engine.analyze(df_wide)
+        stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
         stats_df = stats_result.to_dataframe()
+        if preset_type is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((current_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         current_row += len(stats_df) + 2
 
-    _write_transformed_data(sheet, current_row, start_col, df_wide, "Processed Data")
+    title = "Processed Data"
+    if preset_type is ExperimentPreset.QPCR:
+        title += PROCESSED_DATA_SUFFIX
+    _write_transformed_data(sheet, current_row, start_col, df_wide, title)
     book.app.status_bar = "XSTARS: Transform only — data written"
