@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -14,7 +14,13 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from . import annotations as ann
-from .config import ChartType, DoseAxisScale, ErrorBarType, PrismConfig
+from .config import (
+    ChartType,
+    DoseAxisScale,
+    ErrorBarType,
+    ExperimentPreset,
+    PrismConfig,
+)
 from .stats_engine import StatsResult
 from .styles import get_journal_figsize, get_prism_context
 
@@ -84,24 +90,28 @@ class PlotEngine:
     ) -> None:
         cfg = self.config
         groups = list(df_wide.columns)
-        ci_param = self._seaborn_ci()
 
-        sns.barplot(
-            data=long_df,
-            x="Group",
-            y="Value",
-            hue="Group",
-            order=groups,
-            hue_order=groups,
-            palette=cfg.palette[: len(groups)],
-            errorbar=ci_param,
-            capsize=0.15,
-            edgecolor="black",
-            linewidth=0.8,
-            ax=ax,
-            alpha=0.7,
-            legend=False,
-        )
+        if self._is_qpcr():
+            self._qpcr_bars(ax, df_wide, groups)
+        else:
+            ci_param = self._seaborn_ci()
+
+            sns.barplot(
+                data=long_df,
+                x="Group",
+                y="Value",
+                hue="Group",
+                order=groups,
+                hue_order=groups,
+                palette=cfg.palette[: len(groups)],
+                errorbar=ci_param,
+                capsize=0.15,
+                edgecolor="black",
+                linewidth=0.8,
+                ax=ax,
+                alpha=0.7,
+                legend=False,
+            )
 
         if cfg.show_points:
             sns.stripplot(
@@ -115,6 +125,53 @@ class PlotEngine:
                 jitter=True,
                 ax=ax,
             )
+
+    def _qpcr_bars(
+        self,
+        ax: plt.Axes,
+        df_wide: pd.DataFrame,
+        groups: list[str],
+    ) -> None:
+        """qPCR bars: geometric mean with asymmetric error bars.
+
+        Statistics run on the log2 fold-change (−ΔΔCt) space, so the
+        displayed central tendency and error bars are derived there and
+        rotated back to the fold-change axis: bar height = 2^(mean log2FC),
+        error-bar endpoints = 2^(mean log2FC ± err) — visually asymmetric
+        on the linear fold-change axis, consistent with the tested space.
+        """
+        cfg = self.config
+        x_positions = np.arange(len(groups))
+        geo_means: list[float] = []
+        lower_errs: list[float] = []
+        upper_errs: list[float] = []
+        for group in groups:
+            geo, lower, upper = self._qpcr_geo_stats(cast(Any, df_wide[group]))
+            geo_means.append(geo)
+            lower_errs.append(lower)
+            upper_errs.append(upper)
+
+        ax.bar(
+            x_positions,
+            geo_means,
+            color=cfg.palette[: len(groups)],
+            edgecolor="black",
+            linewidth=0.8,
+            alpha=0.7,
+        )
+        ax.errorbar(
+            x_positions,
+            geo_means,
+            yerr=[lower_errs, upper_errs],
+            fmt="none",
+            ecolor="black",
+            elinewidth=1.0,
+            capsize=4,
+            capthick=1.0,
+            zorder=6,
+        )
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(groups)
 
     def _violin(
         self,
@@ -314,6 +371,46 @@ class PlotEngine:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _is_qpcr(self) -> bool:
+        """Whether the current preset is the qPCR ΔΔCt transform."""
+        return self.config.experiment_preset is ExperimentPreset.QPCR
+
+    def _qpcr_geo_stats(self, series: pd.Series) -> tuple[float, float, float]:
+        """Geometric mean plus asymmetric error-bar offsets, in fold-change units.
+
+        The error magnitude is computed on log2(fold change) (= −ΔΔCt) with
+        the configured :class:`ErrorBarType`, then rotated back through the
+        exponential so the bar/error display stays consistent with the space
+        the statistics were computed on.
+        """
+        logs = np.log2(series.dropna().to_numpy(dtype=float))
+        if logs.size == 0:
+            return 0.0, 0.0, 0.0
+        mean_log = float(np.mean(logs))
+        err_log = self._log_error_value(logs)
+        geo_mean = 2.0**mean_log
+        lower = geo_mean - float(2.0 ** (mean_log - err_log))
+        upper = float(2.0 ** (mean_log + err_log)) - geo_mean
+        return geo_mean, lower, upper
+
+    def _log_error_value(self, logs: np.ndarray) -> float:
+        """Error-bar magnitude in log2 space for the configured error type."""
+        n = logs.size
+        if n == 0:
+            return 0.0
+        if self.config.error_bar == ErrorBarType.SEM:
+            return float(np.std(logs, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
+        if self.config.error_bar == ErrorBarType.SD:
+            return float(np.std(logs, ddof=1)) if n > 1 else 0.0
+        # 95% CI
+        from scipy import stats as sp_stats
+
+        if n < 3:
+            return 0.0
+        se = np.std(logs, ddof=1) / np.sqrt(n)
+        t_crit = sp_stats.t.ppf(0.975, df=n - 1)
+        return float(se * t_crit)
 
     def _resolve_figsize(self) -> tuple[float, float]:
         """Use journal-recommended size if available and user hasn't customized."""

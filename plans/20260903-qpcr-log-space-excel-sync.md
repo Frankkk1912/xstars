@@ -115,7 +115,7 @@
 | --- | --- | --- | --- | --- |
 | M1 分支建立与移植基线 | [ ] | 无 | feat 分支自 5f4c409 创建；main 基线 pytest 全绿（或已知失败已记录区分）；1c19a63 参考文本提取完成且 `_qpcr_bars` 版本基准已实证记录（rev 2 已预实证，T1.2 仅需落档确认）；模板数据修正完成（T1.3） | §4.6-2 已实证（rev 2），T1.2 转为落档确认；T1.3 独立于分支基线也可先做 |
 | M2 统计 gate 移植与 6 调用点接入 | [x] | M1 | 静态核查：6 个调用表达式均经 `stats_input_frame`，ELISA/WB 两调用点无 gate；`np.log2` 仅存在于 helper；tests/test_stats_engine.py 未修改且全绿；qPCR 输出标签就位且 ELISA/WB 标签不变（T2.4） | helper 落点 presets/qpcr.py（§4.5）；R11 标签同文件落地 |
-| M3 plot_engine qPCR 图形移植 | [ ] | M1（与 M2 可并行） | main plot_engine.py 含 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value`/`_qpcr_bars` 且 BAR_SCATTER 分发生效；非 qPCR 路径原样；既有 TestBarScatter/TestErrorBars 全绿 | 严格复刻 1c 原版（rev 2 实证：含 set_xticklabels，基准=1c19a63，无 MINOR 残留） |
+| M3 plot_engine qPCR 图形移植 | [x] | M1（与 M2 可并行） | main plot_engine.py 含 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value`/`_qpcr_bars` 且 BAR_SCATTER 分发生效；非 qPCR 路径原样；既有 TestBarScatter/TestErrorBars 全绿 | 严格复刻 1c 原版（rev 2 实证：含 set_xticklabels，基准=1c19a63，无 MINOR 残留） |
 | M4 测试移植 | [ ] | M2、M3 | 新增测试全部通过；未新建测试文件；含 tick-label 回归测试（:804-826 意图，rev 2 修订） | 落点仅 test_presets.py + test_plot_engine.py（R5） |
 | M5 全量验证与 Draft PR | [ ] | M4 | pytest 全量 0 failed；§8 静态核查清单全过；Draft PR 已开（base=main） | 验收标准=R7 |
 
@@ -171,13 +171,13 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 
 ### M3 plot_engine qPCR 图形移植
 
-- [ ] T3.1 移植 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value` 到 main PlotEngine
+- [x] T3.1 移植 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value` 到 main PlotEngine
   - 文件：`xstars/plot_engine.py`（修改；helpers 区，参照 main 版 `_error_value` :336-352 所在区域尾部插入）
   - 修改：按 main 的 PlotEngine 结构移植三个方法，逻辑逐行对照 WPS plot_engine.py:418-456（`_is_qpcr` :418-420 config 谓词；`_qpcr_geo_stats` :422-438 几何均值 + 上下不对称偏移；`_log_error_value` :440-456 SEM/SD/CI95，scipy t 局部导入）。确保 main 版 plot_engine 的 `from .config import ...` 含 `ExperimentPreset`（如缺则补入 import 列表）。不加数值 guard（R6）。
   - 验收：三个方法存在且行为与 WPS 版逐值一致（T4.2 断言 `2^(mean log2)` 几何均值与 `2^(mean±err)` 不对称端点）；非 qPCR 路径不受影响。
   - 依赖：T1.1、T1.2
 
-- [ ] T3.2 移植 `_qpcr_bars` 并在 `_bar_scatter` 加 qPCR 分发
+- [x] T3.2 移植 `_qpcr_bars` 并在 `_bar_scatter` 加 qPCR 分发
   - 文件：`xstars/plot_engine.py`（修改；`_bar_scatter` main 版 :79-118 为插入点）
   - 修改：在 main `_bar_scatter` 内、seaborn barplot 之前插入 `if self._is_qpcr(): self._qpcr_bars(ax, df_wide, groups) else:` 包住原 seaborn 路径，`show_points` 的 stripplot 保持两分支共用（分发结构对照 WPS plot_engine.py:85-127）；`_qpcr_bars` 本体按 1c 原版移植（rev 2 实证：1c 含 `ax.set_xticks`/`ax.set_xticklabels`（L173-174），照搬保留，R4；WPS 工作区版本 :129-174 与 1c 零差异可作参照）。仅特化 BAR_SCATTER，violin/line 不动。
   - 验收：qPCR + BAR_SCATTER 走 `_qpcr_bars`（柱高=几何均值、误差条不对称）；非 qPCR BAR_SCATTER 输出与移植前一致（既有 TestBarScatter/TestErrorBars 全绿）；显著性与轴标注由 `plot()` 统一后处理不与新 bar 坐标冲突（人工审阅 + M5 记录）。
