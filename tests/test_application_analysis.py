@@ -185,7 +185,10 @@ class ApplicationAnalysisTests(unittest.TestCase):
         self.assertEqual(len(result.writeback_plan.images), 2)
         self.assertEqual(
             [table.values[0][0] for table in result.writeback_plan.tables[::2]],
-            ["Processed Data — Gene-A", "Processed Data — Gene-B"],
+            [
+                "Processed Data — Gene-A (2^-ΔΔCt)",
+                "Processed Data — Gene-B (2^-ΔΔCt)",
+            ],
         )
         for target in result.target_results:
             self.assertEqual(
@@ -702,6 +705,10 @@ class QPCRLogSpaceExtendedTests(unittest.TestCase):
 
         # Stats table must be present
         self.assertTrue(len(result.writeback_plan.tables) >= 1)
+        # R11 alignment: qPCR stats table renames the p-value column.
+        self.assertIn(
+            "p-value(−ΔΔCt)", result.writeback_plan.tables[0].values[0]
+        )
 
         # Recover transformed data from the result and cross-check p-values
         analysis_result = analyze_selection(payload, config, output_start_cell="A10")
@@ -747,6 +754,16 @@ class QPCRLogSpaceExtendedTests(unittest.TestCase):
         )
         # Stats table written back for the labeled path
         self.assertTrue(len(result.writeback_plan.tables) >= 1)
+        # R11 alignment: qPCR stats table renames the p-value column.
+        header_rows = [
+            table.values[0]
+            for table in result.writeback_plan.tables
+            if table.values and isinstance(table.values[0], list)
+        ]
+        self.assertTrue(
+            any("p-value(−ΔΔCt)" in row for row in header_rows),
+            "qPCR stats table must rename the p-value column",
+        )
 
         # Cross-check via analyze_selection which also uses the log-space path
         analysis_result = analyze_selection(

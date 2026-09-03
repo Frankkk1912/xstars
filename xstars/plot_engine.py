@@ -396,7 +396,7 @@ class PlotEngine:
                 xytext=(15, 15),
                 textcoords="offset points",
                 fontsize=9,
-                arrowprops=dict(arrowstyle="->", color="gray"),
+                arrowprops={"arrowstyle": "->", "color": "gray"},
                 zorder=7,
             )
 

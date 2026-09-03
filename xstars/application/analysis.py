@@ -261,6 +261,26 @@ def stats_input_frame(df_wide: pd.DataFrame, config: PrismConfig) -> pd.DataFram
     return _stats_input_frame(df_wide, get_preset(config.experiment_preset))
 
 
+# qPCR output-label alignment with the Excel line (PR #4): the statistics run
+# on the log2 fold-change (−ΔΔCt) space, so qPCR writeback tables say so.
+PROCESSED_DATA_SUFFIX = " (2^-ΔΔCt)"
+PVALUE_LABEL = "p-value(−ΔΔCt)"
+
+
+def qpcr_stats_table(stats_df: pd.DataFrame) -> pd.DataFrame:
+    """Rename the generic ``p-value`` column for qPCR stats tables.
+
+    Applies the R11 wording agreed for the Excel line; other columns are
+    untouched, and frames without a ``p-value`` column pass through unchanged.
+    """
+    return stats_df.rename(columns={"p-value": PVALUE_LABEL})
+
+
+def _qpcr_title_suffix(preset: BasePreset | None) -> str:
+    """Return the qPCR processed-data title suffix when ``preset`` is qPCR."""
+    return PROCESSED_DATA_SUFFIX if isinstance(preset, QPCRPreset) else ""
+
+
 def analyze_dataframe(df_wide: pd.DataFrame, config: PrismConfig) -> AnalysisResult:
     """Run the shared transform → stats → plot pipeline without host I/O."""
     transformed, preset = transform_dataframe(df_wide, config)
@@ -305,11 +325,15 @@ def build_analysis_writeback_plan(
     processed_data_title: str = "Processed Data",
 ) -> WritebackPlan:
     """Describe existing Excel table spacing, picture anchor, and status text."""
+    if config.experiment_preset is ExperimentPreset.QPCR:
+        processed_data_title += PROCESSED_DATA_SUFFIX
     tables: list[TableWriteback] = []
     current_row = start_row
 
     if config.output_stats:
         stats_frame = result.stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_frame = qpcr_stats_table(stats_frame)
         tables.append(
             TableWriteback(
                 start_cell=cell_to_a1(current_row, start_column),
@@ -452,6 +476,8 @@ def _analyze_labeled(
 
         if config.output_stats:
             stats_frame = stats_result.to_dataframe()
+            if isinstance(preset, QPCRPreset):
+                stats_frame = qpcr_stats_table(stats_frame)
             tables.append(
                 TableWriteback(
                     start_cell=cell_to_a1(current_row, start_column),
@@ -471,7 +497,9 @@ def _analyze_labeled(
             tables.append(
                 TableWriteback(
                     start_cell=cell_to_a1(current_row, start_column),
-                    values=[[f"Processed Data — {target.name}"]],
+                    values=[
+                        [f"Processed Data — {target.name}{_qpcr_title_suffix(preset)}"]
+                    ],
                 )
             )
             current_row += 1
@@ -819,6 +847,8 @@ def transform_selection(
                     .analyze(_stats_input_frame(transformed, preset))
                     .to_dataframe()
                 )
+                if isinstance(preset, QPCRPreset):
+                    stats = qpcr_stats_table(stats)
                 tables.extend(
                     [
                         TableWriteback(
@@ -836,7 +866,11 @@ def transform_selection(
                 [
                     TableWriteback(
                         start_cell=cell_to_a1(current_row, column),
-                        values=[[f"Processed Data — {target_name}"]],
+                        values=[
+                            [
+                                f"Processed Data — {target_name}{_qpcr_title_suffix(preset)}"
+                            ]
+                        ],
                     ),
                     TableWriteback(
                         start_cell=cell_to_a1(current_row + 1, column),
@@ -858,6 +892,8 @@ def transform_selection(
         )
 
     transformed, preset = transform_dataframe(frame, config)
+    if config.experiment_preset is ExperimentPreset.QPCR:
+        title += PROCESSED_DATA_SUFFIX
     tables = []
     current_row = row
     if include_stats:
@@ -866,6 +902,8 @@ def transform_selection(
             .analyze(_stats_input_frame(transformed, preset))
             .to_dataframe()
         )
+        if isinstance(preset, QPCRPreset):
+            stats = qpcr_stats_table(stats)
         tables.append(
             TableWriteback(
                 start_cell=cell_to_a1(current_row, column),
