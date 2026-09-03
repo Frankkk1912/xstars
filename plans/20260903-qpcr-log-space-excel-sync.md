@@ -116,7 +116,7 @@
 | M1 分支建立与移植基线 | [ ] | 无 | feat 分支自 5f4c409 创建；main 基线 pytest 全绿（或已知失败已记录区分）；1c19a63 参考文本提取完成且 `_qpcr_bars` 版本基准已实证记录（rev 2 已预实证，T1.2 仅需落档确认）；模板数据修正完成（T1.3） | §4.6-2 已实证（rev 2），T1.2 转为落档确认；T1.3 独立于分支基线也可先做 |
 | M2 统计 gate 移植与 6 调用点接入 | [x] | M1 | 静态核查：6 个调用表达式均经 `stats_input_frame`，ELISA/WB 两调用点无 gate；`np.log2` 仅存在于 helper；tests/test_stats_engine.py 未修改且全绿；qPCR 输出标签就位且 ELISA/WB 标签不变（T2.4） | helper 落点 presets/qpcr.py（§4.5）；R11 标签同文件落地 |
 | M3 plot_engine qPCR 图形移植 | [x] | M1（与 M2 可并行） | main plot_engine.py 含 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value`/`_qpcr_bars` 且 BAR_SCATTER 分发生效；非 qPCR 路径原样；既有 TestBarScatter/TestErrorBars 全绿 | 严格复刻 1c 原版（rev 2 实证：含 set_xticklabels，基准=1c19a63，无 MINOR 残留） |
-| M4 测试移植 | [ ] | M2、M3 | 新增测试全部通过；未新建测试文件；含 tick-label 回归测试（:804-826 意图，rev 2 修订） | 落点仅 test_presets.py + test_plot_engine.py（R5） |
+| M4 测试移植 | [x] | M2、M3 | 新增测试全部通过；未新建测试文件；含 tick-label 回归测试（:804-826 意图，rev 2 修订） | 落点仅 test_presets.py + test_plot_engine.py（R5） |
 | M5 全量验证与 Draft PR | [ ] | M4 | pytest 全量 0 failed；§8 静态核查清单全过；Draft PR 已开（base=main） | 验收标准=R7 |
 
 Milestone 总数：5（≤10，符合目标 ≤7）。
@@ -185,13 +185,13 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 
 ### M4 测试移植
 
-- [ ] T4.1 扩展 `tests/test_presets.py`：gate 单测 + log-space p 值 integration
+- [x] T4.1 扩展 `tests/test_presets.py`：gate 单测 + log-space p 值 integration
   - 文件：`tests/test_presets.py`（修改；追加测试类/方法，不新建文件）
   - 修改：① gate 单测：非 qPCR preset（如 WBPreset）与 None 原样返回；QPCRPreset 输入逐元素 log2；config 变体谓词等价。② log-space p 值 integration（plain）：构造 ΔCt 输入（可移植 WPS test_presets.py :507-531 的 rng 数据模式 + QPCRStatsSpaceTests :589-617 的三组 ΔCt 手工数据意图），`QPCRPreset.transform` 得 fold change，过 `stats_input_frame` 喂 `StatsEngine`，断言 decision_path 含 ANOVA 且 p 值与 `scipy.stats.tukey_hsd(log2fc[:,i], ...)` 手算对拍（delta≤1e-12，对照 :617-626 模式）。③ labeled 对拍：移植 QPCRStatsSpaceTests :619-647 意图（GAPDH reference 三组数据，逐 target Tukey 对拍），用 DataFrame 直接构造，**不引入** SelectionPayload 等 WPS 依赖。~~**不移植** :804-826 tick-label 测试~~ **[superseded rev 2]**：该测试属 1c 自身内容，其意图改由 T4.2 移植到 `tests/test_plot_engine.py`（R4 修订版）。④ 输出标签（R11）：`qpcr_stats_table()` 仅重命名 `p-value` 列为 `PVALUE_LABEL`、其余列不动；`PROCESSED_DATA_SUFFIX` 常量值正确。
   - 验收：新增测试全部通过；`tests/test_application_analysis.py` 未创建；断言包含 transformed frame 全正（fold-change 不变量）、p 值数值对拍、qPCR stats 表列名重命名（含非 qPCR frame 不受影响的对照）。
   - 依赖：T2.1、T2.2、T2.3
 
-- [ ] T4.2 扩展 `tests/test_plot_engine.py`：几何均值/不对称误差条测试
+- [x] T4.2 扩展 `tests/test_plot_engine.py`：几何均值/不对称误差条测试
   - 文件：`tests/test_plot_engine.py`（修改；追加测试类，沿用既有 Agg/matplotlib 导入模式）
   - 修改：移植 QPCRStatsSpaceTests `test_qpcr_geo_stats_derive_from_log_space`（:649-666）意图：`PrismConfig(experiment_preset=QPCR)` 下 `_qpcr_geo_stats(Series([1.0, 2.0, 4.0]))` 断言 geo=2.0、lower/upper 等于 `2^(1∓sem_log)`/`2^(1±sem_log)` 且 upper>lower；另加 qPCR BAR_SCATTER 冒烟（`PlotEngine(config).plot(df_wide)` 成功出图、axes 存在）与非 qPCR config 走原路径的对照断言；再加 tick-label 回归（rev 2 新增，移植 1c :804-826 意图）：`show_points=False` 下 qPCR BAR_SCATTER 的 `ax.get_xticklabels()` 等于组名（对应 1c `_qpcr_bars` L173-174 行为）。不依赖 xlwings。
   - 验收：新增测试通过；既有 TestBarScatter/TestErrorBars/TestOptions（main :15-81）不修改且全绿；tick-label 断言通过（组名刻度）。
@@ -220,7 +220,7 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 | 3 | gate 覆盖静态核查（访谈确认以静态核查替代逐入口 mock） | `git grep -n "stats_input_frame" xstars/main.py`；`git grep -nE "np\.log2\|log2\(" xstars/main.py`；逐点代码审阅 :508-509、:667-668、:781-782、:842-843、:1477-1478、:1499-1500 | 6 个调用表达式均经 gate；main.py 内无散落 log2（log2 仅在 presets/qpcr.py helper 与 plot_engine helpers 内） | 6 处命中、0 散落、审阅清单逐点签字 |
 | 4 | ELISA/WB 回归不变核查 | 代码审阅 main.py :330-331（ELISA）、:587-588（WB labeled）无 gate；`git diff main...HEAD -- xstars/stats_engine.py tests/test_stats_engine.py` 为空且该测试全绿 | 非 qPCR 调用点与引擎零改动 | 两调用点无 gate + 引擎文件 diff 为空 + test_stats_engine.py 全绿 |
 | 5 | 图形分发核查 | `git grep -nE "_qpcr_bars\|_is_qpcr\|_qpcr_geo_stats\|_log_error_value" xstars/plot_engine.py`；既有 TestBarScatter/TestErrorBars 全绿；对照 `git show 1c19a63:xstars/plot_engine.py` 确认 `_qpcr_bars` 严格复刻（rev 2 实证：1c 含 set_xticklabels，移植版须含 L173-174 对应行） | 4 个符号存在、分发生效、非 qPCR 路径输出不变、1c 复刻无增删（含 tick-label 行为） | grep 命中 + 既有测试全绿 + 复刻对照通过 + tick-label 测试通过 |
-| 6 | wps 分支零改动核查 | `git log --oneline main..HEAD`（仅本次移植提交）；`git diff --stat main...HEAD`（仅 §9 所列 5 文件）；`feature/wps-support` ref 无新提交（`git rev-parse feature/wps-support` 不变） | 无 WPS 范围文件（application/、contracts、export.py、test_application_analysis.py）流入；wps 分支原样 | 提交清单与 diff 范围核查通过 |
+| 6 | wps 分支零改动核查 | `git log --oneline main..HEAD`（仅本次移植提交）；`git diff --stat main...HEAD`（仅 §9 所列 6 个实现/内容文件，另含 Plan 进度更新）；`feature/wps-support` ref 无新提交（`git rev-parse feature/wps-support` 不变） | 无 WPS 范围文件（application/、contracts、export.py、test_application_analysis.py）流入；wps 分支原样 | 提交清单与 diff 范围核查通过 |
 | 7 | 真实 Excel 人工验证（**后置，非本 Plan 验收项，R7**） | 合并后在真实 Excel 中人工验证：普通 qPCR、labeled qPCR、Quick、transform-only include-stats，各含 SEM/SD/CI95 三种 error-bar 配置；同时核对 processed data 标题与 p-value 列名（R11） | 统计表 p 值与 log 空间一致；qPCR 柱图为几何均值+不对称误差条；ELISA/WB 输出与修复前一致 | **不适用**（后置动作）；责任人：用户；结果记录于后续 issue/PR 评论 |
 | 8 | 模板数据核查（R12/T1.3） | 修改后用模板 qPCR sheet 数据重跑 `transform_labeled`+`StatsEngine`（含新旧两种口径） | TNF-a 新旧口径均为 ANOVA→Tukey，无 Dunn fallback；IL-6 与 rev 2 预验证一致；其余 sheet 未变 | 两个 gene 的 decision_path 与预验证一致 |
 | 9 | qPCR 输出标签核查（R11/T2.4） | `git grep -n "2^-ΔΔCt\|p-value(−ΔΔCt)"`；ELISA/WB 写回路径代码审阅；T4.1 ④ 单测 | 标签仅出现在 qPCR 路径；ELISA/WB 标题与 `p-value` 列名不变 | grep 命中范围符合 + 审阅通过 + 单测通过 |
@@ -251,7 +251,7 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 | ID | 风险 | 等级 | 触发条件 | 影响 | 缓解 |
 | --- | --- | --- | --- | --- | --- |
 | R1 | 移植遗漏 qPCR-capable 调用点（尤其 transform-only 两分支） | 高 | 6 表达式分散于 5 函数；手工逐点接入 | 同一数据不同入口不同口径，双轨状态残留 | §8 第 3 项静态核查（6 处 grep 命中 + 逐点审阅清单）；T2.2/T2.3 按表达式粒度拆任务 |
-| R2 | 冲突处理/照搬引入 WPS 范围（application/contracts/export 流入） | 中 | 试图用 cherry-pick 结果直接落盘，或从工作区版本复制而非 1c 原版 | 违反 R1 路径边界，review 面与回归面扩大 | 手工移植为唯一路径；§8 第 6 项 diff 范围核查（仅 5 文件）；T1.2 锁定 1c 基准 |
+| R2 | 冲突处理/照搬引入 WPS 范围（application/contracts/export 流入） | 中 | 试图用 cherry-pick 结果直接落盘，或从工作区版本复制而非 1c 原版 | 违反 R1 路径边界，review 面与回归面扩大 | 手工移植为唯一路径；§8 第 6 项 diff 范围核查（仅 6 个实现/内容文件 + Plan）；T1.2 锁定 1c 基准 |
 | R3 | 图形显著性与轴标注与新 bar 坐标兼容性 | 中 | `_qpcr_bars` 的 ax.bar/errorbar 与 `plot()` 统一 annotation 层的交互在 main 结构下与 WPS 有差异 | 标注错位或遮挡 | WPS 同分发结构已验证（1c + 测试）；T4.2 冒烟 + §8 第 5 项；真实 Excel 人工后置验证覆盖此项 |
 | R4 | 两分支临时重复逻辑 | 中 | main 的 presets/qpcr.py helper 与 WPS application/analysis.py `_stats_input_frame` 并存 | PR #1 合并时同域冲突/双实现漂移 | 命名对齐（§4.5-4）便于识别收敛；PR 描述显式声明与 PR #1 的关系与去重约定（PR #1 侧解决冲突） |
 | R5 | 极端数值边界（0/inf/非有限 → log2 产生 -inf/NaN 进 StatsEngine） | 低 | qPCR transform 指数 underflow 至 0 或非有限输入 | warning/-inf 进入决策树，结果异常 | 访谈决策 6：沿用 1c 行为不新增 guard（正常有限 ΔΔCt 输出严格为正，explore 报告 §3.4）；残余风险已记录，如需 guard 另开需求 |
@@ -303,7 +303,7 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
   > - Static audit: all 6 qPCR-capable call expressions route through `stats_input_frame` (grep + per-site review); ELISA/WB call sites and `xstars/stats_engine.py` unchanged.
   > - Manual verification in real Excel (plain/labeled qPCR, Quick, transform-only include-stats; SEM/SD/CI95) is deferred and tracked as a follow-up, not part of this PR's acceptance.
 
-- **PR 拆分决策**：**单 PR**。依据：5 个 milestone 是同一行为修正的连续切片（gate→调用点→图形→测试→验证），不存在可独立交付/独立验收的子系统；中途拆分会产生"统计已改、图未改"或"实现已改、测试未跟"的不可验收中间态；总 diff 预计 5 文件、规模可控。
+- **PR 拆分决策**：**单 PR**。依据：5 个 milestone 是同一行为修正的连续切片（gate→调用点→图形→测试→验证），不存在可独立交付/独立验收的子系统；中途拆分会产生"统计已改、图未改"或"实现已改、测试未跟"的不可验收中间态；总 diff 预计 6 个实现/内容文件 + Plan，规模可控。
 - **合并顺序**：本 PR 与 PR #1（feature/wps-support）**互相独立、先后不限**。若本 PR 先合并：PR #1 合并时如产生同域冲突（`xstars/main.py`、`xstars/plot_engine.py`、`tests/test_presets.py` 及 gate 重复逻辑），**在 PR #1 侧解决**——application 层成为该逻辑的唯一归属，收敛/删除本 PR 引入的 `presets/qpcr.py` helper 形态。若 PR #1 先合并：本 PR 需 rebase 并按同一原则在 PR #1 侧（即以 application 层为准）去重后重提。
 
 ---
@@ -328,3 +328,4 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 | 4 | 2026-09-03 | p-value 标签定稿为 `p-value(−ΔΔCt)`（用户指定，替换 rev 3 的 `p-value (calculated on ΔCt)`）；状态改"已批准" | 用户批准 rev 3 并指定唯一修订（2026-09-03） |
 | 4b | 2026-09-03 | 两项事实修正：① 模板坐标 Q11/Q12→R11/R12（父 Agent从 pandas 0-based 列索引转换 Excel 列字母时偏移一列；不改变用户批准的 TNF-a Control Ct 数值修改）；② p≈0.0435 的 pair 是 Control vs LPS+Dex，而非 LPS vs LPS+Dex（不改变方差≠0、ANOVA→Tukey、避免 Dunn 的核心验收） | worker 用 openpyxl 实测：Q10:Q12 为 `TNF-a` 标签，R10:R12 为 Control Ct `[28, 28.2, 27.8]`；显式读取 StatsResult pairs：Control-LPS=2.407e-06、Control-LPS+Dex=0.0434986、LPS-LPS+Dex=6.638e-06 |
 | 4c | 2026-09-03 | 调用点归属事实修正：main L1477/L1499 属于 `_run_transform_only_impl` 的 plain/labeled include-stats 分支，不是 `_run_export_impl`；WPS 语义对应为 `transform_selection` plain/labeled include_stats，不是 payload export/re-render。仅修正 Plan/PR 措辞，不改变批准的 6 调用点覆盖范围 | worker 在 feat/main 版 `xstars/main.py` 实读函数边界；父 Agent 批准事实修正 |
+| 4d | 2026-09-03 | R12 加入模板后，diff 范围旧计数 5→6 个实现/内容文件（另含 Plan） | 文件级范围 §9.1 与实际 `git diff --name-only main...HEAD` 核对 |
