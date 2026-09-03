@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.ticker import MaxNLocator
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -25,7 +25,7 @@ from .stats_engine import StatsResult
 from .styles import get_journal_figsize, get_prism_context
 
 
-def export_figure(fig: "Figure", path: str, dpi: int = 300) -> None:
+def export_figure(fig: Figure, path: str, dpi: int = 300) -> None:
     """Save figure to file. Format is inferred from extension by matplotlib."""
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
 
@@ -40,7 +40,7 @@ class PlotEngine:
         self,
         df_wide: pd.DataFrame,
         stats_result: StatsResult | None = None,
-    ) -> "Figure":
+    ) -> Figure:
         """Dispatch to the correct chart builder and return the Figure."""
         cfg = self.config
 
@@ -256,7 +256,7 @@ class PlotEngine:
     # Dose-response (IC50)
     # ------------------------------------------------------------------
 
-    def _dose_response_figure(self, df_wide: pd.DataFrame) -> "Figure":
+    def _dose_response_figure(self, df_wide: pd.DataFrame) -> Figure:
         """Generate a dose-response curve with fit and IC50 markers."""
         cfg = self.config
         fit_info = cfg.ic50_fit_info
@@ -325,7 +325,9 @@ class PlotEngine:
                         linewidth=1.5, label="Interpolation", zorder=4)
             else:
                 # Legacy 4PL
-                from .tools.standard_curve import four_param_logistic as _four_param_logistic
+                from .tools.standard_curve import (
+                    four_param_logistic as _four_param_logistic,
+                )
                 if use_log:
                     x_fit = np.geomspace(conc.min() * 0.5, conc.max() * 2, 200)
                 else:

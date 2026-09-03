@@ -10,7 +10,8 @@ from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
 from .presets import get_preset
-from .presets.wb import WBOptions
+from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
+from .presets.elisa import ELISAOptions
 from .presets.qpcr import (
     PROCESSED_DATA_SUFFIX,
     QPCROptions,
@@ -18,8 +19,7 @@ from .presets.qpcr import (
     stats_input_frame,
     stats_input_frame_for_config,
 )
-from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
-from .presets.elisa import ELISAOptions, ELISAPreset
+from .presets.wb import WBOptions
 from .stats_engine import StatsEngine
 from .ui_dialog import SettingsDialog, TransformOnlyDialog
 
@@ -276,13 +276,17 @@ def run_elisa() -> None:
 
 def _run_elisa_impl(book: xw.Book) -> None:
     """ELISA flow: read std curve selection → fit → dialog → select samples → back-calc → stats → plot."""
-    import numpy as np
     import matplotlib
+    import numpy as np
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from .tools.standard_curve import back_calculate, fit_standard_curve, wide_to_conc_od
+
     from .presets.elisa_dialog import ELISADialog
     from .styles import get_prism_context
+    from .tools.standard_curve import (
+        back_calculate,
+        wide_to_conc_od,
+    )
 
     sheet = book.selection.sheet
     sel = book.selection
@@ -429,7 +433,7 @@ def _run_elisa_impl(book: xw.Book) -> None:
     )
 
 
-def _has_label_column(df: "pd.DataFrame") -> bool:
+def _has_label_column(df: pd.DataFrame) -> bool:
     """Check if the first column of a raw DataFrame contains non-numeric labels."""
     import pandas as pd
 
@@ -569,8 +573,8 @@ def _run_wb_labeled(
     book: xw.Book,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """WB labeled reference mode: produce one figure per target protein."""
@@ -649,8 +653,8 @@ def _run_qpcr_labeled(
     book: xw.Book,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """qPCR labeled reference mode: produce one figure per target gene."""
@@ -919,8 +923,9 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
     Strategy: temporarily scale the shape up so that CopyPicture(xlBitmap)
     captures at higher resolution, then restore original dimensions.
     """
-    from PIL import ImageGrab, Image
     import time
+
+    from PIL import ImageGrab
 
     scale = dpi / 96.0
     orig_w = shape.Width
@@ -1278,6 +1283,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     rows are OD replicates (same format as CCK-8 / other presets).
     """
     import numpy as np
+
     from .tools.standard_curve import back_calculate, wide_to_conc_od
     from .tools.standard_curve_dialog import StandardCurveDialog
 
@@ -1356,6 +1362,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     from .styles import get_prism_context
 
     cfg = PrismConfig.load()
@@ -1401,7 +1408,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
-def _select_sample_data(book: xw.Book, sheet) -> "pd.DataFrame | None":
+def _select_sample_data(book: xw.Book, sheet) -> pd.DataFrame | None:
     """Prompt user to select a sample OD region in Excel via InputBox.
 
     Returns a wide DataFrame (columns = sample group names, rows = OD replicates),
