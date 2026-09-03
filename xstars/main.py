@@ -10,15 +10,22 @@ from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
 from .presets import get_preset
-from .presets.wb import WBOptions
-from .presets.qpcr import QPCROptions
 from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
-from .presets.elisa import ELISAOptions, ELISAPreset
+from .presets.elisa import ELISAOptions
+from .presets.qpcr import (
+    PROCESSED_DATA_SUFFIX,
+    QPCROptions,
+    qpcr_stats_table,
+    stats_input_frame,
+    stats_input_frame_for_config,
+)
+from .presets.wb import WBOptions
 from .stats_engine import StatsEngine
 from .ui_dialog import SettingsDialog, TransformOnlyDialog
 
 try:
     import ttkbootstrap as _ttkb
+
     HAS_TTKB = True
 except ImportError:
     HAS_TTKB = False
@@ -270,13 +277,18 @@ def run_elisa() -> None:
 
 def _run_elisa_impl(book: xw.Book) -> None:
     """ELISA flow: read std curve selection → fit → dialog → select samples → back-calc → stats → plot."""
-    import numpy as np
     import matplotlib
+    import numpy as np
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from .tools.standard_curve import back_calculate, fit_standard_curve, wide_to_conc_od
+
     from .presets.elisa_dialog import ELISADialog
     from .styles import get_prism_context
+    from .tools.standard_curve import (
+        back_calculate,
+        wide_to_conc_od,
+    )
 
     sheet = book.selection.sheet
     sel = book.selection
@@ -300,7 +312,9 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
     conc, od = wide_to_conc_od(df_std)
     if len(conc) < 2:
-        raise ValueError("Need at least 2 valid data points for standard curve fitting.")
+        raise ValueError(
+            "Need at least 2 valid data points for standard curve fitting."
+        )
 
     # 2. Show ELISA dialog (fit + chart/theme/output settings in one window)
     dialog = ELISADialog(conc, od)
@@ -362,8 +376,9 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
     # Concentration data
     if config.output_data:
-        out_row = _write_transformed_data(sheet, out_row, out_col, conc_df,
-                                          "Back-Calculated Concentrations")
+        out_row = _write_transformed_data(
+            sheet, out_row, out_col, conc_df, "Back-Calculated Concentrations"
+        )
 
     # 7. Insert analysis chart below tables
     insert_left = sheet.range((out_row, out_col)).left
@@ -381,8 +396,9 @@ def _run_elisa_impl(book: xw.Book) -> None:
         with get_prism_context(config.journal_preset, config.base_theme):
             fig_std, ax = plt.subplots(figsize=(4.5, 3.5), dpi=config.dpi)
 
-            ax.scatter(conc, od, color=config.palette[0], s=30, zorder=5,
-                       label="Standards")
+            ax.scatter(
+                conc, od, color=config.palette[0], s=30, zorder=5, label="Standards"
+            )
 
             conc_pos = conc[conc > 0]
             cmin_pos = conc_pos.min() if len(conc_pos) > 0 else 1e-6
@@ -393,8 +409,14 @@ def _run_elisa_impl(book: xw.Book) -> None:
             else:
                 x_fit = np.geomspace(cmin_pos * 0.5, cmax_pos * 1.5, 200)
             y_fit = fit.predict(x_fit)
-            ax.plot(x_fit, y_fit, "-", color=config.palette[1], linewidth=1.5,
-                    label=fit.method)
+            ax.plot(
+                x_fit,
+                y_fit,
+                "-",
+                color=config.palette[1],
+                linewidth=1.5,
+                label=fit.method,
+            )
 
             use_log = len(conc_pos) >= 2 and cmax_pos / cmin_pos > 10
             if use_log:
@@ -423,7 +445,7 @@ def _run_elisa_impl(book: xw.Book) -> None:
     )
 
 
-def _has_label_column(df: "pd.DataFrame") -> bool:
+def _has_label_column(df: pd.DataFrame) -> bool:
     """Check if the first column of a raw DataFrame contains non-numeric labels."""
     import pandas as pd
 
@@ -454,7 +476,10 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
     if preset_type == ExperimentPreset.CCK8 and not base_config.preset_blank_group:
         base_config.preset_blank_group = _guess_blank(groups)
     # If labels detected, default to has_reference=True for WB and qPCR
-    if wb_labels is not None and preset_type in (ExperimentPreset.WB, ExperimentPreset.QPCR):
+    if wb_labels is not None and preset_type in (
+        ExperimentPreset.WB,
+        ExperimentPreset.QPCR,
+    ):
         base_config.preset_has_reference = True
 
     dialog = SettingsDialog(groups, sizes, base_config=base_config)
@@ -493,10 +518,7 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
         and preset.last_result.fit_params is not None
     ):
         opts = _build_preset_options(config)
-        dose_cols = [
-            c for c in df_wide.columns
-            if c != opts.control_group
-        ]
+        dose_cols = [c for c in df_wide.columns if c != opts.control_group]
         if opts.concentrations and len(opts.concentrations) == len(dose_cols):
             config.ic50_fit_info = CCK8FitInfo(
                 concentrations=opts.concentrations,
@@ -506,7 +528,7 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     # Stats
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame(df_wide, preset))
 
     # Plot
     plotter = PlotEngine(config)
@@ -522,12 +544,18 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
 
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
 
         # IC50 results for CCK-8
-        if isinstance(preset, CCK8Preset) and preset.last_result and preset.last_result.ic50 is not None:
+        if (
+            isinstance(preset, CCK8Preset)
+            and preset.last_result
+            and preset.last_result.ic50 is not None
+        ):
             ic50_dest = sheet.range((next_row, start_col))
             res = preset.last_result
             ic50_data = [
@@ -535,13 +563,18 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
                 ["R²", res.r_squared],
             ]
             if res.ic50_95ci:
-                ic50_data.append(["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"])
+                ic50_data.append(
+                    ["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"]
+                )
             ic50_dest.value = ic50_data
             next_row += len(ic50_data) + 2
 
     # Write processed data
     if config.output_data:
-        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, "Processed Data")
+        title = "Processed Data"
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            title += PROCESSED_DATA_SUFFIX
+        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, title)
 
     # Insert chart below stats/data tables
     sheet.pictures.add(
@@ -558,8 +591,8 @@ def _run_wb_labeled(
     book: xw.Book,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """WB labeled reference mode: produce one figure per target protein."""
@@ -588,10 +621,12 @@ def _run_wb_labeled(
         stats_result = engine.analyze(fold_df)
 
         # Set title to protein name
-        plot_config = PrismConfig(**{
-            f.name: getattr(config, f.name)
-            for f in config.__dataclass_fields__.values()
-        })
+        plot_config = PrismConfig(
+            **{
+                f.name: getattr(config, f.name)
+                for f in config.__dataclass_fields__.values()
+            }
+        )
         plot_config.title = protein_name
 
         plotter = PlotEngine(plot_config)
@@ -608,6 +643,7 @@ def _run_wb_labeled(
 
         if config.export_path:
             from pathlib import Path
+
             p = Path(config.export_path)
             export_path = str(p.with_stem(f"{p.stem}_{protein_name}"))
             export_figure(fig, export_path, config.export_dpi)
@@ -628,18 +664,24 @@ def _run_wb_labeled(
         # Write processed data
         if config.output_data:
             stats_start_row = _write_transformed_data(
-                sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {protein_name}"
+                sheet,
+                stats_start_row,
+                stats_col,
+                fold_df,
+                f"Processed Data — {protein_name}",
             )
 
-    book.app.status_bar = f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
+    book.app.status_bar = (
+        f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
+    )
 
 
 def _run_qpcr_labeled(
     book: xw.Book,
     sheet,
     handler: DataHandler,
-    labels: "pd.Series",
-    df_numeric: "pd.DataFrame",
+    labels: pd.Series,
+    df_numeric: pd.DataFrame,
     config: PrismConfig,
 ) -> None:
     """qPCR labeled reference mode: produce one figure per target gene."""
@@ -665,13 +707,15 @@ def _run_qpcr_labeled(
         handler.validate(fold_df)
 
         engine = StatsEngine(config)
-        stats_result = engine.analyze(fold_df)
+        stats_result = engine.analyze(stats_input_frame(fold_df, preset))
 
         # Set title to gene name
-        plot_config = PrismConfig(**{
-            f.name: getattr(config, f.name)
-            for f in config.__dataclass_fields__.values()
-        })
+        plot_config = PrismConfig(
+            **{
+                f.name: getattr(config, f.name)
+                for f in config.__dataclass_fields__.values()
+            }
+        )
         plot_config.title = gene_name
 
         plotter = PlotEngine(plot_config)
@@ -688,6 +732,7 @@ def _run_qpcr_labeled(
 
         if config.export_path:
             from pathlib import Path
+
             p = Path(config.export_path)
             export_path = str(p.with_stem(f"{p.stem}_{gene_name}"))
             export_figure(fig, export_path, config.export_dpi)
@@ -697,7 +742,7 @@ def _run_qpcr_labeled(
 
         # Stats table
         if config.output_stats:
-            stats_df = stats_result.to_dataframe()
+            stats_df = qpcr_stats_table(stats_result.to_dataframe())
             dest = sheet.range((stats_start_row, stats_col))
             dest.value = [[gene_name]]
             stats_start_row += 1
@@ -708,10 +753,16 @@ def _run_qpcr_labeled(
         # Write processed data
         if config.output_data:
             stats_start_row = _write_transformed_data(
-                sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {gene_name}"
+                sheet,
+                stats_start_row,
+                stats_col,
+                fold_df,
+                f"Processed Data — {gene_name}{PROCESSED_DATA_SUFFIX}",
             )
 
-    book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
+    book.app.status_bar = (
+        f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
+    )
 
 
 def _read_selection_auto(handler: DataHandler, book: xw.Book):
@@ -779,7 +830,7 @@ def _run_impl(book: xw.Book) -> None:
 
     # 3. Statistics
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
 
     # 4. Plot
     plotter = PlotEngine(config)
@@ -796,13 +847,19 @@ def _run_impl(book: xw.Book) -> None:
 
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
 
         # Write IC50 results if CCK-8 preset was used
         preset = get_preset(config.experiment_preset)
-        if isinstance(preset, CCK8Preset) and preset.last_result and preset.last_result.ic50 is not None:
+        if (
+            isinstance(preset, CCK8Preset)
+            and preset.last_result
+            and preset.last_result.ic50 is not None
+        ):
             ic50_dest = sheet.range((next_row, start_col))
             res = preset.last_result
             ic50_data = [
@@ -810,7 +867,9 @@ def _run_impl(book: xw.Book) -> None:
                 ["R²", res.r_squared],
             ]
             if res.ic50_95ci:
-                ic50_data.append(["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"])
+                ic50_data.append(
+                    ["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"]
+                )
             ic50_dest.value = ic50_data
             next_row += len(ic50_data) + 2
 
@@ -840,7 +899,7 @@ def _run_quick_impl(book: xw.Book) -> None:
     handler.validate(df_wide)
 
     engine = StatsEngine(config)
-    stats_result = engine.analyze(df_wide)
+    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
 
     plotter = PlotEngine(config)
     fig = plotter.plot(df_wide, stats_result)
@@ -852,6 +911,8 @@ def _run_quick_impl(book: xw.Book) -> None:
     # Write stats summary table below the data selection
     if config.output_stats:
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((next_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         next_row += len(stats_df) + 2
@@ -900,8 +961,9 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
     Strategy: temporarily scale the shape up so that CopyPicture(xlBitmap)
     captures at higher resolution, then restore original dimensions.
     """
-    from PIL import ImageGrab, Image
     import time
+
+    from PIL import ImageGrab
 
     scale = dpi / 96.0
     orig_w = shape.Width
@@ -963,14 +1025,18 @@ def _show_export_dialog() -> tuple[str, int] | None:
 
     result = {}
 
-    root = ttkb.Window(title="Export Image", themename="cosmo", size=(460, 240)) if ttkb else tk.Tk()
+    root = (
+        ttkb.Window(title="Export Image", themename="cosmo", size=(460, 240))
+        if ttkb
+        else tk.Tk()
+    )
     if not ttkb:
         root.title("Export Image")
         root.geometry("460x240")
     root.resizable(False, False)
     root.attributes("-topmost", True)
 
-    frame = (ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15))
+    frame = ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15)
     frame.pack(fill="both", expand=True)
 
     Label = ttkb.Label if ttkb else tk.Label
@@ -981,15 +1047,21 @@ def _show_export_dialog() -> tuple[str, int] | None:
     # Format
     Label(frame, text="Format:").grid(row=0, column=0, sticky="w", pady=(0, 8))
     fmt_var = tk.StringVar(value="PNG image")
-    fmt_combo = Combo(frame, textvariable=fmt_var, values=list(_FORMAT_MAP.keys()),
-                      state="readonly", width=20)
+    fmt_combo = Combo(
+        frame,
+        textvariable=fmt_var,
+        values=list(_FORMAT_MAP.keys()),
+        state="readonly",
+        width=20,
+    )
     fmt_combo.grid(row=0, column=1, columnspan=2, sticky="w", pady=(0, 8), padx=(8, 0))
 
     # DPI
     Label(frame, text="DPI:").grid(row=1, column=0, sticky="w", pady=(0, 8))
     dpi_var = tk.StringVar(value="300")
-    dpi_combo = Combo(frame, textvariable=dpi_var, values=_DPI_OPTIONS,
-                      state="readonly", width=20)
+    dpi_combo = Combo(
+        frame, textvariable=dpi_var, values=_DPI_OPTIONS, state="readonly", width=20
+    )
     dpi_combo.grid(row=1, column=1, columnspan=2, sticky="w", pady=(0, 8), padx=(8, 0))
 
     # Output path
@@ -1012,7 +1084,8 @@ def _show_export_dialog() -> tuple[str, int] | None:
 
     browse_kw = {"bootstyle": "secondary"} if ttkb else {}
     Button(frame, text="Browse...", command=browse, **browse_kw).grid(
-        row=2, column=2, sticky="w", pady=(0, 8), padx=(4, 0))
+        row=2, column=2, sticky="w", pady=(0, 8), padx=(4, 0)
+    )
 
     # Auto-update extension when format changes
     def on_fmt_change(_event=None):
@@ -1020,6 +1093,7 @@ def _show_export_dialog() -> tuple[str, int] | None:
         if cur:
             _, ext = _FORMAT_MAP.get(fmt_var.get(), ("png", ".png"))
             from pathlib import Path
+
             path_var.set(str(Path(cur).with_suffix(ext)))
 
     fmt_combo.bind("<<ComboboxSelected>>", on_fmt_change)
@@ -1039,15 +1113,23 @@ def _show_export_dialog() -> tuple[str, int] | None:
     def on_cancel():
         root.destroy()
 
-    btn_frame = (ttkb.Frame(frame) if ttkb else tk.Frame(frame))
+    btn_frame = ttkb.Frame(frame) if ttkb else tk.Frame(frame)
     btn_frame.grid(row=3, column=0, columnspan=3, sticky="e", pady=(12, 0))
 
     if ttkb:
-        ttkb.Button(btn_frame, text="Export", bootstyle="primary", command=on_export, width=10).pack(side="right", padx=(8, 0))
-        ttkb.Button(btn_frame, text="Cancel", bootstyle="secondary", command=on_cancel, width=10).pack(side="right")
+        ttkb.Button(
+            btn_frame, text="Export", bootstyle="primary", command=on_export, width=10
+        ).pack(side="right", padx=(8, 0))
+        ttkb.Button(
+            btn_frame, text="Cancel", bootstyle="secondary", command=on_cancel, width=10
+        ).pack(side="right")
     else:
-        tk.Button(btn_frame, text="Export", command=on_export, width=10).pack(side="right", padx=(8, 0))
-        tk.Button(btn_frame, text="Cancel", command=on_cancel, width=10).pack(side="right")
+        tk.Button(btn_frame, text="Export", command=on_export, width=10).pack(
+            side="right", padx=(8, 0)
+        )
+        tk.Button(btn_frame, text="Cancel", command=on_cancel, width=10).pack(
+            side="right"
+        )
 
     # Center on screen
     root.update_idletasks()
@@ -1097,6 +1179,7 @@ def run_reset_settings() -> None:
     book = xw.Book.caller()
     try:
         from .config import DEFAULT_SETTINGS_PATH
+
         if DEFAULT_SETTINGS_PATH.exists():
             DEFAULT_SETTINGS_PATH.unlink()
         try:
@@ -1116,6 +1199,7 @@ def run_set_theme(theme_name: str) -> None:
     book = xw.Book.caller()
     try:
         from .config import JournalPreset
+
         preset = JournalPreset(theme_name)
         config = PrismConfig.load()
         config.journal_preset = preset
@@ -1140,6 +1224,7 @@ def run_set_base_theme(theme_name: str) -> None:
     book = xw.Book.caller()
     try:
         from .config import BaseTheme
+
         theme = BaseTheme(theme_name)
         config = PrismConfig.load()
         config.base_theme = theme
@@ -1155,6 +1240,7 @@ def run_set_palette(palette_name: str) -> None:
     try:
         from .config import PalettePreset
         from .styles import get_palette
+
         preset = PalettePreset(palette_name)
         config = PrismConfig.load()
         config.palette_preset = preset
@@ -1172,6 +1258,7 @@ def run_set_journal_palette(palette_name: str) -> None:
     try:
         from .config import JournalPalette
         from .styles import get_palette
+
         jp = JournalPalette(palette_name)
         config = PrismConfig.load()
         config.journal_palette = jp
@@ -1187,35 +1274,109 @@ def run_set_journal_palette(palette_name: str) -> None:
 # These are called by RunFrozenPython which can only pass simple string args.
 # Each wraps a parameterized setter with a fixed argument.
 
-def run_set_base_theme_classic() -> None: run_set_base_theme("classic")
-def run_set_base_theme_bw() -> None: run_set_base_theme("bw")
-def run_set_base_theme_minimal() -> None: run_set_base_theme("minimal")
-def run_set_base_theme_dark() -> None: run_set_base_theme("dark")
 
-def run_set_theme_none() -> None: run_set_theme("none")
-def run_set_theme_nature() -> None: run_set_theme("nature")
-def run_set_theme_science() -> None: run_set_theme("science")
-def run_set_theme_cell() -> None: run_set_theme("cell")
-def run_set_theme_lancet() -> None: run_set_theme("lancet")
-def run_set_theme_nejm() -> None: run_set_theme("nejm")
-def run_set_theme_jama() -> None: run_set_theme("jama")
-def run_set_theme_bmj() -> None: run_set_theme("bmj")
+def run_set_base_theme_classic() -> None:
+    run_set_base_theme("classic")
 
-def run_set_journal_palette_default() -> None: run_set_journal_palette("default")
-def run_set_journal_palette_nature() -> None: run_set_journal_palette("nature")
-def run_set_journal_palette_science() -> None: run_set_journal_palette("science")
-def run_set_journal_palette_cell() -> None: run_set_journal_palette("cell")
-def run_set_journal_palette_lancet() -> None: run_set_journal_palette("lancet")
-def run_set_journal_palette_nejm() -> None: run_set_journal_palette("nejm")
-def run_set_journal_palette_jama() -> None: run_set_journal_palette("jama")
-def run_set_journal_palette_bmj() -> None: run_set_journal_palette("bmj")
 
-def run_set_palette_default() -> None: run_set_palette("default")
-def run_set_palette_colorblind() -> None: run_set_palette("colorblind")
-def run_set_palette_vibrant() -> None: run_set_palette("vibrant")
-def run_set_palette_pastel() -> None: run_set_palette("pastel")
-def run_set_palette_deep() -> None: run_set_palette("deep")
-def run_set_palette_muted() -> None: run_set_palette("muted")
+def run_set_base_theme_bw() -> None:
+    run_set_base_theme("bw")
+
+
+def run_set_base_theme_minimal() -> None:
+    run_set_base_theme("minimal")
+
+
+def run_set_base_theme_dark() -> None:
+    run_set_base_theme("dark")
+
+
+def run_set_theme_none() -> None:
+    run_set_theme("none")
+
+
+def run_set_theme_nature() -> None:
+    run_set_theme("nature")
+
+
+def run_set_theme_science() -> None:
+    run_set_theme("science")
+
+
+def run_set_theme_cell() -> None:
+    run_set_theme("cell")
+
+
+def run_set_theme_lancet() -> None:
+    run_set_theme("lancet")
+
+
+def run_set_theme_nejm() -> None:
+    run_set_theme("nejm")
+
+
+def run_set_theme_jama() -> None:
+    run_set_theme("jama")
+
+
+def run_set_theme_bmj() -> None:
+    run_set_theme("bmj")
+
+
+def run_set_journal_palette_default() -> None:
+    run_set_journal_palette("default")
+
+
+def run_set_journal_palette_nature() -> None:
+    run_set_journal_palette("nature")
+
+
+def run_set_journal_palette_science() -> None:
+    run_set_journal_palette("science")
+
+
+def run_set_journal_palette_cell() -> None:
+    run_set_journal_palette("cell")
+
+
+def run_set_journal_palette_lancet() -> None:
+    run_set_journal_palette("lancet")
+
+
+def run_set_journal_palette_nejm() -> None:
+    run_set_journal_palette("nejm")
+
+
+def run_set_journal_palette_jama() -> None:
+    run_set_journal_palette("jama")
+
+
+def run_set_journal_palette_bmj() -> None:
+    run_set_journal_palette("bmj")
+
+
+def run_set_palette_default() -> None:
+    run_set_palette("default")
+
+
+def run_set_palette_colorblind() -> None:
+    run_set_palette("colorblind")
+
+
+def run_set_palette_vibrant() -> None:
+    run_set_palette("vibrant")
+
+
+def run_set_palette_pastel() -> None:
+    run_set_palette("pastel")
+
+
+def run_set_palette_deep() -> None:
+    run_set_palette("deep")
+
+
+def run_set_palette_muted() -> None:
+    run_set_palette("muted")
 
 
 def run_about() -> None:
@@ -1259,6 +1420,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     rows are OD replicates (same format as CCK-8 / other presets).
     """
     import numpy as np
+
     from .tools.standard_curve import back_calculate, wide_to_conc_od
     from .tools.standard_curve_dialog import StandardCurveDialog
 
@@ -1329,14 +1491,19 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
                 result_df[col] = back_calculate(fit, od_vals)
 
             out_row = _write_transformed_data(
-                sheet, out_row, out_col, result_df,
+                sheet,
+                out_row,
+                out_col,
+                result_df,
                 "Back-Calculated Concentrations",
             )
 
     # 3. Insert standard curve chart
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     from .styles import get_prism_context
 
     cfg = PrismConfig.load()
@@ -1354,8 +1521,9 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
         else:
             x_fit = np.geomspace(cmin_pos * 0.5, cmax_pos * 1.5, 200)
         y_fit = fit.predict(x_fit)
-        ax.plot(x_fit, y_fit, "-", color=cfg.palette[1], linewidth=1.5,
-                label=fit.method)
+        ax.plot(
+            x_fit, y_fit, "-", color=cfg.palette[1], linewidth=1.5, label=fit.method
+        )
 
         use_log = len(conc_pos) >= 2 and cmax_pos / cmin_pos > 10
         if use_log:
@@ -1382,7 +1550,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
-def _select_sample_data(book: xw.Book, sheet) -> "pd.DataFrame | None":
+def _select_sample_data(book: xw.Book, sheet) -> pd.DataFrame | None:
     """Prompt user to select a sample OD region in Excel via InputBox.
 
     Returns a wide DataFrame (columns = sample group names, rows = OD replicates),
@@ -1462,9 +1630,11 @@ def _run_transform_only_impl(book: xw.Book) -> None:
     ):
         if preset_type == ExperimentPreset.WB:
             from .presets.wb import WBPreset
+
             preset_cls = WBPreset
         else:
             from .presets.qpcr import QPCRPreset
+
             preset_cls = QPCRPreset
 
         preset = preset_cls()
@@ -1475,16 +1645,21 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         for target_name, fold_df in target_dfs:
             if include_stats:
                 engine = StatsEngine(config)
-                stats_result = engine.analyze(fold_df)
+                stats_result = engine.analyze(stats_input_frame(fold_df, preset))
                 stats_df = stats_result.to_dataframe()
+                if preset_type is ExperimentPreset.QPCR:
+                    stats_df = qpcr_stats_table(stats_df)
                 dest = sheet.range((current_row, start_col))
                 dest.value = [[f"Statistics — {target_name}"]]
                 current_row += 1
                 dest = sheet.range((current_row, start_col))
                 dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
                 current_row += len(stats_df) + 2
+            title = f"Processed Data — {target_name}"
+            if preset_type is ExperimentPreset.QPCR:
+                title += PROCESSED_DATA_SUFFIX
             current_row = _write_transformed_data(
-                sheet, current_row, start_col, fold_df, f"Processed Data — {target_name}"
+                sheet, current_row, start_col, fold_df, title
             )
         count = len(target_dfs)
         book.app.status_bar = f"XSTARS: Transform only — {count} target(s) processed"
@@ -1497,11 +1672,16 @@ def _run_transform_only_impl(book: xw.Book) -> None:
     current_row = start_row
     if include_stats:
         engine = StatsEngine(config)
-        stats_result = engine.analyze(df_wide)
+        stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
         stats_df = stats_result.to_dataframe()
+        if preset_type is ExperimentPreset.QPCR:
+            stats_df = qpcr_stats_table(stats_df)
         dest = sheet.range((current_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         current_row += len(stats_df) + 2
 
-    _write_transformed_data(sheet, current_row, start_col, df_wide, "Processed Data")
+    title = "Processed Data"
+    if preset_type is ExperimentPreset.QPCR:
+        title += PROCESSED_DATA_SUFFIX
+    _write_transformed_data(sheet, current_row, start_col, df_wide, title)
     book.app.status_bar = "XSTARS: Transform only — data written"
