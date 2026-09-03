@@ -706,15 +706,11 @@ class QPCRLogSpaceExtendedTests(unittest.TestCase):
         # Stats table must be present
         self.assertTrue(len(result.writeback_plan.tables) >= 1)
         # R11 alignment: qPCR stats table renames the p-value column.
-        self.assertIn(
-            "p-value(−ΔΔCt)", result.writeback_plan.tables[0].values[0]
-        )
+        self.assertIn("p-value(−ΔΔCt)", result.writeback_plan.tables[0].values[0])
 
         # Recover transformed data from the result and cross-check p-values
         analysis_result = analyze_selection(payload, config, output_start_cell="A10")
-        log2fc = np_module.log2(
-            analysis_result.transformed_data.to_numpy(dtype=float)
-        )
+        log2fc = np_module.log2(analysis_result.transformed_data.to_numpy(dtype=float))
         tukey = scipy_stats.tukey_hsd(log2fc[:, 0], log2fc[:, 1], log2fc[:, 2])
 
         engine_ps = [pair.p_value for pair in analysis_result.stats_result.pairs]
@@ -766,16 +762,12 @@ class QPCRLogSpaceExtendedTests(unittest.TestCase):
         )
 
         # Cross-check via analyze_selection which also uses the log-space path
-        analysis_result = analyze_selection(
-            payload, config, output_start_cell="A13"
-        )
+        analysis_result = analyze_selection(payload, config, output_start_cell="A13")
         self.assertEqual(len(analysis_result.target_results), 1)
         for target in analysis_result.target_results:
             log2fc = np_module.log2(target.transformed_data.to_numpy(dtype=float))
             columns = list(target.transformed_data.columns)
-            tukey = scipy_stats.tukey_hsd(
-                *[log2fc[:, i] for i in range(len(columns))]
-            )
+            tukey = scipy_stats.tukey_hsd(*[log2fc[:, i] for i in range(len(columns))])
             for pair, (i, j) in zip(
                 target.stats_result.pairs, [(0, 1), (0, 2), (1, 2)], strict=True
             ):
@@ -838,6 +830,9 @@ class QPCRLogSpaceExtendedTests(unittest.TestCase):
         fig = engine.plot(df_wide)
         ax = fig.axes[0]
         tick_labels = [t.get_text() for t in ax.get_xticklabels()]
-        self.assertEqual(tick_labels, groups,
-            msg=f"Expected group name ticks {groups}, got {tick_labels}")
+        self.assertEqual(
+            tick_labels,
+            groups,
+            msg=f"Expected group name ticks {groups}, got {tick_labels}",
+        )
         plt.close(fig)
