@@ -289,7 +289,7 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
   >
   > - `xstars/presets/qpcr.py`: new `stats_input_frame` / `stats_input_frame_for_config` helpers — qPCR-only `np.log2` gate (`log2(2^-ΔΔCt) = −ΔΔCt` holds exactly); non-qPCR frames pass through unchanged. Module stays xlwings-free so pytest can import it headless.
   > - `xstars/main.py`: all 6 qPCR-capable `StatsEngine` call sites now route through the gate — `_run_preset_impl` (:508-509), `_run_qpcr_labeled` (:667-668), `_run_impl` (:781-782), `_run_quick_impl` (:842-843), and both `_run_transform_only_impl` include-stats branches (:1477-1478, :1499-1500). Excel `_run_export_impl` is image-only and has no statistics call. ELISA (:330-331) and WB-labeled (:587-588) are intentionally untouched. Writeback/plot data remains fold change.
-  > - `xstars/plot_engine.py`: ports `_is_qpcr`, `_qpcr_geo_stats`, `_log_error_value`, `_qpcr_bars` and the BAR_SCATTER dispatch, replicating the `1c19a63` version verbatim (including its known MINOR state — the `_qpcr_bars` xticklabels issue is explicitly out of scope here).
+  > - `xstars/plot_engine.py`: ports `_is_qpcr`, `_qpcr_geo_stats`, `_log_error_value`, `_qpcr_bars` and the BAR_SCATTER dispatch, replicating the `1c19a63` version verbatim, **including its `set_xticks`/`set_xticklabels` behavior (rev 2: this was fixed inside `1c19a63` itself — no MINOR residue; covered by a tick-label regression test)**.
   > - `tests/test_presets.py`: gate unit tests + log-space p-value integration with hand-computed `scipy.stats.tukey_hsd` cross-checks (plain + labeled).
   > - `tests/test_plot_engine.py`: geometric-mean / asymmetric error-bar assertions (ported from the WPS `_qpcr_geo_stats` test intent).
   >
