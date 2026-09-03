@@ -1,6 +1,7 @@
 """Tests for plot_engine module."""
 
 import matplotlib
+
 matplotlib.use("Agg")  # non-interactive backend for CI
 
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from xstars.annotations import _format_p_scientific
 from xstars.config import (
     AnnotationFormat,
     ChartType,
@@ -15,7 +17,6 @@ from xstars.config import (
     ExperimentPreset,
     PrismConfig,
 )
-from xstars.annotations import _format_p_scientific
 from xstars.plot_engine import PlotEngine
 from xstars.presets.qpcr import QPCRPreset, stats_input_frame
 from xstars.stats_engine import StatsEngine
@@ -46,9 +47,7 @@ class TestBarScatter:
 
 class TestQPCRBars:
     def test_geo_stats_derive_from_log_space(self):
-        engine = PlotEngine(
-            PrismConfig(experiment_preset=ExperimentPreset.QPCR)
-        )
+        engine = PlotEngine(PrismConfig(experiment_preset=ExperimentPreset.QPCR))
         geo, lower, upper = engine._qpcr_geo_stats(pd.Series([1.0, 2.0, 4.0]))
 
         assert geo == pytest.approx(2.0)
@@ -71,9 +70,7 @@ class TestQPCRBars:
             show_points=False,
         )
         engine = PlotEngine(config)
-        stats = StatsEngine(config).analyze(
-            stats_input_frame(df_wide, QPCRPreset())
-        )
+        stats = StatsEngine(config).analyze(stats_input_frame(df_wide, QPCRPreset()))
         fig = engine.plot(df_wide, stats)
         ax = fig.axes[0]
 
@@ -86,22 +83,19 @@ class TestQPCRBars:
             float(2.0 ** np.log2(df_wide[g].to_numpy(dtype=float)).mean())
             for g in groups
         ]
-        rectangles = [
-            patch for patch in ax.patches if isinstance(patch, Rectangle)
-        ]
+        rectangles = [patch for patch in ax.patches if isinstance(patch, Rectangle)]
         assert [patch.get_height() for patch in rectangles] == pytest.approx(
             expected_heights, abs=1e-9
         )
-        assert sum(
-            isinstance(container, ErrorbarContainer) for container in ax.containers
-        ) == 1
+        assert (
+            sum(isinstance(container, ErrorbarContainer) for container in ax.containers)
+            == 1
+        )
         assert len(ax.texts) > 0
         plt.close(fig)
 
     def test_non_qpcr_uses_standard_bar_path(self, monkeypatch, two_group_normal):
-        engine = PlotEngine(
-            PrismConfig(experiment_preset=ExperimentPreset.WB)
-        )
+        engine = PlotEngine(PrismConfig(experiment_preset=ExperimentPreset.WB))
 
         def fail_if_called(*_args, **_kwargs):
             pytest.fail("non-qPCR data must not use _qpcr_bars")
@@ -167,7 +161,9 @@ class TestAnnotationFormat:
         # Should not raise; bracket text should contain "p"
         ax = fig.axes[0]
         texts = [t.get_text() for t in ax.texts]
-        assert any("p" in t for t in texts), f"Expected scientific p-value text, got {texts}"
+        assert any("p" in t for t in texts), (
+            f"Expected scientific p-value text, got {texts}"
+        )
         plt.close(fig)
 
     def test_stars_annotation(self, two_group_normal):
