@@ -35,7 +35,7 @@
 | R9 | stats gate helper 所在模块不依赖 xlwings，保证 pytest headless 可导入 | 硬约束 | 设计提示（pytest headless 可导入）+ explore 报告 §3.3（main.py 模块级 import xlwings 的代码库证据） |
 | R10 | `StatsEngine` 保持通用，不感知 preset（统计空间选择发生在调用方） | 硬约束 | explore 报告 §3.1 既有分层约定 |
 | R11 | qPCR 输出标签：① qPCR 路径的 processed data 标题追加后缀，变为 `Processed Data (2^-ΔΔCt)`（labeled 变体：`Processed Data — {gene} (2^-ΔΔCt)`）；② qPCR 路径 stats 表的 `p-value` 列重命名为 `p-value(−ΔΔCt)`（rev 4 定稿措辞，用户指定）。**仅限 qPCR 调用点**，ELISA/WB 的标题与列名保持不变；标签常量/辅助函数放 `presets/qpcr.py`（headless 可测）。WPS 侧（application/analysis.py）同名标签为后置对齐动作，不在本 PR | 硬约束 | 用户 2026-09-03 追加指令（rev 3） |
-| R12 | 模板示例数据修正：`XSTARS_Templates.xlsx` qPCR sheet 的 TNF-a Control Ct 由 `[28, 28.2, 27.8]` 改为 `[28, 28.4, 27.7]`（仅 Q11/Q12 两格），使 control 组方差 ≠ 0，示例不再落入 Dunn's test（已预验证：走 ANOVA→Tukey，control fold-change 方差 0.0109）；仅修改被 git 跟踪的 `XSTARS_Templates.xlsx`，本地未跟踪的 "copy" 变体不动 | 硬约束 | 用户 2026-09-03 追加指令（rev 3）；预验证见 Changelog rev 3 |
+| R12 | 模板示例数据修正：`XSTARS_Templates.xlsx` qPCR sheet 的 TNF-a Control Ct 由 `[28, 28.2, 27.8]` 改为 `[28, 28.4, 27.7]`（仅 R11/R12 两格），使 control 组方差 ≠ 0，示例不再落入 Dunn's test（已预验证：走 ANOVA→Tukey，control fold-change 方差 0.0109）；仅修改被 git 跟踪的 `XSTARS_Templates.xlsx`，本地未跟踪的 "copy" 变体不动 | 硬约束 | 用户 2026-09-03 追加指令（rev 3）；预验证见 Changelog rev 3 |
 
 ## 3. Non-goals
 
@@ -137,9 +137,9 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
   - 验收：1c 原版含 set_xticklabels 的实证结论已复核并落档（预期与 rev 2 一致）；移植一律以 1c 原版为准，不引入 1c 之后的任何 WPS 变更。
   - 依赖：T1.1
 
-- [ ] T1.3 修正模板示例 TNF-a Control Ct（R12）
-  - 文件：`XSTARS_Templates.xlsx`（修改；qPCR sheet Q11/Q12 两格）
-  - 修改：TNF-a Control Ct `28.2`→`28.4`（Q11）、`27.8`→`27.7`（Q12），使 control ΔCt 方差 ≠ 0；不改动其他任何 sheet/单元格；不动本地未跟踪的 "XSTARS_Templates copy.xlsx"。写入前确认文件未被 Excel 进程占用。
+- [x] T1.3 修正模板示例 TNF-a Control Ct（R12）
+  - 文件：`XSTARS_Templates.xlsx`（修改；qPCR sheet R11/R12 两格）
+  - 修改：TNF-a Control Ct `28.2`→`28.4`（R11）、`27.8`→`27.7`（R12），使 control ΔCt 方差 ≠ 0；不改动其他任何 sheet/单元格；不动本地未跟踪的 "XSTARS_Templates copy.xlsx"。写入前确认文件未被 Excel 进程占用。
   - 验收：用修改后模板数据重跑 `transform_labeled` + `StatsEngine`：TNF-a 新旧口径均为 ANOVA→Tukey（无 Dunn fallback，预验证 control fold-change 方差 0.0109）；IL-6 结果与 rev 2 预验证一致；工作簿其余区域未被改动。
   - 依赖：无
 
@@ -234,7 +234,7 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 | 文件 | 操作 | 说明 |
 | --- | --- | --- |
 | `xstars/presets/qpcr.py` | **修改** | 新增 `stats_input_frame` + `stats_input_frame_for_config` helper（§4.5 落点决策；不新建文件）；新增输出标签常量 `PROCESSED_DATA_SUFFIX`/`PVALUE_LABEL` 与 `qpcr_stats_table()`（R11） |
-| `XSTARS_Templates.xlsx` | **修改** | qPCR sheet Q11/Q12 两格（TNF-a Control Ct，R12/T1.3）；其余内容不动 |
+| `XSTARS_Templates.xlsx` | **修改** | qPCR sheet R11/R12 两格（TNF-a Control Ct，R12/T1.3）；其余内容不动 |
 | `xstars/main.py` | **修改** | 6 个 qPCR-capable 调用表达式接入 gate（T2.2/T2.3）+ helper import；ELISA :330-331、WB :587-588 不动 |
 | `xstars/plot_engine.py` | **修改** | `_bar_scatter`（:79-118）加 qPCR 分发；新增 `_qpcr_bars`/`_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value`；按需补 `ExperimentPreset` import |
 | `tests/test_presets.py` | **修改** | 追加 gate 单测 + log-space p 值 integration（plain + labeled Tukey 对拍） |
@@ -324,5 +324,6 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 | --- | --- | --- | --- |
 | 1 | 2026-09-03 | 初版 | explore 报告（plans/explore-20260903-qpcr-log-space-excel-sync.md）+ 访谈 2026-09-03 |
 | 2 | 2026-09-03 | 实证修正：1c19a63 原版 `_qpcr_bars` 已含 set_xticklabels（L173-174），"Fix 3c" 测试 :804-826 属 1c 自身内容；rev 1 的 MINOR 前提失效，R4/G6/T1.2/T3.2/T4.1/T4.2/M1/M3/§8-5/R6/§9.4 相应修订（superseded 标注保留） | 父 Agent 实证：`git show 1c19a63:xstars/plot_engine.py`、`git diff 1c19a63 -- xstars/plot_engine.py tests/test_application_analysis.py`（均空）、`git log 1c19a63..feature/wps-support -- xstars/plot_engine.py`（空） |
-| 3 | 2026-09-03 | 新增用户追加范围：R11 qPCR 输出标签（`Processed Data (2^-ΔΔCt)` / `p-value (calculated on ΔCt)`，仅 qPCR 路径）；R12 模板 TNF-a Control Ct 改为 [28, 28.4, 27.7]（Q11/Q12 两格，避免 Dunn fallback）。新增 T1.3/T2.4、T4.1-④、§8-8/9、风险 R8/R9、文件级范围 +XSTARS_Templates.xlsx；非目标第 3 条同步 superseded（rev 2 遗留） | 用户 2026-09-03 追加指令；预验证：候选 A 使 TNF-a control fold-change 方差=0.0109，新旧口径均走 ANOVA→Tukey，新口径 LPS vs LPS+Dex p=0.0435 |
+| 3 | 2026-09-03 | 新增用户追加范围：R11 qPCR 输出标签（`Processed Data (2^-ΔΔCt)` / `p-value (calculated on ΔCt)`，仅 qPCR 路径）；R12 模板 TNF-a Control Ct 改为 [28, 28.4, 27.7]（R11/R12 两格，避免 Dunn fallback）。新增 T1.3/T2.4、T4.1-④、§8-8/9、风险 R8/R9、文件级范围 +XSTARS_Templates.xlsx；非目标第 3 条同步 superseded（rev 2 遗留） | 用户 2026-09-03 追加指令；预验证：候选 A 使 TNF-a control fold-change 方差=0.0109，新旧口径均走 ANOVA→Tukey，新口径 Control vs LPS+Dex p=0.0435 |
 | 4 | 2026-09-03 | p-value 标签定稿为 `p-value(−ΔΔCt)`（用户指定，替换 rev 3 的 `p-value (calculated on ΔCt)`）；状态改"已批准" | 用户批准 rev 3 并指定唯一修订（2026-09-03） |
+| 4b | 2026-09-03 | 两项事实修正：① 模板坐标 Q11/Q12→R11/R12（父 Agent从 pandas 0-based 列索引转换 Excel 列字母时偏移一列；不改变用户批准的 TNF-a Control Ct 数值修改）；② p≈0.0435 的 pair 是 Control vs LPS+Dex，而非 LPS vs LPS+Dex（不改变方差≠0、ANOVA→Tukey、避免 Dunn 的核心验收） | worker 用 openpyxl 实测：Q10:Q12 为 `TNF-a` 标签，R10:R12 为 Control Ct `[28, 28.2, 27.8]`；显式读取 StatsResult pairs：Control-LPS=2.407e-06、Control-LPS+Dex=0.0434986、LPS-LPS+Dex=6.638e-06 |
