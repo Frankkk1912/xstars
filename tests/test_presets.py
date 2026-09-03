@@ -525,12 +525,27 @@ class TestQPCRStatsSpace:
             is transformed
         )
 
-        stats_df = pd.DataFrame(
-            {"Group A": ["Control"], "p-value": [0.01], "Significance": ["*"]}
-        )
-        labeled = qpcr_stats_table(stats_df)
-        assert list(labeled.columns) == ["Group A", PVALUE_LABEL, "Significance"]
-        assert list(stats_df.columns) == ["Group A", "p-value", "Significance"]
+        from xstars.stats_engine import StatsEngine
+
+        real = StatsEngine().analyze(expected).to_dataframe()
+        original_columns = list(real.columns)
+        assert "p-value" in real.columns
+
+        labeled = qpcr_stats_table(real)
+        assert PVALUE_LABEL in labeled.columns
+        assert "p-value" not in labeled.columns
+        assert list(labeled.columns) == [
+            "Group A",
+            "Group B",
+            "Test",
+            "Statistic",
+            PVALUE_LABEL,
+            "Significance",
+        ]
+        assert list(real.columns) == original_columns
+
+        no_p = pd.DataFrame({"Group A": ["x"], "Significance": ["*"]})
+        assert list(qpcr_stats_table(no_p).columns) == list(no_p.columns)
         assert PVALUE_LABEL == "p-value(−ΔΔCt)"
         assert PROCESSED_DATA_SUFFIX == " (2^-ΔΔCt)"
 

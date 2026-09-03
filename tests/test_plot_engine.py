@@ -17,6 +17,7 @@ from xstars.config import (
 )
 from xstars.annotations import _format_p_scientific
 from xstars.plot_engine import PlotEngine
+from xstars.presets.qpcr import QPCRPreset, stats_input_frame
 from xstars.stats_engine import StatsEngine
 
 
@@ -65,17 +66,36 @@ class TestQPCRBars:
                 "OE": [2.8, 3.1, 2.9],
             }
         )
-        engine = PlotEngine(
-            PrismConfig(
-                experiment_preset=ExperimentPreset.QPCR,
-                show_points=False,
-            )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            show_points=False,
         )
-        fig = engine.plot(df_wide)
+        engine = PlotEngine(config)
+        stats = StatsEngine(config).analyze(
+            stats_input_frame(df_wide, QPCRPreset())
+        )
+        fig = engine.plot(df_wide, stats)
         ax = fig.axes[0]
 
         assert [tick.get_text() for tick in ax.get_xticklabels()] == groups
         assert len(ax.patches) == len(groups)
+        from matplotlib.container import ErrorbarContainer
+        from matplotlib.patches import Rectangle
+
+        expected_heights = [
+            float(2.0 ** np.log2(df_wide[g].to_numpy(dtype=float)).mean())
+            for g in groups
+        ]
+        rectangles = [
+            patch for patch in ax.patches if isinstance(patch, Rectangle)
+        ]
+        assert [patch.get_height() for patch in rectangles] == pytest.approx(
+            expected_heights, abs=1e-9
+        )
+        assert sum(
+            isinstance(container, ErrorbarContainer) for container in ax.containers
+        ) == 1
+        assert len(ax.texts) > 0
         plt.close(fig)
 
     def test_non_qpcr_uses_standard_bar_path(self, monkeypatch, two_group_normal):
