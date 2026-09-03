@@ -113,11 +113,11 @@
 
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
-| M1 分支建立与移植基线 | [ ] | 无 | feat 分支自 5f4c409 创建；main 基线 pytest 全绿（或已知失败已记录区分）；1c19a63 参考文本提取完成且 `_qpcr_bars` 版本基准已实证记录（rev 2 已预实证，T1.2 仅需落档确认）；模板数据修正完成（T1.3） | §4.6-2 已实证（rev 2），T1.2 转为落档确认；T1.3 独立于分支基线也可先做 |
+| M1 分支建立与移植基线 | [x] | 无 | feat 分支自 5f4c409 创建；main 基线 pytest 全绿（或已知失败已记录区分）；1c19a63 参考文本提取完成且 `_qpcr_bars` 版本基准已实证记录（rev 2 已预实证，T1.2 仅需落档确认）；模板数据修正完成（T1.3） | §4.6-2 已实证（rev 2），T1.2 转为落档确认；T1.3 独立于分支基线也可先做 |
 | M2 统计 gate 移植与 6 调用点接入 | [x] | M1 | 静态核查：6 个调用表达式均经 `stats_input_frame`，ELISA/WB 两调用点无 gate；`np.log2` 仅存在于 helper；tests/test_stats_engine.py 未修改且全绿；qPCR 输出标签就位且 ELISA/WB 标签不变（T2.4） | helper 落点 presets/qpcr.py（§4.5）；R11 标签同文件落地 |
 | M3 plot_engine qPCR 图形移植 | [x] | M1（与 M2 可并行） | main plot_engine.py 含 `_is_qpcr`/`_qpcr_geo_stats`/`_log_error_value`/`_qpcr_bars` 且 BAR_SCATTER 分发生效；非 qPCR 路径原样；既有 TestBarScatter/TestErrorBars 全绿 | 严格复刻 1c 原版（rev 2 实证：含 set_xticklabels，基准=1c19a63，无 MINOR 残留） |
 | M4 测试移植 | [x] | M2、M3 | 新增测试全部通过；未新建测试文件；含 tick-label 回归测试（:804-826 意图，rev 2 修订） | 落点仅 test_presets.py + test_plot_engine.py（R5） |
-| M5 全量验证与 Draft PR | [ ] | M4 | pytest 全量 0 failed；§8 静态核查清单全过；Draft PR 已开（base=main） | 验收标准=R7 |
+| M5 全量验证与 Draft PR | [x] | M4 | pytest 全量 0 failed；§8 静态核查清单全过；Draft PR 已开（base=main） | 验收标准=R7 |
 
 Milestone 总数：5（≤10，符合目标 ≤7）。
 
@@ -125,13 +125,13 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 
 ### M1 分支建立与移植基线
 
-- [ ] T1.1 从 main（5f4c409）新建 `feat/qpcr-log-space-excel-sync` 并确认基线绿
+- [x] T1.1 从 main（5f4c409）新建 `feat/qpcr-log-space-excel-sync` 并确认基线绿
   - 文件：无（git 操作；不产生代码改动）
   - 修改：`git switch -c feat/qpcr-log-space-excel-sync 5f4c409`（自 main tip）；在分支上运行 `python -m pytest tests -v` 记录基线结果；确认 `git log --oneline -1` == 5f4c409。若基线存在已知失败，逐条记录并标注"先于本次改动已存在"，不得顺手修复（Non-goal 边界）。
   - 验收：分支存在且起点为 5f4c409；基线 pytest 结果已记录（全绿，或已知失败清单+区分说明）；工作区干净。
   - 依赖：无
 
-- [ ] T1.2 锁定 1c19a63 移植基准并落档实证结论
+- [x] T1.2 锁定 1c19a63 移植基准并落档实证结论
   - 文件：无代码修改；产出为移植参考文本与实证记录（可暂存于本地临时文件或直接在审阅中读取，不入库）
   - 修改：`git show 1c19a63:xstars/plot_engine.py`、`git show 1c19a63:xstars/main.py`、`git show 1c19a63:tests/test_presets.py` 提取 1c 原版内容作为移植唯一基准。rev 2 已预实证（§4.6-2）：1c 原版 `_qpcr_bars` 含 `ax.set_xticks`/`ax.set_xticklabels`（L173-174），工作区与 1c 对 plot_engine/test_application_analysis 零差异。实施时在 feat 分支上复核一次并写入提交信息或 PR 描述备查。
   - 验收：1c 原版含 set_xticklabels 的实证结论已复核并落档（预期与 rev 2 一致）；移植一律以 1c 原版为准，不引入 1c 之后的任何 WPS 变更。
@@ -199,13 +199,13 @@ Milestone 总数：5（≤10，符合目标 ≤7）。
 
 ### M5 全量验证与 Draft PR
 
-- [ ] T5.1 全量验证与静态核查
+- [x] T5.1 全量验证与静态核查
   - 文件：无新改动（验证动作；如核查发现问题，回对应 T 任务修复后重跑）
   - 修改：执行 §8 Validation contract 全部可执行项（pytest 全量、gate 覆盖 grep、非 qPCR 不变核查、图形分发核查、wps 分支零改动核查），逐项记录结果。
   - 验收：§8 第 1-6 项全部通过；任何失败项回溯修复并复跑至全过。
   - 依赖：T4.1、T4.2
 
-- [ ] T5.2 创建 Draft PR
+- [x] T5.2 创建 Draft PR
   - 文件：无（git/平台操作）
   - 修改：推送 `feat/qpcr-log-space-excel-sync`，按 §9 Git 策略开 Draft PR（base=main，标题与描述草稿见 §9），标记 Draft。
   - 验收：Draft PR 存在、base=main、diff 仅涉 §9 文件级范围所列文件。
