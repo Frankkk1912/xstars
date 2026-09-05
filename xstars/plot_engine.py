@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -146,7 +146,7 @@ class PlotEngine:
         lower_errs: list[float] = []
         upper_errs: list[float] = []
         for group in groups:
-            geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
+            geo, lower, upper = self._qpcr_geo_stats(cast(Any, df_wide[group]))
             geo_means.append(geo)
             lower_errs.append(lower)
             upper_errs.append(upper)
