@@ -8,6 +8,7 @@
 | Rev | 日期 | 变更摘要 | 依据 |
 | --- | --- | --- | --- |
 | 1 | 2026-09-06 | 初版：基于 explore 报告与访谈决策生成 | explore 报告 + interview（q1-q4） |
+| 2 | 2026-09-06 | 实施期 review 修复 F1；验证偏差记录 | fresh-context review round 1 |
 
 ## 1. Goal
 
@@ -228,3 +229,4 @@
 - M1 基线：系统 Python 3.9 下 `python -m pytest tests -q` 出现 2 个 `xlwings` collection error；`cd wps-addon && npm test` 为 29 passed。
 - M3 终验（Python 3.11.15 venv）：pytest 为 260 passed / 1 failed（先存）；`test_wps_probe.py` 为 5 过 / 1 挂起（macOS Tk 环境限制，在 wps tip 复现）；`cd wps-addon && npm test` 为 29 passed，退出码 0；ruff scoped 检查退出码 0；`git diff --check` 干净。
 - 依赖说明：验证使用 `/tmp/xstars-venv`，通过 `uv` 安装 requirements、pytest 与 pytest-timeout；未改动仓库。
+- Round 1 review：F1 已在 `c28501f` 修复，恢复 Excel 三条内联 qPCR 写回路径的 `p-value(−ΔΔCt)` 与 ` (2^-ΔΔCt)` 标签；聚焦测试 103 passed，AST 与 6 处标签引用核查通过；全文件 ruff 仍因 wps tip 先存的 24 项 lint 与格式债务失败，为避免扩大范围未自动格式化。F2 已澄清为无行为影响的 cast 放置，F4 因现有端到端/Excel characterization 测试覆盖而降级；F3 双实现与 F5 xlsx 仓库卫生分别记录为技术债和范围外延期。
