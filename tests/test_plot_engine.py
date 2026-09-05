@@ -123,6 +123,52 @@ class TestLine:
         assert fig is not None
         plt.close(fig)
 
+    def test_qpcr_line_uses_geometric_means(self):
+        groups = ["Control", "Treatment"]
+        df_wide = pd.DataFrame(
+            {
+                "Control": [1.0, 2.0, 4.0],
+                "Treatment": [0.5, 1.0, 2.0],
+            }
+        )
+        config = PrismConfig(
+            chart_type=ChartType.LINE,
+            experiment_preset=ExperimentPreset.QPCR,
+            show_points=False,
+        )
+        engine = PlotEngine(config)
+        fig = engine.plot(df_wide)
+        ax = fig.axes[0]
+
+        from matplotlib.container import ErrorbarContainer
+
+        errorbar = next(
+            container
+            for container in ax.containers
+            if isinstance(container, ErrorbarContainer)
+        )
+        expected_means = [
+            float(np.exp(np.mean(np.log(df_wide[group].to_numpy(dtype=float)))))
+            for group in groups
+        ]
+        assert errorbar.lines[0].get_ydata() == pytest.approx(expected_means)
+
+        segments = errorbar.lines[2][0].get_segments()
+        for group, mean, segment in zip(groups, expected_means, segments):
+            log_values = np.log2(df_wide[group].to_numpy(dtype=float))
+            sem_log = np.std(log_values, ddof=1) / np.sqrt(len(log_values))
+            expected_endpoints = [
+                2.0 ** (np.mean(log_values) - sem_log),
+                2.0 ** (np.mean(log_values) + sem_log),
+            ]
+            assert segment[:, 1] == pytest.approx(expected_endpoints)
+
+            lower = mean - segment[0, 1]
+            upper = segment[1, 1] - mean
+            assert lower != pytest.approx(upper)
+
+        plt.close(fig)
+
 
 class TestErrorBars:
     @pytest.mark.parametrize("eb", list(ErrorBarType))
