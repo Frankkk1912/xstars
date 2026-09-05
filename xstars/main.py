@@ -619,7 +619,9 @@ def _run_qpcr_labeled(
 
         # Stats table
         if config.output_stats:
-            stats_df = stats_result.to_dataframe()
+            stats_df = _application_analysis.qpcr_stats_table(
+                stats_result.to_dataframe()
+            )
             dest = sheet.range((stats_start_row, stats_col))
             dest.value = [[gene_name]]
             stats_start_row += 1
@@ -630,7 +632,11 @@ def _run_qpcr_labeled(
         # Write processed data
         if config.output_data:
             stats_start_row = _write_transformed_data(
-                sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {gene_name}"
+                sheet,
+                stats_start_row,
+                stats_col,
+                fold_df,
+                f"Processed Data — {gene_name}{_application_analysis.PROCESSED_DATA_SUFFIX}",
             )
 
     book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
@@ -1341,14 +1347,19 @@ def _run_transform_only_impl(book: Any) -> None:
                     _application_analysis.stats_input_frame(fold_df, config)
                 )
                 stats_df = stats_result.to_dataframe()
+                if preset_type is ExperimentPreset.QPCR:
+                    stats_df = _application_analysis.qpcr_stats_table(stats_df)
                 dest = sheet.range((current_row, start_col))
                 dest.value = [[f"Statistics — {target_name}"]]
                 current_row += 1
                 dest = sheet.range((current_row, start_col))
                 dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
                 current_row += len(stats_df) + 2
+            title = f"Processed Data — {target_name}"
+            if preset_type is ExperimentPreset.QPCR:
+                title += _application_analysis.PROCESSED_DATA_SUFFIX
             current_row = _write_transformed_data(
-                sheet, current_row, start_col, fold_df, f"Processed Data — {target_name}"
+                sheet, current_row, start_col, fold_df, title
             )
         count = len(target_dfs)
         book.app.status_bar = f"XSTARS: Transform only — {count} target(s) processed"
@@ -1364,9 +1375,14 @@ def _run_transform_only_impl(book: Any) -> None:
             _application_analysis.stats_input_frame(df_wide, config)
         )
         stats_df = stats_result.to_dataframe()
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = _application_analysis.qpcr_stats_table(stats_df)
         dest = sheet.range((current_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         current_row += len(stats_df) + 2
 
-    _write_transformed_data(sheet, current_row, start_col, df_wide, "Processed Data")
+    title = "Processed Data"
+    if config.experiment_preset is ExperimentPreset.QPCR:
+        title += _application_analysis.PROCESSED_DATA_SUFFIX
+    _write_transformed_data(sheet, current_row, start_col, df_wide, title)
     book.app.status_bar = "XSTARS: Transform only — data written"
