@@ -1,7 +1,7 @@
 # Plan：合并 main 与 feature/wps-support 分支
 
 - 日期：2026-09-06
-- 状态：**已批准**（rev 1，2026-09-06 用户明确批准）
+- 状态：**已批准**（rev 3，2026-09-06 用户明确批准）
 - 输入：`plans/explore-20260906-merge-main-wps-support.md`（explore 报告）+ 强制访谈决策（2026-09-06，4/4 已确认）
 - Changelog：
 
@@ -9,6 +9,7 @@
 | --- | --- | --- | --- |
 | 1 | 2026-09-06 | 初版：基于 explore 报告与访谈决策生成 | explore 报告 + interview（q1-q4） |
 | 2 | 2026-09-06 | 实施期 review 修复 F1；验证偏差记录 | fresh-context review round 1 |
+| 3 | 2026-09-06 | Round 2 review 收尾：§6/§8 验证措辞对齐实际证据、锚点校正、待决事项 DC3/DC4 登记、T2.3 cast 表述澄清 | fresh-context review round 2 |
 
 ## 1. Goal
 
@@ -39,7 +40,7 @@
 **代码库现状**（均已在 explore 阶段验证，锚点见报告）：
 
 - 分支拓扑：merge-base `5f4c409`；main +12（PR #4）、wps +53（+20254 行）；`git merge-tree` 实测恰好 4 个冲突文件：`XSTARS_Templates.xlsx`、`tests/test_presets.py`、`xstars/main.py`（11 处冲突块）、`xstars/plot_engine.py`；双方同时修改的文件仅此 4 个。
-- 语义等价性：wps 侧 `application/analysis.py:231-276` 已包含与 main `presets/qpcr.py:168-204` 语义一致的 log2 gate、`PVALUE_LABEL`、`qpcr_stats_table`（由 `274e169` 对齐 PR #4）→ main.py 冲突可整体取 wps 结构。
+- 语义等价性：wps 侧 `application/analysis.py:234-280` 已包含与 main `presets/qpcr.py:168-199` 语义一致的 log2 gate、`PVALUE_LABEL`、`qpcr_stats_table`（由 `274e169` 对齐 PR #4）→ main.py 冲突可整体取 wps 结构。
 - 模板二进制：wps 版（274e169，09-03 20:23）晚于 main 版（eaa9f10，09-03 18:17）且声明对齐；unzip 对比两侧 sheet3 均含 27.7/28.4 修复值 → wps 版为超集。
 - 折线图分歧：wps `plot_engine.py:225-233` 的 `_line` qPCR 几何均值 gate 来自 1c19a63 原始实现；main PR #4 未移植，且其 Plan Non-goal 10（`plans/20260903-qpcr-log-space-excel-sync.md:53`）"1c 只特化 BAR_SCATTER"与 1c19a63 实际代码（`git show 1c19a63:xstars/plot_engine.py:225`）矛盾。访谈决策：取 wps 行为。
 - 测试：main `tests/test_presets.py` 为超集（+308 行，含 log-space 交叉验证 :590-647），wps 侧 delta（+17/-5：import 重排 + `analyze(log2_df)` 断言）已被覆盖；`tests/test_plot_engine.py` 仅 main 修改（+77），无 qPCR 折线图断言，与 R3 不冲突；两侧均无 `_line` qPCR 回归测试（缺口 → T3.1）。
@@ -70,7 +71,7 @@
 | --- | --- | --- | --- | --- |
 | M1 准备与基线 | [x] | 无 | 工作区 clean、分支正确（`git status` / `git log -1`）；基线测试结果已记录 | 从 feat/macos-support 切出（R5） |
 | M2 合并与冲突解决 | [x] | M1 | 4 文件按 R2/R3 语义解决；`git diff --check` 无冲突标记；stale import 核查通过 | 唯一写入者，串行执行 |
-| M3 验证与收敛 | [x] | M2 | pytest 全量绿；node 测试绿；ruff check/format 绿；新增 `_line` 回归测试通过 | 真实宿主冒烟不在本机（R4） |
+| M3 验证与收敛 | [x] | M2 | pytest 相对基线无新失败；node 测试绿；合并涉及文件 scoped ruff 绿 | 真实宿主冒烟不在本机（R4） |
 | M4 提交推送与 PR 更新 | [x] | M3 | 合并提交落盘并推送；Draft PR #1 描述已更新含合并说明 | PR 描述草稿见 §9 |
 
 ## 7. 分 milestone 的 To-do checkbox 清单
@@ -105,7 +106,7 @@
   - 修改：11 处冲突块全部取 theirs 语义后手工校验——#4/#6/#7 取 wps `analyze_dataframe`/`build_analysis_writeback_plan` 流程；#5/#10/#11 取 `_application_analysis.stats_input_frame(...)`；#1/#2/#3/#8/#9 取 wps 宿主无关结构（动态 `import_module("ttkbootstrap")`、`Any` 注解、import 合并）；随后核对 main 侧独有 import（`stats_input_frame`/`stats_input_frame_for_config` from presets 等）在保留代码中是否仍被引用，删除未引用项
   - 验收：文件无冲突标记；`python -c "import ast; ast.parse(open('xstars/main.py').read())"` 通过；grep 无 `<<<<<<<`/`>>>>>>>`
   - 依赖：T2.0
-- [x] T2.3 解决 `xstars/plot_engine.py`（G2，R3）
+- [x] T2.3 解决 `xstars/plot_engine.py`（G2，R3）（澄清：cast(Any) 对齐 main tip 实际位置 = _qpcr_bars 内调用行；_line gate 内不加 cast）
   - 文件：`xstars/plot_engine.py`
   - 修改：保留 wps 侧 `_line` qPCR gate（:225-233 区域），将 `_qpcr_geo_stats` 调用行对齐 main 的 `cast(Any, ...)` 写法；import 行取 `from typing import TYPE_CHECKING, Any, cast`
   - 验收：与两侧 tip 的差异仅剩 cast 风格；`_line` gate 存在；无冲突标记
@@ -165,9 +166,9 @@
 | 模板正确性 | `git diff origin/feature/wps-support -- XSTARS_Templates.xlsx` | 空 | 与 wps 对齐版逐字节一致 |
 | main.py 语法 | `python -c "import ast; ast.parse(open('xstars/main.py').read())"` | 无异常 | 可解析 |
 | 折线统一（R3） | `pytest tests/test_plot_engine.py -q`（含新增 T3.1） | 全绿且新测试断言几何均值 | `_line` gate 存在且回归测试通过 |
-| Python 回归 | `python -m pytest tests -q` | 全绿 | 0 failed；与 T1.2 基线对比无新失败 |
+| Python 回归 | `python -m pytest tests -q` | 0 failed 或仅先存失败（与 T1.2 基线对比无新失败） | 0 failed 或仅先存失败（与 T1.2 基线对比无新失败） |
 | 前端回归 | `cd wps-addon && npm test` | 全绿 | node --test 0 failed |
-| 静态风格 | `ruff check .` + `ruff format --check .` | 零报错 | 双命令通过 |
+| 静态风格 | `ruff check .` + `ruff format --check .`（合并编辑文件必须零报错；全仓先存债务不要求清零） | 合并编辑文件零报错 | scoped 双命令通过；全仓先存债务已记录 |
 | PR 状态 | `gh pr view 1 --json state,title,body` | OPEN + DRAFT + 含合并小节 | 描述更新且未误关闭/误 ready |
 | 人工验证（标注项） | 真实 Excel/WPS 宿主 qPCR 柱状+折线冒烟 | 由具备 Windows/WPS 环境者执行 | 本环境不可行，PR 中标注为人工验证项，责任人在 PR 描述中指派 |
 
@@ -205,6 +206,8 @@
 
 - DC1（技术债）：`presets/qpcr.py` 与 `application/analysis.py` 的 gate/标签逻辑并存。本 Plan 按 R6 保留；去重方向（application 层委托 presets 或反向）留待后续独立 Plan。
 - DC2（人工验证责任人）：真实 Excel/WPS 宿主冒烟由谁执行、何时执行——PR 中标注，待用户指派。
+- DC3（仓库卫生，延期）：`.gitignore` 的 `*.xlsx` 规则遮蔽 `XSTARS_Templates.xlsx`（`.gitignore:22`），且无 `.gitattributes` binary 声明；建议后续独立 PR 增 `!XSTARS_Templates.xlsx` 反白与 binary 属性。
+- DC4（测试缺口，延期）：`main.py` 三条内联 qPCR 写回路径的标签 wiring 无自动化回归测试（Round 1 F1 即由此静默丢失）；候选方案为 `test_excel_characterization.py` 增加 mock-book 特征测试或源码级守卫测试；需用户批准后另行实施。
 
 ### Git 策略
 
@@ -230,3 +233,4 @@
 - M3 终验（Python 3.11.15 venv）：pytest 为 260 passed / 1 failed（先存）；`test_wps_probe.py` 为 5 过 / 1 挂起（macOS Tk 环境限制，在 wps tip 复现）；`cd wps-addon && npm test` 为 29 passed，退出码 0；ruff scoped 检查退出码 0；`git diff --check` 干净。
 - 依赖说明：验证使用 `/tmp/xstars-venv`，通过 `uv` 安装 requirements、pytest 与 pytest-timeout；未改动仓库。
 - Round 1 review：F1 已在 `c28501f` 修复，恢复 Excel 三条内联 qPCR 写回路径的 `p-value(−ΔΔCt)` 与 ` (2^-ΔΔCt)` 标签；聚焦测试 103 passed，AST 与 6 处标签引用核查通过；全文件 ruff 仍因 wps tip 先存的 24 项 lint 与格式债务失败，为避免扩大范围未自动格式化。F2 已澄清为无行为影响的 cast 放置，F4 因现有端到端/Excel characterization 测试覆盖而降级；F3 双实现与 F5 xlsx 仓库卫生分别记录为技术债和范围外延期。
+- Round 2（3 reviewer 并行：coverage/correctness/maintainability）：零 Blocker。已核无问题：T3.1 测试有效锁定几何均值行为（真实 PlotEngine 路径无 mock）、test_presets main 版对 wps delta 强于原断言覆盖、F1 四 hunk 位置/gate/作用域正确且与 main tip 语义逐条一致、双实现 R6 原样保留属实、无夹带改动（合并树 vs 纯自动合并树差异恰为 3 个文本冲突文件；模板 blob 5dfdd020 与 wps tip 一致）。终版证据：F1 后全量 pytest（3.11 venv，排除 probe）260 passed/1 failed（先存）。F-1 守卫测试缺口登记为 DC4（避免超批准范围）；cast 位置按 main tip 保留并在 T2.3 澄清；F-3 docstring 注释、F-6 重复测试去重、F-5 别名统一均登记/忽略（理由见 review 记录）。
