@@ -150,7 +150,7 @@
   - 修改：`git commit`（合并信息：`Merge main into feature/wps-support: reconcile qPCR log-space port (PR #4)`，正文列 4 文件解决语义与 `_line` 统一决策）；`git push origin feature/wps-support`
   - 验收：`git log -1` 为合并提交且双亲正确；push 成功
   - 依赖：T3.1, T3.2, T3.3, T3.4
-- [ ] T4.2 更新 Draft PR #1 描述（R1 交付）
+- [x] T4.2 更新 Draft PR #1 描述（R1 交付）（PR #1 已追加 Sync with main 小节，PR 保持 OPEN+Draft）
   - 文件：无（`gh pr edit 1`）
   - 修改：在 PR 描述追加"与 main 同步（2026-09-06）"小节：4 文件解决语义、`_line` 统一决策及依据、双实现并存技术债说明、真实宿主冒烟为人工验证项
   - 验收：`gh pr view 1` 含新增小节；PR 仍为 Draft
