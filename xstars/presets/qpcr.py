@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from ..config import ExperimentPreset
 from . import BasePreset, PresetOptions, register_preset
+
+if TYPE_CHECKING:
+    from ..config import PrismConfig
+
+
+PROCESSED_DATA_SUFFIX = " (2^-ΔΔCt)"
+PVALUE_LABEL = "p-value(−ΔΔCt)"
 
 
 @dataclass
@@ -155,3 +163,37 @@ class QPCRPreset(BasePreset):
             results.append((target, fold_df))
 
         return results
+
+
+def _log2_stats_frame(transformed: pd.DataFrame) -> pd.DataFrame:
+    """Recover the linear −ΔΔCt space from qPCR fold-change values."""
+    values = np.log2(transformed.to_numpy(dtype=float))
+    return pd.DataFrame(values, index=transformed.index, columns=transformed.columns)
+
+
+def stats_input_frame(
+    transformed: pd.DataFrame, preset: BasePreset | None
+) -> pd.DataFrame:
+    """Return the space in which hypothesis tests should run.
+
+    qPCR fold-change values (2^-ΔΔCt) live on a nonlinear ratio scale.  Tests
+    therefore run on log2 fold change (identically −ΔΔCt), while writeback and
+    plots continue to use the original fold-change frame.
+    """
+    if isinstance(preset, QPCRPreset):
+        return _log2_stats_frame(transformed)
+    return transformed
+
+
+def stats_input_frame_for_config(
+    transformed: pd.DataFrame, config: PrismConfig
+) -> pd.DataFrame:
+    """Config-based qPCR statistics-space gate, safe for all other presets."""
+    if config.experiment_preset is ExperimentPreset.QPCR:
+        return _log2_stats_frame(transformed)
+    return transformed
+
+
+def qpcr_stats_table(stats_df: pd.DataFrame) -> pd.DataFrame:
+    """Label a qPCR statistics table with its tested −ΔΔCt space."""
+    return stats_df.rename(columns={"p-value": PVALUE_LABEL})

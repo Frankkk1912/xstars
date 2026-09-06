@@ -41,7 +41,7 @@
 | --- | ------ |
 | 🔄 **零切换** | 在 Excel 里选中数据 → 点击 → 图表直接出现在 Excel 中，数据不需要离开 |
 | 🧠 **零门槛** | 自动检测正态性和方差齐性 → 自动选择正确的统计方法 → 自动绘制显著性标注。你不需要选 |
-| 💰 **零成本** | 免费开源；Windows 安装包无需另装 Python，也没有授权费 |
+| 💰 **零成本** | 免费开源，一个安装包搞定，不需要安装 Python，没有授权费 |
 
 ---
 
@@ -60,7 +60,7 @@
 | **💰 价格** | 🟢 免费 | 🔴 ~$300–600/年 | 🟢 免费 |
 | **📊 在 Excel 内工作** | ✅ | ❌ | ❌ |
 | **🖱️ 无需编程** | ✅ | ✅ | ❌ |
-| **📦 无需安装 Python/R** | ✅（仅 Windows 安装包） | 不适用 | ❌ |
+| **📦 无需安装 Python/R** | ✅（独立 .exe） | 不适用 | ❌ |
 | **🤖 自动选择统计方法** | ✅ | ❌ 手动 | ❌ 手动 |
 | **📐 显著性标注** | ✅ 自动 | ⚠️ 手动放置 | ❌ 需写代码 |
 | **🧪 实验预设** | ✅ WB、qPCR、CCK-8、ELISA | ❌ | ❌ 自己搭建 |
@@ -158,7 +158,7 @@
 
 ## 🚀 快速开始
 
-### Windows：📥 安装包（推荐 —— 无需 Python）
+### 方式 A：📥 安装包（推荐 —— 无需 Python）
 
 1. 从 [Releases](https://github.com/Frankkk1912/excel-prism/releases) 下载 `XSTARS_Setup.exe`
 2. 运行安装程序 —— 自动配置 Excel 插件
@@ -167,21 +167,29 @@
 
 > 💡 **第一次使用？** 打开安装包附带的 `XSTARS_Templates.xlsx`，里面已预置了覆盖所有图表类型和实验预设的示例数据——在任意 Sheet 上直接点击 Run，即可看到 XSTARS 的完整效果。
 
+### 方式 B：📑 Windows WPS Office 支持
+
+XSTARS 现已提供面向 **WPS 电子表格** 的独立发行版本：
+
+- **正式支持**：WPS Office 365 / 12.x 64 位（专业版、商业版、政企版、教育高级版）。
+- **个人版**：作为 Beta 预览支持。
+- **完全离线运行**：仅监听本地回环端口（`127.0.0.1`），无任何云端依赖或外网连接。
+- 完整安装与配置流程参见 [WPS 版安装与使用指南](docs/wps-installation.md)（使用 `XSTARS_WPS_Setup.exe`）。
+
 ### macOS：🛠️ 开发者模式（需要 Python）
 
-macOS 仅支持开发者模式：在 Python 3.10+ 虚拟环境中安装 XSTARS 与 xlwings 桥接，并复用现有 RunPython VBA 回调。本项目不提供独立 `.app`，也不支持 WPS for Mac。
+macOS 仅支持开发者模式：在 Python 3.10+ 虚拟环境中安装 XSTARS 与 xlwings 桥接，并复用现有 RunPython VBA 回调。本项目不提供独立 `.app`，也不支持 WPS for Mac
+
+### 方式 C：🛠️ 开发者安装（需要 Python）
 
 ```bash
 git clone https://github.com/Frankkk1912/xstars.git
 cd xstars
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
+pip install -e ".[dev]"
 xlwings addin install
-xlwings runpython install
 ```
 
-Excel VBA 导入、Python 解释器、宏与自动化权限、artifact 隐私、Export 限制和故障排查详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md)。现有回调模块说明见 [ribbon/README.md](ribbon/README.md)。
+然后打开 `.xlsm` 工作簿并添加 VBA 回调 —— 参见 [ribbon/README.md](ribbon/README.md)。
 
 ---
 
@@ -221,19 +229,13 @@ Excel VBA 导入、Python 解释器、宏与自动化权限、artifact 隐私、
 
 设置跨会话持久化，保存在 `~/.xstars/settings.json`。💾
 
-### 本地图表重建数据与隐私
-
-在 **Windows 和 macOS** 上生成图表时，XSTARS 还会在 `~/.xstars/artifacts/` 写入带版本的 JSON 重建 payload。这些本地文件可能包含处理后的实验数据、绘图配置和统计结果；XSTARS 不会上传它们，也不会自动到期清理。请按实验数据保留策略管理该目录。若只需清理派生缓存，请先退出 Excel/XSTARS，再删除 `~/.xstars/artifacts/`；除非同时要重置设置，否则不要删除 `~/.xstars/settings.json`。macOS 清理缓存后需重新生成图表才能再次导出。详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md#8-artifact-storage-privacy-and-cleanup)。
-
 ---
 
 ## 📌 系统要求
 
-- **Windows 安装包模式**：Windows + Microsoft Excel；`.exe` 已打包运行时，无需另装 Python
-- **macOS 开发者模式**：macOS 10.14+、Microsoft Excel for Mac 2016+、Python ≥ 3.10，支持 Intel 与 Apple Silicon；还需安装 xlwings add-in 与 RunPython 支持
-- 不支持 WPS for Mac；不提供独立 macOS `.app`
-
-macOS 版本和芯片矩阵来自上游 xlwings 支持声明；没有真实 Excel 运行记录的组合不宣称为本项目已验证。详见 [macOS 开发者模式安装指南](docs/macos-developer-setup.md)。
+- 🪟 Windows + Microsoft Excel
+- **安装包模式**：无其他要求 —— `.exe` 已打包所有依赖
+- **开发者模式**：Python ≥ 3.10
 
 ---
 

@@ -5,13 +5,21 @@ import pandas as pd
 import pytest
 
 from xstars.config import DoseAxisScale, ExperimentPreset, PrismConfig
-from xstars.presets import BasePreset, get_preset, register_preset, _REGISTRY
-from xstars.presets.wb import WBOptions, WBPreset
-from xstars.presets.qpcr import QPCROptions, QPCRPreset
+from xstars.presets import _REGISTRY, BasePreset, get_preset
 from xstars.presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset, CCK8Result
-
+from xstars.presets.qpcr import (
+    PROCESSED_DATA_SUFFIX,
+    PVALUE_LABEL,
+    QPCROptions,
+    QPCRPreset,
+    qpcr_stats_table,
+    stats_input_frame,
+    stats_input_frame_for_config,
+)
+from xstars.presets.wb import WBOptions, WBPreset
 
 # ── Registry tests ──────────────────────────────────────────────────────
+
 
 class TestRegistry:
     def test_get_preset_none(self):
@@ -36,52 +44,66 @@ class TestRegistry:
 
 # ── WB Preset ───────────────────────────────────────────────────────────
 
+
 class TestWBPreset:
     @pytest.fixture
     def wb_data(self):
         """Simple WB intensity data: 3 groups, 5 replicates each."""
         rng = np.random.default_rng(42)
-        return pd.DataFrame({
-            "Control": rng.uniform(1000, 2000, size=5),
-            "Treatment_A": rng.uniform(2000, 4000, size=5),
-            "Treatment_B": rng.uniform(500, 1500, size=5),
-        })
+        return pd.DataFrame(
+            {
+                "Control": rng.uniform(1000, 2000, size=5),
+                "Treatment_A": rng.uniform(2000, 4000, size=5),
+                "Treatment_B": rng.uniform(500, 1500, size=5),
+            }
+        )
 
     @pytest.fixture
     def wb_ref_data(self):
         """WB data: top 3 rows = target protein, bottom 3 rows = reference (GAPDH)."""
-        return pd.DataFrame({
-            "Control":   [1000, 1200,  900, 500, 600, 450],
-            "Treatment": [2000, 2400, 1800, 500, 600, 450],
-        })
+        return pd.DataFrame(
+            {
+                "Control": [1000, 1200, 900, 500, 600, 450],
+                "Treatment": [2000, 2400, 1800, 500, 600, 450],
+            }
+        )
 
     @pytest.fixture
     def wb_labeled_single(self):
         """Labeled WB data: 1 target + 1 reference, 3 replicates."""
-        labels = pd.Series(["Target-A", "Target-A", "Target-A",
-                            "GAPDH", "GAPDH", "GAPDH"])
-        df = pd.DataFrame({
-            "Control":   [1000, 1200,  900, 500, 600, 450],
-            "Treatment": [2000, 2400, 1800, 500, 600, 450],
-        })
+        labels = pd.Series(
+            ["Target-A", "Target-A", "Target-A", "GAPDH", "GAPDH", "GAPDH"]
+        )
+        df = pd.DataFrame(
+            {
+                "Control": [1000, 1200, 900, 500, 600, 450],
+                "Treatment": [2000, 2400, 1800, 500, 600, 450],
+            }
+        )
         return labels, df
 
     @pytest.fixture
     def wb_labeled_multi(self):
         """Labeled WB data: 2 targets + 1 reference, 3 replicates each."""
-        labels = pd.Series([
-            "Target-A", "Target-A", "Target-A",
-            "Target-B", "Target-B", "Target-B",
-            "GAPDH", "GAPDH", "GAPDH",
-        ])
-        df = pd.DataFrame({
-            "Control":   [1000, 1200,  900,
-                           800,  900,  750,
-                           500,  600,  450],
-            "Treatment": [2000, 2400, 1800,
-                           400,  350,  380,
-                           500,  600,  450],
-        })
+        labels = pd.Series(
+            [
+                "Target-A",
+                "Target-A",
+                "Target-A",
+                "Target-B",
+                "Target-B",
+                "Target-B",
+                "GAPDH",
+                "GAPDH",
+                "GAPDH",
+            ]
+        )
+        df = pd.DataFrame(
+            {
+                "Control": [1000, 1200, 900, 800, 900, 750, 500, 600, 450],
+                "Treatment": [2000, 2400, 1800, 400, 350, 380, 500, 600, 450],
+            }
+        )
         return labels, df
 
     def test_basic_normalization(self, wb_data):
@@ -176,10 +198,12 @@ class TestWBPreset:
             preset.transform(wb_data, opts)
 
     def test_validation_odd_rows_reference_mode(self):
-        df = pd.DataFrame({
-            "Control": [1.0, 2.0, 3.0],
-            "Treatment": [4.0, 5.0, 6.0],
-        })
+        df = pd.DataFrame(
+            {
+                "Control": [1.0, 2.0, 3.0],
+                "Treatment": [4.0, 5.0, 6.0],
+            }
+        )
         preset = WBPreset()
         opts = WBOptions(has_reference=True)
         with pytest.raises(ValueError, match="even number"):
@@ -188,24 +212,29 @@ class TestWBPreset:
 
 # ── qPCR Preset ─────────────────────────────────────────────────────────
 
+
 class TestQPCRPreset:
     @pytest.fixture
     def delta_ct_data(self):
         """Pre-computed ΔCt values."""
         rng = np.random.default_rng(42)
-        return pd.DataFrame({
-            "Control": rng.normal(5.0, 0.5, size=6),
-            "KD": rng.normal(8.0, 0.5, size=6),
-            "OE": rng.normal(2.0, 0.5, size=6),
-        })
+        return pd.DataFrame(
+            {
+                "Control": rng.normal(5.0, 0.5, size=6),
+                "KD": rng.normal(8.0, 0.5, size=6),
+                "OE": rng.normal(2.0, 0.5, size=6),
+            }
+        )
 
     @pytest.fixture
     def raw_ct_data(self):
         """Raw Ct: top 3 rows = target, bottom 3 = reference."""
-        return pd.DataFrame({
-            "Control": [25.0, 26.0, 24.5, 20.0, 20.5, 19.5],
-            "Treatment": [28.0, 29.0, 27.5, 20.0, 20.5, 19.5],
-        })
+        return pd.DataFrame(
+            {
+                "Control": [25.0, 26.0, 24.5, 20.0, 20.5, 19.5],
+                "Treatment": [28.0, 29.0, 27.5, 20.0, 20.5, 19.5],
+            }
+        )
 
     def test_delta_ct_mode(self, delta_ct_data):
         preset = QPCRPreset()
@@ -239,10 +268,12 @@ class TestQPCRPreset:
             preset.transform(delta_ct_data, opts)
 
     def test_validation_odd_rows_raw_ct(self):
-        df = pd.DataFrame({
-            "Control": [1.0, 2.0, 3.0],
-            "Treatment": [4.0, 5.0, 6.0],
-        })
+        df = pd.DataFrame(
+            {
+                "Control": [1.0, 2.0, 3.0],
+                "Treatment": [4.0, 5.0, 6.0],
+            }
+        )
         preset = QPCRPreset()
         opts = QPCROptions(input_format="raw_ct")
         with pytest.raises(ValueError, match="even number"):
@@ -259,30 +290,37 @@ class TestQPCRPreset:
     @pytest.fixture
     def qpcr_labeled_single(self):
         """Labeled qPCR data: 1 target gene + 1 reference, 3 replicates."""
-        labels = pd.Series(["Gene-A", "Gene-A", "Gene-A",
-                            "GAPDH", "GAPDH", "GAPDH"])
-        df = pd.DataFrame({
-            "Control":   [25.0, 25.5, 25.2, 18.0, 18.2, 17.8],
-            "Treatment": [22.0, 22.3, 21.9, 18.0, 18.2, 17.8],
-        })
+        labels = pd.Series(["Gene-A", "Gene-A", "Gene-A", "GAPDH", "GAPDH", "GAPDH"])
+        df = pd.DataFrame(
+            {
+                "Control": [25.0, 25.5, 25.2, 18.0, 18.2, 17.8],
+                "Treatment": [22.0, 22.3, 21.9, 18.0, 18.2, 17.8],
+            }
+        )
         return labels, df
 
     @pytest.fixture
     def qpcr_labeled_multi(self):
         """Labeled qPCR data: 2 target genes + 1 reference, 3 replicates each."""
-        labels = pd.Series([
-            "Gene-A", "Gene-A", "Gene-A",
-            "Gene-B", "Gene-B", "Gene-B",
-            "GAPDH", "GAPDH", "GAPDH",
-        ])
-        df = pd.DataFrame({
-            "Control":   [25.0, 25.5, 25.2,
-                          28.0, 28.2, 27.8,
-                          18.0, 18.2, 17.8],
-            "Treatment": [22.0, 22.3, 21.9,
-                          30.0, 30.5, 30.2,
-                          18.0, 18.2, 17.8],
-        })
+        labels = pd.Series(
+            [
+                "Gene-A",
+                "Gene-A",
+                "Gene-A",
+                "Gene-B",
+                "Gene-B",
+                "Gene-B",
+                "GAPDH",
+                "GAPDH",
+                "GAPDH",
+            ]
+        )
+        df = pd.DataFrame(
+            {
+                "Control": [25.0, 25.5, 25.2, 28.0, 28.2, 27.8, 18.0, 18.2, 17.8],
+                "Treatment": [22.0, 22.3, 21.9, 30.0, 30.5, 30.2, 18.0, 18.2, 17.8],
+            }
+        )
         return labels, df
 
     def test_transform_labeled_single_gene(self, qpcr_labeled_single):
@@ -347,7 +385,9 @@ class TestQPCRPreset:
 
     def test_transform_labeled_mismatched_replicates(self):
         labels = pd.Series(["Gene-A", "Gene-A", "Gene-A", "GAPDH", "GAPDH"])
-        df = pd.DataFrame({"Control": [25, 26, 27, 18, 19], "Treatment": [22, 23, 24, 18, 19]})
+        df = pd.DataFrame(
+            {"Control": [25, 26, 27, 18, 19], "Treatment": [22, 23, 24, 18, 19]}
+        )
         preset = QPCRPreset()
         opts = QPCROptions(control_group="Control")
         with pytest.raises(ValueError, match="replicates"):
@@ -356,19 +396,22 @@ class TestQPCRPreset:
 
 # ── CCK-8 Preset ────────────────────────────────────────────────────────
 
+
 class TestCCK8Preset:
     @pytest.fixture
     def cck8_data(self):
         """OD readings: Blank, Control, and 4 dose columns."""
         rng = np.random.default_rng(42)
-        return pd.DataFrame({
-            "Blank": rng.normal(0.1, 0.02, size=6),
-            "Control": rng.normal(1.5, 0.1, size=6),
-            "Dose_1": rng.normal(1.4, 0.1, size=6),
-            "Dose_2": rng.normal(1.0, 0.1, size=6),
-            "Dose_3": rng.normal(0.6, 0.1, size=6),
-            "Dose_4": rng.normal(0.2, 0.1, size=6),
-        })
+        return pd.DataFrame(
+            {
+                "Blank": rng.normal(0.1, 0.02, size=6),
+                "Control": rng.normal(1.5, 0.1, size=6),
+                "Dose_1": rng.normal(1.4, 0.1, size=6),
+                "Dose_2": rng.normal(1.0, 0.1, size=6),
+                "Dose_3": rng.normal(0.6, 0.1, size=6),
+                "Dose_4": rng.normal(0.2, 0.1, size=6),
+            }
+        )
 
     def test_viability_calculation(self, cck8_data):
         preset = CCK8Preset()
@@ -483,7 +526,129 @@ class TestCCK8Preset:
         assert isinstance(preset.last_result.viability_df, pd.DataFrame)
 
 
+# ── qPCR statistics space ───────────────────────────────────────────────
+
+
+class TestQPCRStatsSpace:
+    def test_stats_input_gate_and_output_labels(self):
+        transformed = pd.DataFrame(
+            {"Control": [1.0, 2.0, 4.0], "Treatment": [0.5, 1.0, 2.0]},
+            index=[3, 4, 5],
+        )
+        expected = pd.DataFrame(
+            np.log2(transformed.to_numpy(dtype=float)),
+            index=transformed.index,
+            columns=transformed.columns,
+        )
+        pd.testing.assert_frame_equal(
+            stats_input_frame(transformed, QPCRPreset()), expected
+        )
+        pd.testing.assert_frame_equal(
+            stats_input_frame_for_config(
+                transformed,
+                PrismConfig(experiment_preset=ExperimentPreset.QPCR),
+            ),
+            expected,
+        )
+
+        # Non-qPCR data must pass through unchanged.
+        assert stats_input_frame(transformed, WBPreset()) is transformed
+        assert stats_input_frame(transformed, None) is transformed
+        assert (
+            stats_input_frame_for_config(
+                transformed,
+                PrismConfig(experiment_preset=ExperimentPreset.WB),
+            )
+            is transformed
+        )
+
+        from xstars.stats_engine import StatsEngine
+
+        real = StatsEngine().analyze(expected).to_dataframe()
+        original_columns = list(real.columns)
+        assert "p-value" in real.columns
+
+        labeled = qpcr_stats_table(real)
+        assert PVALUE_LABEL in labeled.columns
+        assert "p-value" not in labeled.columns
+        assert list(labeled.columns) == [
+            "Group A",
+            "Group B",
+            "Test",
+            "Statistic",
+            PVALUE_LABEL,
+            "Significance",
+        ]
+        assert list(real.columns) == original_columns
+
+        no_p = pd.DataFrame({"Group A": ["x"], "Significance": ["*"]})
+        assert list(qpcr_stats_table(no_p).columns) == list(no_p.columns)
+        assert PVALUE_LABEL == "p-value(−ΔΔCt)"
+        assert PROCESSED_DATA_SUFFIX == " (2^-ΔΔCt)"
+
+    @staticmethod
+    def _assert_tukey_matches_log2(result, transformed):
+        from scipy import stats as scipy_stats
+
+        columns = list(transformed.columns)
+        log2fc = np.log2(transformed.to_numpy(dtype=float))
+        tukey = scipy_stats.tukey_hsd(*[log2fc[:, i] for i in range(len(columns))])
+        expected = {
+            (columns[i], columns[j]): float(tukey.pvalue[i][j])
+            for i in range(len(columns))
+            for j in range(i + 1, len(columns))
+        }
+        actual = {(pair.group_a, pair.group_b): pair.p_value for pair in result.pairs}
+        assert actual.keys() == expected.keys()
+        for pair, expected_p in expected.items():
+            assert actual[pair] == pytest.approx(expected_p, abs=1e-12)
+
+    def test_plain_qpcr_pvalues_match_manual_log2_space(self):
+        delta_ct = pd.DataFrame(
+            {
+                "Control": [0.0, 0.4, -0.2],
+                "siRNA": [3.3, 3.1, 3.4],
+                "OE": [-2.8, -2.9, -2.7],
+            }
+        )
+        preset = QPCRPreset()
+        transformed = preset.transform(delta_ct, QPCROptions(control_group="Control"))
+        assert (transformed > 0).all().all()
+
+        from xstars.stats_engine import StatsEngine
+
+        result = StatsEngine().analyze(stats_input_frame(transformed, preset))
+        assert "ANOVA" in result.decision_path
+        self._assert_tukey_matches_log2(result, transformed)
+
+    def test_labeled_qpcr_pvalues_match_manual_log2_space(self):
+        labels = pd.Series(["Gene-A", "Gene-A", "Gene-A", "GAPDH", "GAPDH", "GAPDH"])
+        ct = pd.DataFrame(
+            {
+                "Control": [25.0, 25.5, 24.7, 20.0, 20.2, 19.9],
+                "Treatment_A": [26.9, 27.5, 27.1, 20.1, 20.0, 20.4],
+                "Treatment_B": [24.0, 24.4, 23.7, 20.0, 20.2, 19.9],
+            }
+        )
+        preset = QPCRPreset()
+        targets = preset.transform_labeled(
+            labels,
+            ct,
+            QPCROptions(control_group="Control", reference_gene="GAPDH"),
+        )
+        assert [name for name, _ in targets] == ["Gene-A"]
+
+        from xstars.stats_engine import StatsEngine
+
+        for _name, transformed in targets:
+            assert (transformed > 0).all().all()
+            result = StatsEngine().analyze(stats_input_frame(transformed, preset))
+            assert "ANOVA" in result.decision_path
+            self._assert_tukey_matches_log2(result, transformed)
+
+
 # ── Integration: Preset → Stats → Plot ──────────────────────────────────
+
 
 class TestPresetIntegration:
     """End-to-end: preset transform output feeds into StatsEngine."""
@@ -492,10 +657,12 @@ class TestPresetIntegration:
         from xstars.stats_engine import StatsEngine
 
         rng = np.random.default_rng(42)
-        df = pd.DataFrame({
-            "Control": rng.uniform(1000, 2000, size=8),
-            "Treatment": rng.uniform(2000, 4000, size=8),
-        })
+        df = pd.DataFrame(
+            {
+                "Control": rng.uniform(1000, 2000, size=8),
+                "Treatment": rng.uniform(2000, 4000, size=8),
+            }
+        )
         preset = WBPreset()
         opts = WBOptions(control_group="Control")
         transformed = preset.transform(df, opts)
@@ -509,30 +676,36 @@ class TestPresetIntegration:
         from xstars.stats_engine import StatsEngine
 
         rng = np.random.default_rng(42)
-        df = pd.DataFrame({
-            "Control": rng.normal(5.0, 0.3, size=8),
-            "KD": rng.normal(8.0, 0.3, size=8),
-            "OE": rng.normal(2.0, 0.3, size=8),
-        })
+        df = pd.DataFrame(
+            {
+                "Control": rng.normal(5.0, 0.3, size=8),
+                "KD": rng.normal(8.0, 0.3, size=8),
+                "OE": rng.normal(2.0, 0.3, size=8),
+            }
+        )
         preset = QPCRPreset()
         opts = QPCROptions(control_group="Control")
         transformed = preset.transform(df, opts)
+        assert (transformed > 0).all().all()
 
         engine = StatsEngine()
-        result = engine.analyze(transformed)
+        result = engine.analyze(stats_input_frame(transformed, preset))
         assert len(result.pairs) >= 1
 
     def test_wb_to_plot(self):
         import matplotlib
+
         matplotlib.use("Agg")
         from xstars.plot_engine import PlotEngine
         from xstars.stats_engine import StatsEngine
 
         rng = np.random.default_rng(42)
-        df = pd.DataFrame({
-            "Control": rng.uniform(1000, 2000, size=8),
-            "Treatment": rng.uniform(2000, 4000, size=8),
-        })
+        df = pd.DataFrame(
+            {
+                "Control": rng.uniform(1000, 2000, size=8),
+                "Treatment": rng.uniform(2000, 4000, size=8),
+            }
+        )
         preset = WBPreset()
         opts = WBOptions(control_group="Control")
         transformed = preset.transform(df, opts)
@@ -548,19 +721,23 @@ class TestPresetIntegration:
     def test_cck8_dose_response_chart(self):
         """IC50 fit info triggers dose-response chart with 4PL curve and IC50 markers."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         rng = np.random.default_rng(42)
         concentrations = [0.1, 1.0, 10.0, 100.0]
-        df = pd.DataFrame({
-            "Control": rng.normal(100, 5, size=6),
-            "Dose_1": rng.normal(95, 5, size=6),
-            "Dose_2": rng.normal(70, 5, size=6),
-            "Dose_3": rng.normal(40, 5, size=6),
-            "Dose_4": rng.normal(10, 5, size=6),
-        })
+        df = pd.DataFrame(
+            {
+                "Control": rng.normal(100, 5, size=6),
+                "Dose_1": rng.normal(95, 5, size=6),
+                "Dose_2": rng.normal(70, 5, size=6),
+                "Dose_3": rng.normal(40, 5, size=6),
+                "Dose_4": rng.normal(10, 5, size=6),
+            }
+        )
 
         # Run CCK-8 preset to get fit params
         preset = CCK8Preset()
@@ -604,8 +781,10 @@ class TestPresetIntegration:
     def test_cck8_dose_response_linear_scale(self):
         """Narrow concentration range with LINEAR override uses linear x-axis."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         # Narrow range: 1, 2, 5, 8 — ratio = 8, below 10x threshold
@@ -615,13 +794,15 @@ class TestPresetIntegration:
             fit_params={"bottom": 5, "top": 100, "ic50": 4.0, "hill": 1.5},
             dose_col_names=["D1", "D2", "D3", "D4"],
         )
-        df = pd.DataFrame({
-            "Control": [100, 98, 102, 99, 101, 97],
-            "D1": [92, 95, 90, 93, 91, 94],
-            "D2": [70, 72, 68, 71, 69, 73],
-            "D3": [35, 38, 32, 36, 34, 37],
-            "D4": [12, 15, 10, 13, 11, 14],
-        })
+        df = pd.DataFrame(
+            {
+                "Control": [100, 98, 102, 99, 101, 97],
+                "D1": [92, 95, 90, 93, 91, 94],
+                "D2": [70, 72, 68, 71, 69, 73],
+                "D3": [35, 38, 32, 36, 34, 37],
+                "D4": [12, 15, 10, 13, 11, 14],
+            }
+        )
 
         # Force linear
         config = PrismConfig(
@@ -638,8 +819,10 @@ class TestPresetIntegration:
     def test_cck8_dose_response_auto_selects_linear(self):
         """AUTO mode picks linear when concentration range <= 100x."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         concentrations = [1.0, 2.0, 5.0, 8.0]  # max/min = 8 <= 100
@@ -648,13 +831,15 @@ class TestPresetIntegration:
             fit_params={"bottom": 5, "top": 100, "ic50": 4.0, "hill": 1.5},
             dose_col_names=["D1", "D2", "D3", "D4"],
         )
-        df = pd.DataFrame({
-            "Control": [100, 98, 102, 99, 101, 97],
-            "D1": [92, 95, 90, 93, 91, 94],
-            "D2": [70, 72, 68, 71, 69, 73],
-            "D3": [35, 38, 32, 36, 34, 37],
-            "D4": [12, 15, 10, 13, 11, 14],
-        })
+        df = pd.DataFrame(
+            {
+                "Control": [100, 98, 102, 99, 101, 97],
+                "D1": [92, 95, 90, 93, 91, 94],
+                "D2": [70, 72, 68, 71, 69, 73],
+                "D3": [35, 38, 32, 36, 34, 37],
+                "D4": [12, 15, 10, 13, 11, 14],
+            }
+        )
 
         config = PrismConfig(
             y_label="Viability (%)",
@@ -670,8 +855,10 @@ class TestPresetIntegration:
     def test_cck8_dose_response_auto_selects_log(self):
         """AUTO mode picks log when concentration range > 100x."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         from xstars.plot_engine import PlotEngine
 
         concentrations = [0.1, 1.0, 10.0, 100.0]  # max/min = 1000
@@ -680,13 +867,15 @@ class TestPresetIntegration:
             fit_params={"bottom": 5, "top": 100, "ic50": 5.0, "hill": 1.0},
             dose_col_names=["D1", "D2", "D3", "D4"],
         )
-        df = pd.DataFrame({
-            "Control": [100, 98, 102, 99, 101, 97],
-            "D1": [92, 95, 90, 93, 91, 94],
-            "D2": [70, 72, 68, 71, 69, 73],
-            "D3": [35, 38, 32, 36, 34, 37],
-            "D4": [12, 15, 10, 13, 11, 14],
-        })
+        df = pd.DataFrame(
+            {
+                "Control": [100, 98, 102, 99, 101, 97],
+                "D1": [92, 95, 90, 93, 91, 94],
+                "D2": [70, 72, 68, 71, 69, 73],
+                "D3": [35, 38, 32, 36, 34, 37],
+                "D4": [12, 15, 10, 13, 11, 14],
+            }
+        )
 
         config = PrismConfig(
             y_label="Viability (%)",

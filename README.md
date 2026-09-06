@@ -40,7 +40,7 @@
 | --- | --- |
 | 🔄 **Zero Switching** | Select data in Excel → click → figure appears in Excel. Your data never leaves |
 | 🧠 **Zero Barrier** | Auto-detects normality & variance → picks the right test → draws significance brackets. You don't choose |
-| 💰 **Zero Cost** | Free and open-source. The Windows installer requires no Python and there are no license fees |
+| 💰 **Zero Cost** | Free and open-source. One installer, no Python required, no license fees |
 
 ---
 
@@ -59,7 +59,7 @@
 | **💰 Price** | 🟢 Free | 🔴 ~$300–600/yr | 🟢 Free |
 | **📊 Works inside Excel** | ✅ | ❌ | ❌ |
 | **🖱️ No coding required** | ✅ | ✅ | ❌ |
-| **📦 No Python/R install** | ✅ (Windows installer only) | N/A | ❌ |
+| **📦 No Python/R install** | ✅ (standalone .exe) | N/A | ❌ |
 | **🤖 Auto stat test selection** | ✅ | ❌ Manual | ❌ Manual |
 | **📐 Significance brackets** | ✅ Automatic | ⚠️ Manual placement | ❌ Code required |
 | **🧪 Experiment presets** | ✅ WB, qPCR, CCK-8, ELISA | ❌ | ❌ Build your own |
@@ -159,7 +159,7 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 
 ## 🚀 Quick Start
 
-### Windows: 📥 Installer (Recommended — no Python needed)
+### Option A: 📥 Installer (Recommended — no Python needed)
 
 1. Download `XSTARS_Setup.exe` from [Releases](https://github.com/Frankkk1912/excel-prism/releases)
 2. Run the installer — it sets up the Excel add-in automatically
@@ -168,21 +168,29 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 
 > 💡 **New to XSTARS?** Open `XSTARS_Templates.xlsx` (included in the installer) for ready-to-run example datasets covering every chart type and experiment preset — just click Run on any sheet to see XSTARS in action.
 
+### Option B: 📑 WPS Office Support (Windows)
+
+XSTARS provides a standalone distribution for **Kingsoft WPS Spreadsheet**:
+
+- **Official Support**: WPS 365 / 12.x 64-bit (Professional, Commercial, Enterprise, and Education editions).
+- **Personal Edition**: Supported as Beta preview.
+- **Offline & Secure**: Runs entirely on local loopback (`127.0.0.1`) without external network dependencies.
+- See the [WPS Installation & User Guide](docs/wps-installation.md) for full setup instructions (`XSTARS_WPS_Setup.exe`).
+
 ### macOS: 🛠️ Developer Mode (Python required)
 
-macOS support is developer mode only: install XSTARS and the xlwings bridge in a Python 3.10+ virtual environment, then reuse the existing RunPython VBA callbacks. It does not provide a standalone `.app` and does not support WPS for Mac.
+macOS support is developer mode only: install XSTARS and the xlwings bridge in a Python 3.10+ virtual environment, then reuse the existing RunPython VBA callbacks. It does not provide a standalone `.app` and does not support WPS for Mac
+
+### Option C: 🛠️ Developer Setup (Python required)
 
 ```bash
 git clone https://github.com/Frankkk1912/xstars.git
 cd xstars
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
+pip install -e ".[dev]"
 xlwings addin install
-xlwings runpython install
 ```
 
-Follow the complete [macOS developer-mode setup guide](docs/macos-developer-setup.md) for the Excel VBA import, Python interpreter, macro and Automation permissions, artifact privacy, Export limits, and troubleshooting. The existing callback module is documented in [ribbon/README.md](ribbon/README.md).
+Then open your `.xlsm` workbook and add the VBA callbacks — see [ribbon/README.md](ribbon/README.md).
 
 ---
 
@@ -222,19 +230,13 @@ All options are in a tabbed dialog:
 
 Settings persist across sessions in `~/.xstars/settings.json`. 💾
 
-### Local chart rebuild artifacts and privacy
-
-Chart generation on **Windows and macOS** also writes versioned JSON rebuild payloads under `~/.xstars/artifacts/`. These local files can contain processed experimental data, plotting configuration, and statistical results. They are not uploaded by XSTARS and are not automatically expired. Apply your normal experimental-data retention policy. To clear only this derived cache, quit Excel/XSTARS and delete `~/.xstars/artifacts/`; do not delete `~/.xstars/settings.json` unless you also want to reset settings. On macOS, clearing the cache requires regenerating a chart before exporting it again. See [macOS Developer-Mode Setup](docs/macos-developer-setup.md#8-artifact-storage-privacy-and-cleanup) for details.
-
 ---
 
 ## 📌 Requirements
 
-- **Windows installer mode**: Windows with Microsoft Excel; no separate Python installation is required because the `.exe` bundles the runtime
-- **macOS developer mode**: macOS 10.14+, Microsoft Excel for Mac 2016+, Python ≥ 3.10, Intel or Apple Silicon, plus the xlwings add-in and RunPython setup
-- WPS for Mac is not supported; no standalone macOS `.app` is provided
-
-The macOS version and processor matrix is declared from upstream xlwings support information; combinations without a recorded real-Excel run are not claimed as project-verified. See [macOS Developer-Mode Setup](docs/macos-developer-setup.md).
+- 🪟 Windows with Microsoft Excel
+- **Installer mode**: Nothing else — the `.exe` bundles everything
+- **Dev mode**: Python ≥ 3.10
 
 ---
 

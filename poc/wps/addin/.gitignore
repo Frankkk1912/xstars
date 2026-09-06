@@ -1,0 +1,6 @@
+node_modules/
+dist/
+wps-addon-build/
+wps-addon-publish/
+deploy/
+*.log

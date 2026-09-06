@@ -1,5 +1,3 @@
-> **编者注（随本 PR 首次进入主线）**：本文档自 `origin/feature/wps-support` 复制，用于在主线固化跨平台 Office 技术策略记录。本 PR（macOS 开发者模式）与 WPS 适配是相互独立的 PR；WPS JS adapter/PoC 不包含在本 PR 中，详见 Draft PR 描述。
-
 # XSTARS 跨平台 Office 技术路线
 
 > 状态：已确定为后续架构方向
