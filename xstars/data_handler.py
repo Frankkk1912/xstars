@@ -163,9 +163,7 @@ class DataHandler:
         """Raise ``ValueError`` if data does not meet minimum requirements."""
         n_groups = len(df.columns)
         if n_groups < min_groups:
-            raise ValueError(
-                f"Need at least {min_groups} groups, got {n_groups}."
-            )
+            raise ValueError(f"Need at least {min_groups} groups, got {n_groups}.")
         for col in df.columns:
             n = df[col].dropna().shape[0]
             if n < min_n:
