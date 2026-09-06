@@ -336,6 +336,8 @@ Milestone 总数：**5**（≤7，且 ≤10）。所有初始 Status 均为 `[ ]
 | --- | --- | --- | --- |
 | `xstars/artifacts.py` | 新建 | payload DTO/schema、key/path、save/load/validate、Figure rebuild、artifact 错误类型 | pickle、任意代码执行、Excel COM、网络传输 |
 | `xstars/main.py` | 修改 | artifact 登记 helper；Darwin pictures/export/InputBox 分支；topmost 局部降级 | 重构统计核心；改变非 Darwin COM/InputBox 行为 |
+| `xstars/data_handler.py` | 修改（2026-09-06 DC2 批准范围扩展） | 仅 `get_insertion_cell` 改为跨平台 `(row, col)` tuple 形式（macOS 两参数形式抛 ValueError）及 lint 硬化（`pd.Index` 列构造、去冗余 `int()`） | 改变清洗/转换统计语义 |
+| `xstars/application/analysis.py` | 修改（2026-09-06 DC2 批准范围扩展） | 仅 lint 硬化（`pd.Index` 列构造、去冗余 `float()`）；行为保持 | 改变分析/统计语义 |
 | `tests/test_artifacts.py` | 新建 | artifact round-trip、安全、失败隔离、重建测试 | 访问真实用户目录或 Excel |
 | `tests/test_macos_support.py` | 新建 | Darwin/Windows 分支与 tkinter/xlwings mocks | 实机 GUI 依赖 |
 | `tests/test_end_to_end.py` | 可选修改 | 仅复用/追加 Windows 零回归断言；若新文件足够则不改 | 改写现有测试期望以掩盖回归 |
@@ -481,3 +483,4 @@ The main risks are payload completeness, local experimental-data retention, work
 - [x] 本次只新建 `plans/20260829-macos-support.md`，没有创建或覆盖源码、测试、配置、脚本或生成物。
 - [x] 2026-08-30 批准修订：用户会话确认 Plan rev 批准，D1–D7 按推荐值定案；D8 改为“复制策略文档到本 PR（带前言）”，§9.1 文件范围相应新增一行；首个提交包含 Plan 与 Explore 调研报告。
 - [x] 2026-08-30 批准范围扩展：用户批准在本 PR 内修复 `xstars/tools/standard_curve.py` 预先存在的 `back_calculate` NaN 掩码缺陷（main 基线确定性失败、相对 main 零 diff，与本 PR 无关但阻断完整回归门禁），§9.1 新增该文件行；修复仅限该缺陷。
+- [x] 2026-09-06 DC2 批准范围扩展：macOS 真机人工验收（docs/macos-manual-acceptance.md，最终 PASS）暴露 4 个 CI 不可见缺陷并当场修复，用户逐项验收确认；§9.1 新增 `xstars/data_handler.py`、`xstars/application/analysis.py` 两行（修复范围见上表）。同期修订 `docs/macos-developer-setup.md`、`ribbon/README.md`：实机验证表明文档原述“xlsm 内嵌 customUI14 + Mac 导入 .bas”流程不能产生可见 Ribbon，改为启动目录 xlam（2006 格式 customUI）+ 工作簿导入 xlwings.bas/Dictionary 的已验证流程。

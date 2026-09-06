@@ -28,14 +28,9 @@ Install:
    ```
 
 3. Git, to clone the repository.
-4. A macro-enabled Excel workbook (`.xlsm`) that contains the XSTARS Ribbon XML. See the [Ribbon installation guide](../ribbon/README.md).
+4. A macro-enabled Excel workbook (`.xlsm`) holding your data, plus an **XSTARS ribbon add-in (`.xlam`)** that provides the XSTARS tab. See the [Ribbon installation guide](../ribbon/README.md).
 
-> **Ribbon workbook prerequisite:** this repository does not include a prebuilt
-> `.xlsm`. Before moving to macOS, embed `ribbon/customUI14.xml` into a workbook
-> on Windows (or another environment with a working Office RibbonX Editor),
-> save it as `.xlsm`, and copy that workbook to the Mac. The supported macOS
-> workflow imports the VBA callbacks but does not provide a from-scratch Ribbon
-> XML embedding tool.
+> **macOS Ribbon reality check (verified on Excel for Mac 16.112.3 / macOS 15.7.4, Apple Silicon):** Excel for Mac in this tested build does **not** render a document-level custom UI embedded in an `.xlsm`, and it also does **not** render a `customUI14`-format (2009 namespace) ribbon delivered via an add-in. The only configuration observed to work is an `.xlam` add-in in the Excel startup folder whose custom UI part uses the **2006-format custom UI** (`customUI/customUI.xml`, namespace `http://schemas.microsoft.com/office/2006/01/customui`, relationship type `http://schemas.microsoft.com/office/2006/relationships/ui/extensibility`, and no `insertAfterMso` attribute, which the 2006 schema does not support). Package the ribbon accordingly on Windows or another host with the Office RibbonX Editor before copying the `.xlam` to the Mac; the VBA callbacks themselves are imported unchanged on the Mac as described below.
 
 Keep the repository in a stable location. The editable Python installation refers back to this checkout.
 
@@ -86,17 +81,22 @@ python -m pip show xlwings
 command -v xlwings
 ```
 
-## 4. Import the existing XSTARS callbacks
+## 4. Import the existing XSTARS callbacks and xlwings support modules
 
 XSTARS reuses [`ribbon/ribbon_callbacks.bas`](../ribbon/ribbon_callbacks.bas) unchanged on Windows and macOS. Do not create a separate Mac callback module and do not edit the existing `.bas` file.
+
+VBA unqualified calls such as `RunPython` do **not** cross project boundaries, so the workbook must also embed the xlwings support modules that the xlwings add-in alone does not provide to other projects. On macOS the xlwings module additionally requires the `Dictionary` class (VBA-Dictionary), which ships inside the installed `xlwings.xlam` add-in.
 
 1. Open the macro-enabled XSTARS workbook in Excel for Mac.
 2. Open the Visual Basic Editor through **Tools → Macro → Visual Basic Editor**. Depending on the keyboard and Excel version, `Fn+Option+F11` may also open it; the Windows `Alt+F11` shortcut does not generally apply.
 3. In the workbook project, choose **File → Import File…** (or use the project context menu) and select `ribbon/ribbon_callbacks.bas` from this repository.
 4. Confirm that the imported module is named `RibbonCallbacks`.
-5. Save the workbook as **Excel Macro-Enabled Workbook (`.xlsm`)**, close Excel, and reopen the workbook.
+5. Import `xlwings.bas` from the installed xlwings wheel (for example `<venv>/lib/python3.x/site-packages/xlwings/xlwings.bas`), so the imported module is named `xlwings` and its version matches the installed xlwings version.
+6. Import the `Dictionary` class module (extract `Dictionary.cls` from the VBA project of the installed `xlwings.xlam`, or obtain VBA-Dictionary from its upstream source). Confirm the class module is named `Dictionary`.
+7. If the workbook's `xlwings.conf` sheet contains an `Interpreter` entry, point it at the virtual-environment interpreter from §2 (a workbook sheet overrides the user config).
+8. Save the workbook as **Excel Macro-Enabled Workbook (`.xlsm`)**, close Excel, and reopen the workbook.
 
-The XSTARS Ribbon XML is installed separately from the VBA module. Follow the [Ribbon installation guide](../ribbon/README.md) if the **XSTARS** tab is absent.
+The XSTARS Ribbon tab is provided by the `.xlam` add-in described in the [Ribbon installation guide](../ribbon/README.md), not by this workbook. Callbacks raised by the add-in's ribbon resolve in the active workbook, which is why `RibbonCallbacks`, `xlwings`, and `Dictionary` must live in the workbook project.
 
 ## 5. Macro and Automation permissions
 
@@ -185,8 +185,12 @@ Do **not** delete `~/.xstars/settings.json` unless you also intend to reset XSTA
 ### The xlwings or XSTARS Ribbon tab is missing
 
 - For the xlwings tab, rerun `xlwings addin install` in the active `.venv`, then restart Excel.
-- For the XSTARS tab, confirm the workbook contains `customUI14.xml` and that the existing `ribbon_callbacks.bas` module was imported; see the [Ribbon installation guide](../ribbon/README.md).
-- Confirm the workbook was saved as `.xlsm` and macros are enabled for that workbook.
+- For the XSTARS tab, confirm the `.xlam` add-in that carries the XSTARS ribbon (2006-format custom UI; see the [Ribbon installation guide](../ribbon/README.md)) is present in the Excel startup folder and listed/checked under **Tools → Excel Add-ins**, then restart Excel. Note that on the tested Excel for Mac build a workbook-embedded custom UI and a `customUI14`-format add-in ribbon do not render; only the 2006-format add-in was observed to work.
+- Confirm the workbook was saved as `.xlsm` and macros are enabled for that workbook (when macros are disabled, Excel for Mac hides the custom tab instead of merely failing its buttons).
+
+### Excel reports a missing add-in at startup
+
+If a previously installed XSTARS add-in was deleted while Excel still auto-loads it, Excel shows a "cannot find add-in" prompt on every start. Remove the stale entry: with Excel closed, delete the corresponding `OPENn` record from the Office registration database (`~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/*.reg`, table `HKEY_CURRENT_USER_values`, keys `OPEN`, `OPEN1`, … under the Excel options node) or re-check/uncheck the add-in in **Tools → Excel Add-ins**. Back up the database file before editing it.
 
 ### `RunPython` is unavailable or does nothing
 
