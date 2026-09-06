@@ -201,12 +201,10 @@ def test_ensure_export_extension_appends_when_missing(tmp_path):
     base = tmp_path / "e07"
     assert main._ensure_export_extension(str(base), ".pdf") == str(base) + ".pdf"
     assert (
-        main._ensure_export_extension(str(base) + ".pdf", ".pdf")
-        == str(base) + ".pdf"
+        main._ensure_export_extension(str(base) + ".pdf", ".pdf") == str(base) + ".pdf"
     )
     assert (
-        main._ensure_export_extension(str(base) + ".png", ".pdf")
-        == str(base) + ".png"
+        main._ensure_export_extension(str(base) + ".png", ".pdf") == str(base) + ".png"
     )
 
 
