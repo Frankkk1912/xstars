@@ -49,13 +49,15 @@ def get_last_artifact_diagnostic() -> str | None:
 
 def _workbook_artifact_identifier(book: Any) -> str:
     """Return a Save-As-sensitive path identity or fail closed if unsaved."""
-    path = getattr(book, "path", None)
+    # xlwings Book has no ``path`` attribute (at least since 0.33/0.37), so the
+    # saved/unsaved gate must not depend on it: derive the directory from the
+    # workbook fullname instead. An unsaved workbook reports a bare name such
+    # as "Book1" with no directory component.
     fullname = getattr(book, "fullname", None)
     if (
-        isinstance(path, str)
-        and path.strip()
-        and isinstance(fullname, str)
+        isinstance(fullname, str)
         and fullname.strip()
+        and os.path.dirname(fullname.strip()) != ""
     ):
         return f"path:{os.path.abspath(os.path.expanduser(fullname.strip()))}"
     raise artifacts.ArtifactIdentityError(_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE)
@@ -224,9 +226,15 @@ def _execute_analysis_writeback(book, sheet, result) -> list:
     return inserted_pictures
 
 
-def _register_writeback_artifacts(book, sheet, result, inserted_pictures, config) -> None:
+def _register_writeback_artifacts(
+    book, sheet, result, inserted_pictures, config
+) -> None:
     """Best-effort rebuild-payload registration for pictures inserted by a WritebackPlan."""
-    for image, picture in zip(result.writeback_plan.images, inserted_pictures):
+    # Best-effort by contract: a length mismatch must skip stray registration
+    # instead of crashing the chart flow, hence explicit strict=False.
+    for image, picture in zip(
+        result.writeback_plan.images, inserted_pictures, strict=False
+    ):
         _register_artifact_best_effort(
             book,
             sheet,
@@ -565,7 +573,7 @@ def _has_label_column(df: pd.DataFrame) -> bool:
     first_col = pd.Series(df.iloc[:, 0])
     numeric = pd.Series(pd.to_numeric(first_col, errors="coerce"))
     # If more than half the values failed numeric conversion, it's a label column
-    return int(numeric.isna().sum()) > len(first_col) // 2
+    return bool(numeric.isna().sum() > len(first_col) // 2)
 
 
 def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
@@ -1088,7 +1096,6 @@ def _show_export_dialog() -> tuple[str, int] | None:
 
     Label: Any = ttkb.Label if ttkb else tk.Label
     Entry: Any = ttkb.Entry if ttkb else tk.Entry
-    Button: Any = ttkb.Button if ttkb else tk.Button
     Combo: Any = ttkb.Combobox if ttkb else tk_ttk.Combobox
 
     # Format
@@ -1157,8 +1164,19 @@ def _show_export_dialog() -> tuple[str, int] | None:
             browse()
             path = path_var.get().strip()
         if path:
+            try:
+                dpi = int(dpi_var.get())
+            except (TypeError, ValueError):
+                from tkinter import messagebox
+
+                messagebox.showerror(
+                    "Invalid DPI",
+                    "DPI must be an integer, for example 300.",
+                    parent=root,
+                )
+                return
             result["path"] = path
-            result["dpi"] = int(dpi_var.get())
+            result["dpi"] = dpi
         root.destroy()
 
     def on_cancel():
@@ -1571,7 +1589,7 @@ def _run_standard_curve_impl(book: Any) -> None:
 
     # Group info for dialog
     group_names = list(df_wide.columns)
-    group_sizes = {col: int(df_wide[col].notna().sum()) for col in df_wide.columns}
+    group_sizes = df_wide.count().to_dict()
 
     # Show dialog
     dialog = StandardCurveDialog(conc, od, group_names, group_sizes)

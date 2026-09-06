@@ -163,6 +163,20 @@ def test_unsaved_workbook_registration_is_skipped_with_diagnostic(tmp_path):
     assert not list(tmp_path.glob("*.json"))
 
 
+def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
+    """Real xlwings Book (0.33/0.37) exposes no ``path`` attribute; identity
+    must be derived from ``fullname`` alone (DC2 real-Excel finding)."""
+    saved = SimpleNamespace(fullname=str(tmp_path / "XSTARS.xlsm"), name="XSTARS.xlsm")
+    assert main._workbook_artifact_identifier(saved) == (
+        f"path:{tmp_path / 'XSTARS.xlsm'}"
+    )
+
+    with pytest.raises(artifacts.ArtifactIdentityError, match="Save the workbook"):
+        main._workbook_artifact_identifier(
+            SimpleNamespace(fullname="Book1", name="Book1")
+        )
+
+
 def test_darwin_unsaved_workbook_export_reports_save_and_regenerate(tmp_path):
     picture = StrictPicture("XSTARS_Plot_1")
     book, _ = _darwin_book(tmp_path, [picture])
