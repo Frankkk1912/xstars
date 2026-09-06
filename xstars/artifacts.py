@@ -618,10 +618,10 @@ def _stats_to_dict(stats_result: StatsResult | None) -> dict[str, Any] | None:
         "decision_path": stats_result.decision_path,
         "normality_test": stats_result.normality_test,
         "normality_pvalues": _json_safe(stats_result.normality_pvalues),
-        "all_normal": stats_result.all_normal,
+        "all_normal": _json_safe(stats_result.all_normal),
         "variance_test": stats_result.variance_test,
         "variance_p": _json_safe(stats_result.variance_p),
-        "equal_variance": stats_result.equal_variance,
+        "equal_variance": _json_safe(stats_result.equal_variance),
         "omnibus_test": stats_result.omnibus_test,
         "omnibus_statistic": _json_safe(stats_result.omnibus_statistic),
         "omnibus_p": _json_safe(stats_result.omnibus_p),
@@ -759,6 +759,8 @@ def _dataframe_from_dict(snapshot: Any) -> pd.DataFrame:
 def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
+    if isinstance(value, np.bool_):
+        return bool(value)
     if isinstance(value, (float, np.floating)):
         number = float(value)
         if math.isnan(number):

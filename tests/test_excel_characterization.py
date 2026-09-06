@@ -8,6 +8,7 @@ logic; no live Excel instance is used.
 from __future__ import annotations
 
 import inspect
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import pandas as pd
+import pytest
 
 from xstars import main
 from xstars.config import PrismConfig
@@ -158,6 +160,11 @@ def test_full_run_cancel_does_not_write_or_insert():
     assert book.app.status_bar == "before"
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="macOS dispatches _select_sample_data to the native Tk range dialog; "
+    "the COM InputBox cancel contract under test is unreachable headlessly",
+)
 def test_second_selection_inputbox_cancel_returns_none():
     for inputbox_result in (None, RuntimeError("cancelled")):
         book = MagicMock()
@@ -176,6 +183,11 @@ def test_second_selection_inputbox_cancel_returns_none():
         sheet.range.assert_not_called()
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="macOS _run_export_impl routes to the artifact rebuild export path; "
+    "the COM shape-export numbered-paths contract under test is unreachable on darwin",
+)
 def test_export_multiple_shapes_uses_numbered_paths_and_status(tmp_path: Path):
     book = MagicMock()
     shapes = [MagicMock(), MagicMock()]

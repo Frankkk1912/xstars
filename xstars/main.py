@@ -190,8 +190,14 @@ def _selection_output_row(selection, data_rows: int) -> int:
     return selection.row + row_count + 2
 
 
-def _execute_analysis_writeback(book, sheet, result) -> None:
-    """Execute a host-neutral WritebackPlan through the Excel adapter."""
+def _execute_analysis_writeback(book, sheet, result) -> list:
+    """Execute a host-neutral WritebackPlan through the Excel adapter.
+
+    Returns the pictures inserted for writeback-plan images, in plan order,
+    so callers can register rebuild payloads against the actual Excel-assigned
+    picture names.
+    """
+    inserted_pictures: list = []
     for table in result.writeback_plan.tables:
         row, column = _application_analysis.parse_cell(table.start_cell)
         sheet.range((row, column)).value = table.values
@@ -212,28 +218,24 @@ def _execute_analysis_writeback(book, sheet, result) -> None:
             kwargs["width"] = image.width
         if image.height is not None:
             kwargs["height"] = image.height
-        sheet.pictures.add(source, **kwargs)
+        inserted_pictures.append(sheet.pictures.add(source, **kwargs))
 
     book.app.status_bar = result.writeback_plan.status_message
+    return inserted_pictures
 
 
-def _register_writeback_artifacts(book, sheet, result, config) -> None:
+def _register_writeback_artifacts(book, sheet, result, inserted_pictures, config) -> None:
     """Best-effort rebuild-payload registration for pictures inserted by a WritebackPlan."""
-    planned = {image.name for image in result.writeback_plan.images}
-    if not planned:
-        return
-    for picture in sheet.pictures:
-        name = getattr(picture, "name", None)
-        if isinstance(name, str) and name in planned:
-            _register_artifact_best_effort(
-                book,
-                sheet,
-                picture,
-                name,
-                result.transformed_data,
-                config,
-                result.stats_result,
-            )
+    for image, picture in zip(result.writeback_plan.images, inserted_pictures):
+        _register_artifact_best_effort(
+            book,
+            sheet,
+            picture,
+            image.name,
+            result.transformed_data,
+            config,
+            result.stats_result,
+        )
 
 
 def _guess_control(groups: list[str]) -> str:
@@ -626,8 +628,8 @@ def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
         image_name=_next_plot_name(sheet, book=book),
         include_processed_data=True,
     )
-    _execute_analysis_writeback(book, sheet, result)
-    _register_writeback_artifacts(book, sheet, result, config)
+    inserted_pictures = _execute_analysis_writeback(book, sheet, result)
+    _register_writeback_artifacts(book, sheet, result, inserted_pictures, config)
 
 
 def _run_wb_labeled(
@@ -889,8 +891,8 @@ def _run_impl(book: Any) -> None:
         image_name=_next_plot_name(sheet, book=book),
         include_processed_data=False,
     )
-    _execute_analysis_writeback(book, sheet, result)
-    _register_writeback_artifacts(book, sheet, result, config)
+    inserted_pictures = _execute_analysis_writeback(book, sheet, result)
+    _register_writeback_artifacts(book, sheet, result, inserted_pictures, config)
 
 
 def _run_quick_impl(book: Any) -> None:
@@ -912,8 +914,8 @@ def _run_quick_impl(book: Any) -> None:
         image_name=_next_plot_name(sheet, book=book),
         include_processed_data=False,
     )
-    _execute_analysis_writeback(book, sheet, result)
-    _register_writeback_artifacts(book, sheet, result, config)
+    inserted_pictures = _execute_analysis_writeback(book, sheet, result)
+    _register_writeback_artifacts(book, sheet, result, inserted_pictures, config)
 
 
 def run_export() -> None:

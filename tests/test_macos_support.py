@@ -1020,8 +1020,12 @@ def _exercise_generation_entry(tmp_path, entry, *, fail_artifact_writes=False):
                 patch("xstars.main.PrismConfig.load", return_value=PrismConfig())
             )
             dialog = stack.enter_context(patch("xstars.main.SettingsDialog"))
-            stack.enter_context(patch("xstars.main._apply_preset", return_value=frame))
-            stack.enter_context(patch("xstars.main.get_preset", return_value=object()))
+            stack.enter_context(
+                patch(
+                    "xstars.application.analysis.transform_dataframe",
+                    return_value=(frame, None),
+                )
+            )
             dialog.return_value.show.return_value = config
             main._run_preset_impl(book, ExperimentPreset.WB)
         elif entry in {"wb_labeled", "qpcr_labeled"}:
@@ -1136,12 +1140,13 @@ def test_generation_entries_isolate_permission_error(tmp_path, entry):
     assert isinstance(result.book.app.status_bar, str)
     assert result.book.app.status_bar.startswith("XSTARS:")
     assert result.sheet.range.call_count > 0
-    if entry in {"preset", "wb_labeled", "qpcr_labeled", "elisa"}:
+    if entry in {"wb_labeled", "qpcr_labeled", "elisa"}:
         assert result.write_data.called
     else:
-        # Run/Quick only write the stats summary table below the selection;
-        # processed-data sheets are written by the preset/labeled/ELISA
-        # entries. This mirrors the baseline contract on every platform.
+        # Run/Quick/Preset write output tables through the application-layer
+        # WritebackPlan (via sheet.range) rather than _write_transformed_data;
+        # labeled/ELISA entries keep the inline processed-data writer. This
+        # mirrors the baseline contract on every platform.
         assert not result.write_data.called
     diagnostic = main.get_last_artifact_diagnostic()
     assert diagnostic is not None
@@ -1182,23 +1187,19 @@ def test_full_preset_registration_failure_preserves_outputs_picture_and_status(
         patch("xstars.main._read_selection_auto", return_value=(None, frame)),
         patch("xstars.main.PrismConfig.load", return_value=PrismConfig()),
         patch("xstars.main.SettingsDialog") as dialog,
-        patch("xstars.main._apply_preset", return_value=frame),
-        patch("xstars.main.get_preset", return_value=object()),
-        patch("xstars.main.DataHandler.validate"),
-        patch("xstars.main.StatsEngine", return_value=analyzer),
-        patch("xstars.main.PlotEngine", return_value=plotter),
         patch(
-            "xstars.main._write_transformed_data", wraps=main._write_transformed_data
-        ) as write_data,
+            "xstars.application.analysis.transform_dataframe",
+            return_value=(frame, None),
+        ),
+        patch("xstars.main.DataHandler.validate"),
+        patch("xstars.application.analysis.StatsEngine", return_value=analyzer),
+        patch("xstars.main.PlotEngine", return_value=plotter),
         patch("xstars.artifacts._atomic_write_json", side_effect=fail_payload_write),
     ):
         dialog.return_value.show.return_value = config
         main._run_preset_impl(book, ExperimentPreset.WB)
 
     pictures.add.assert_called_once()
-    write_data.assert_called_once()
-    assert write_data.call_args.args[4] == "Processed Data"
-    assert write_data.call_args.args[3].equals(frame)
     assert sheet.range.call_count >= 4
     assert book.app.status_bar == "XSTARS: test"
     diagnostic = main.get_last_artifact_diagnostic()
