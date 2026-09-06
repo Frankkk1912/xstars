@@ -73,12 +73,17 @@ class DarwinApp:
         raise AttributeError(name)
 
 
-def _darwin_book(tmp_path, pictures=()):
+def _darwin_book(tmp_path, pictures=(), selection=None):
     sheet = SimpleNamespace(name="Analysis", pictures=list(pictures))
     book = SimpleNamespace(
         path=str(tmp_path),
         fullname=str(tmp_path / "experiment.xlsx"),
-        selection=SimpleNamespace(sheet=sheet),
+        selection=(
+            selection
+            if selection is not None
+            else SimpleNamespace(sheet=sheet)
+        ),
+        sheets=SimpleNamespace(active=sheet),
         app=DarwinApp(),
     )
     return book, sheet
@@ -95,6 +100,19 @@ def _install_tk_modules(monkeypatch, root, *, answers=()):
     monkeypatch.setitem(sys.modules, "tkinter.messagebox", tk.messagebox)
     monkeypatch.setitem(sys.modules, "tkinter.simpledialog", tk.simpledialog)
     return tk
+
+
+def test_darwin_export_ignores_picture_selection(tmp_path):
+    """DC2 finding B-3: clicking a picture makes Mac selection return None;
+    export must discover pictures from the active sheet, not book.selection."""
+    valid = StrictPicture("XSTARS_Plot_1")
+    book, sheet = _darwin_book(tmp_path, [valid], selection=None)
+
+    with (
+        patch("xstars.main.sys.platform", "darwin"),
+        patch("xstars.main.artifacts.load_artifact"),
+    ):
+        assert main._get_selected_shapes(book) == [valid]
 
 
 def test_darwin_picture_discovery_filters_to_valid_artifact_backed_xstars(tmp_path):
@@ -840,6 +858,7 @@ def _generation_host(tmp_path, frame, events):
     book.fullname = str(tmp_path / "experiment.xlsx")
     book.path = str(tmp_path)
     book.selection = selection
+    book.sheets.active = sheet
     return book, sheet, pictures
 
 

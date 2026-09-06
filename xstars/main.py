@@ -966,7 +966,7 @@ def _get_selected_shapes(book: Any) -> list:
         # Excel for Mac exposes appscript rather than COM.  Do not touch
         # book.app.api/ShapeRange: only validated artifact-backed pictures are
         # eligible for the reconstruction export path.
-        sheet = book.selection.sheet
+        sheet = book.sheets.active
         pictures = []
         for picture in sheet.pictures:
             picture_name = getattr(picture, "name", "")
@@ -1264,7 +1264,10 @@ def _run_export_impl(book: Any) -> None:
     global _LAST_ARTIFACT_DISCOVERY_ERRORS
     _LAST_ARTIFACT_DISCOVERY_ERRORS = []
     shapes = _get_selected_shapes(book)
-    macos_sheet = book.selection.sheet if sys.platform == "darwin" else None
+    # macOS export is selection-agnostic: the user may have clicked a picture
+    # (whose selection is not a Range and returns None on Mac), so derive the
+    # target sheet from the active sheet, not from book.selection (DC2 B-3).
+    macos_sheet = book.sheets.active if sys.platform == "darwin" else None
     if not shapes:
         if sys.platform == "darwin":
             if _LAST_ARTIFACT_DISCOVERY_ERRORS:
