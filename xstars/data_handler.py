@@ -90,7 +90,9 @@ class DataHandler:
         sel = self._selection_ref
         top_row = sel.row
         right_col = sel.column + sel.columns.count + self.config.insert_offset_cols
-        return sheet.range(top_row, right_col).address
+        # Pass a single (row, col) tuple: the two-argument form raises
+        # ValueError("Invalid parameters") on the macOS xlwings implementation.
+        return sheet.range((top_row, right_col)).address
 
     # ------------------------------------------------------------------
     # Host-independent construction
@@ -111,7 +113,7 @@ class DataHandler:
         if any(len(row) != width for row in values):
             raise ValueError("Selection values must be rectangular.")
         headers = [str(value).strip() for value in values[0]]
-        raw = pd.DataFrame(values[1:], columns=headers)
+        raw = pd.DataFrame(values[1:], columns=pd.Index(headers, dtype=object))
         return cls.clean(raw)
 
     @classmethod
@@ -152,7 +154,9 @@ class DataHandler:
     @staticmethod
     def group_sizes(df: pd.DataFrame) -> dict[str, int]:
         """Return {group_name: n_valid_values} for a wide DataFrame."""
-        return {col: int(df[col].dropna().shape[0]) for col in df.columns}
+        # dropna().shape[0] is already a Python int; the redundant int() call
+        # tripped the lint gate without adding value.
+        return {col: df[col].dropna().shape[0] for col in df.columns}
 
     @staticmethod
     def validate(df: pd.DataFrame, min_groups: int = 2, min_n: int = 3) -> None:

@@ -406,7 +406,7 @@ def split_selection_labels(
     outputs so labels remain aligned with their measurements.
     """
     headers = [str(value).strip() for value in payload.values[0]]
-    raw = pd.DataFrame(payload.values[1:], columns=headers)
+    raw = pd.DataFrame(payload.values[1:], columns=pd.Index(headers, dtype=object))
     if raw.empty:
         return None, DataHandler.clean(raw)
 
@@ -795,7 +795,9 @@ def elisa_selections(
         result.extra_render_data["standard_curve_figure"] = standard_frame
         analysis_image = result.writeback_plan.images[0]
         analysis_row, _analysis_column = parse_cell(analysis_image.anchor_cell)
-        height_points = float(result.figure.get_size_inches()[1]) * 72
+        # get_size_inches() already yields a numeric scalar; the float() cast
+        # tripped the lint gate without adding value.
+        height_points = result.figure.get_size_inches()[1] * 72
         curve_anchor_row = analysis_row + ceil(height_points / 15) + 1
         result.writeback_plan.images.append(
             ImageWriteback(

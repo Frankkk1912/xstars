@@ -30,6 +30,7 @@ from xstars.artifacts import (
     save_artifact,
 )
 from xstars.config import ExperimentPreset, PrismConfig
+from xstars.data_handler import DataHandler
 from xstars.plot_engine import export_figure
 from xstars.stats_engine import StatsResult
 from xstars.tools.standard_curve import fit_standard_curve
@@ -175,6 +176,30 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
         main._workbook_artifact_identifier(
             SimpleNamespace(fullname="Book1", name="Book1")
         )
+
+
+def test_get_insertion_cell_uses_tuple_range_for_macos_compatibility():
+    """The macOS xlwings implementation raises ValueError("Invalid parameters")
+    for the two-argument ``sheet.range(row, col)`` form (DC2 real-Excel
+    finding B-2); the (row, col) tuple form is the cross-platform contract."""
+    from types import SimpleNamespace as NS
+
+    received = {}
+
+    class MacLikeSheet:
+        def range(self, cell1, cell2=None):
+            received["cell1"] = cell1
+            received["cell2"] = cell2
+            assert isinstance(cell1, tuple), (
+                "sheet.range must take a (row, col) tuple; two separate ints "
+                "fail on the macOS xlwings implementation"
+            )
+            return NS(address="$F$3")
+
+    handler = DataHandler()
+    handler._selection_ref = NS(row=3, column=1, columns=NS(count=3))
+    assert handler.get_insertion_cell(MacLikeSheet()) == "$F$3"
+    assert received == {"cell1": (3, 6), "cell2": None}
 
 
 def test_darwin_unsaved_workbook_export_reports_save_and_regenerate(tmp_path):
