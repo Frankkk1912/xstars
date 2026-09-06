@@ -10,7 +10,7 @@ import os
 import re
 import sys
 import traceback
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from importlib import import_module
 from typing import Any, cast
 
@@ -1672,6 +1672,28 @@ _A1_RANGE_RE = re.compile(
 )
 
 
+@contextmanager
+def _silenced_stderr_fd():
+    """Silence process stderr (fd 2) for the duration of the block.
+
+    macOS Tcl/Tk emits harmless C-level keyboard noise (e.g. "TSM
+    AdjustCapsLockLEDForKeyTransitionHandling ...") to stderr while Tk
+    dialogs are used. xlwings captures process stderr into its run log and
+    shows it as a run failure whenever it is non-empty, so a successful run
+    would still pop a misleading error dialog (DC2 finding N-1). Real
+    dialog failures are handled in-process via ``_show_error`` instead.
+    """
+    saved_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(saved_fd, 2)
+        os.close(saved_fd)
+        os.close(devnull_fd)
+
+
 def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
     """Prompt for an active-sheet A1 range without using Excel COM APIs."""
     root = None
@@ -1679,47 +1701,48 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
         import tkinter as tk
         from tkinter import messagebox, simpledialog
 
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            root.attributes("-topmost", True)
-        except Exception as exc:
-            _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
-
-        while True:
-            address = simpledialog.askstring(
-                "Standard Curve — Select Sample Data",
-                "Enter the sample OD data range on the active sheet "
-                "(with headers), for example A1:C6:",
-                parent=root,
-            )
-            if address is None:
-                return None
-            address = address.strip()
-            if not _A1_RANGE_RE.fullmatch(address):
-                messagebox.showerror(
-                    "Invalid Range",
-                    "Enter an A1-style range on the active sheet, for example "
-                    "A1:C6. Cross-sheet references and named ranges are not supported.",
-                    parent=root,
-                )
-                continue
-
+        with _silenced_stderr_fd():
+            root = tk.Tk()
+            root.withdraw()
             try:
-                rng = sheet.range(address)
-                raw = rng.options(pd.DataFrame, header=1, index=False).value
-                raw.columns = [str(c).strip() for c in raw.columns]
-                for col in raw.columns:
-                    raw[col] = pd.to_numeric(raw[col], errors="coerce")
-                return raw.dropna(how="all").reset_index(drop=True)
+                root.attributes("-topmost", True)
             except Exception as exc:
-                _ARTIFACT_LOGGER.info("Invalid macOS sample range %r: %s", address, exc)
-                messagebox.showerror(
-                    "Invalid Range",
-                    "That range could not be read from the active sheet. "
-                    "Check the A1 address and try again.",
+                _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
+
+            while True:
+                address = simpledialog.askstring(
+                    "Standard Curve — Select Sample Data",
+                    "Enter the sample OD data range on the active sheet "
+                    "(with headers), for example A1:C6:",
                     parent=root,
                 )
+                if address is None:
+                    return None
+                address = address.strip()
+                if not _A1_RANGE_RE.fullmatch(address):
+                    messagebox.showerror(
+                        "Invalid Range",
+                        "Enter an A1-style range on the active sheet, for example "
+                        "A1:C6. Cross-sheet references and named ranges are not supported.",
+                        parent=root,
+                    )
+                    continue
+
+                try:
+                    rng = sheet.range(address)
+                    raw = rng.options(pd.DataFrame, header=1, index=False).value
+                    raw.columns = [str(c).strip() for c in raw.columns]
+                    for col in raw.columns:
+                        raw[col] = pd.to_numeric(raw[col], errors="coerce")
+                    return raw.dropna(how="all").reset_index(drop=True)
+                except Exception as exc:
+                    _ARTIFACT_LOGGER.info("Invalid macOS sample range %r: %s", address, exc)
+                    messagebox.showerror(
+                        "Invalid Range",
+                        "That range could not be read from the active sheet. "
+                        "Check the A1 address and try again.",
+                        parent=root,
+                    )
     except Exception as exc:
         _ARTIFACT_LOGGER.warning("macOS sample-range dialog failed: %s", exc)
         _show_error(

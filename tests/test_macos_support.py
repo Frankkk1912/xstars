@@ -4,6 +4,7 @@
 # pyright: reportAttributeAccessIssue=false
 
 import json
+import os
 import sys
 from contextlib import ExitStack
 from pathlib import Path
@@ -176,6 +177,21 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
         main._workbook_artifact_identifier(
             SimpleNamespace(fullname="Book1", name="Book1")
         )
+
+
+def test_silenced_stderr_fd_restores_descriptor():
+    """The Tk-stderr silencer (DC2 finding N-1: xlwings shows a failure popup
+    whenever captured stderr is non-empty) must restore fd 2 afterwards."""
+    with patch("xstars.main.os.dup", return_value=7) as dup, \
+         patch("xstars.main.os.open", return_value=8) as opened, \
+         patch("xstars.main.os.dup2") as dup2, \
+         patch("xstars.main.os.close") as closed:
+        with main._silenced_stderr_fd():
+            dup2.assert_called_once_with(8, 2)
+        assert dup.call_args_list == [call(2)]
+        assert opened.call_args_list == [call("/dev/null", os.O_WRONLY)]
+        assert dup2.call_args_list[-1] == call(7, 2)
+        assert closed.call_args_list == [call(7), call(8)]
 
 
 def test_get_insertion_cell_uses_tuple_range_for_macos_compatibility():
