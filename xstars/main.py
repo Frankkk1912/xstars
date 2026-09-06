@@ -1736,7 +1736,9 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
                         raw[col] = pd.to_numeric(raw[col], errors="coerce")
                     return raw.dropna(how="all").reset_index(drop=True)
                 except Exception as exc:
-                    _ARTIFACT_LOGGER.info("Invalid macOS sample range %r: %s", address, exc)
+                    _ARTIFACT_LOGGER.info(
+                        "Invalid macOS sample range %r: %s", address, exc
+                    )
                     messagebox.showerror(
                         "Invalid Range",
                         "That range could not be read from the active sheet. "

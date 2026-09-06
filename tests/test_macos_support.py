@@ -182,10 +182,12 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
 def test_silenced_stderr_fd_restores_descriptor():
     """The Tk-stderr silencer (DC2 finding N-1: xlwings shows a failure popup
     whenever captured stderr is non-empty) must restore fd 2 afterwards."""
-    with patch("xstars.main.os.dup", return_value=7) as dup, \
-         patch("xstars.main.os.open", return_value=8) as opened, \
-         patch("xstars.main.os.dup2") as dup2, \
-         patch("xstars.main.os.close") as closed:
+    with (
+        patch("xstars.main.os.dup", return_value=7) as dup,
+        patch("xstars.main.os.open", return_value=8) as opened,
+        patch("xstars.main.os.dup2") as dup2,
+        patch("xstars.main.os.close") as closed,
+    ):
         with main._silenced_stderr_fd():
             dup2.assert_called_once_with(8, 2)
         assert dup.call_args_list == [call(2)]
