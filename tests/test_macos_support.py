@@ -220,7 +220,7 @@ def test_silenced_stderr_fd_restores_descriptor():
         with main._silenced_stderr_fd():
             dup2.assert_called_once_with(8, 2)
         assert dup.call_args_list == [call(2)]
-        assert opened.call_args_list == [call("/dev/null", os.O_WRONLY)]
+        assert opened.call_args_list == [call(os.devnull, os.O_WRONLY)]
         assert dup2.call_args_list[-1] == call(7, 2)
         assert closed.call_args_list == [call(7), call(8)]
 
