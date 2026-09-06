@@ -3,34 +3,27 @@
 from __future__ import annotations
 
 import traceback
+from contextlib import suppress
+from importlib import import_module
+from typing import Any, cast
 
-import xlwings as xw
+import pandas as pd
 
 from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
-from .presets import get_preset
-from .presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
-from .presets.elisa import ELISAOptions
-from .presets.qpcr import (
-    PROCESSED_DATA_SUFFIX,
-    QPCROptions,
-    qpcr_stats_table,
-    stats_input_frame,
-    stats_input_frame_for_config,
-)
-from .presets.wb import WBOptions
 from .stats_engine import StatsEngine
 from .ui_dialog import SettingsDialog, TransformOnlyDialog
 
-try:
-    import ttkbootstrap as _ttkb
+xw = import_module("xlwings")
+_application_analysis = import_module(".application.analysis", __package__)
 
+try:
+    _ttkb = import_module("ttkbootstrap")
     HAS_TTKB = True
 except ImportError:
+    _ttkb = None
     HAS_TTKB = False
-
-import pandas as pd
 
 
 def _write_transformed_data(
@@ -57,82 +50,65 @@ def _next_plot_name(sheet, base: str = "XSTARS_Plot") -> str:
         i += 1
 
 
+def _selection_output_row(selection, data_rows: int) -> int:
+    """Return the legacy output row, tolerating incomplete xlwings mocks."""
+    row_count = selection.rows.count
+    if not isinstance(row_count, int):
+        row_count = data_rows + 1  # header plus data rows
+    return selection.row + row_count + 2
+
+
+def _execute_analysis_writeback(book, sheet, result) -> None:
+    """Execute a host-neutral WritebackPlan through the Excel adapter."""
+    for table in result.writeback_plan.tables:
+        row, column = _application_analysis.parse_cell(table.start_cell)
+        sheet.range((row, column)).value = table.values
+
+    for image in result.writeback_plan.images:
+        row, column = _application_analysis.parse_cell(image.anchor_cell)
+        source = (
+            image.artifact.path
+            if image.artifact is not None
+            else result.figure_sources[image.source_key]
+        )
+        kwargs = {
+            "name": image.name,
+            "left": sheet.range((row, column)).left,
+            "top": sheet.range((row, column)).top,
+        }
+        if image.width is not None:
+            kwargs["width"] = image.width
+        if image.height is not None:
+            kwargs["height"] = image.height
+        sheet.pictures.add(source, **kwargs)
+
+    book.app.status_bar = result.writeback_plan.status_message
+
+
 def _guess_control(groups: list[str]) -> str:
     """Pick the most likely control group from column names."""
-    for g in groups:
-        if g.lower() in ("control", "ctrl", "con", "ctl", "nc", "vehicle"):
-            return g
-    # Fall back to second column if first looks like blank, else first
-    if len(groups) >= 2 and groups[0].lower() in ("blank", "blk", "bg", "background"):
-        return groups[1]
-    return groups[0]
+    return _application_analysis.guess_control(groups)
 
 
 def _guess_blank(groups: list[str]) -> str:
     """Pick the most likely blank group, or empty string if none found."""
-    for g in groups:
-        if g.lower() in ("blank", "blk", "bg", "background"):
-            return g
-    return ""
+    return _application_analysis.guess_blank(groups)
 
 
 def _build_preset_options(config: PrismConfig):
     """Map flat PrismConfig fields to the appropriate preset Options dataclass."""
-    preset_type = config.experiment_preset
-    if preset_type == ExperimentPreset.WB:
-        return WBOptions(
-            control_group=config.preset_control_group,
-            has_reference=config.preset_has_reference,
-            reference_protein=config.preset_reference_protein,
-        )
-    elif preset_type == ExperimentPreset.QPCR:
-        return QPCROptions(
-            control_group=config.preset_control_group,
-            input_format=config.preset_input_format,
-            reference_gene=config.preset_reference_gene,
-        )
-    elif preset_type == ExperimentPreset.CCK8:
-        concentrations = []
-        if config.preset_concentrations:
-            try:
-                concentrations = [
-                    float(x.strip())
-                    for x in config.preset_concentrations.split(",")
-                    if x.strip()
-                ]
-            except ValueError:
-                pass
-        return CCK8Options(
-            control_group=config.preset_control_group,
-            blank_group=config.preset_blank_group,
-            fit_ic50=config.preset_fit_ic50,
-            concentrations=concentrations,
-            fit_method=config.preset_fit_method.value,
-        )
-    elif preset_type == ExperimentPreset.ELISA:
-        return ELISAOptions(
-            control_group=config.preset_control_group,
-            fit_result=config.elisa_fit_result,
-        )
-    return None
+    return _application_analysis.build_preset_options(config)
 
 
 def _apply_preset(df_wide, config: PrismConfig):
     """Apply experiment preset transform if configured. Returns transformed df."""
-    preset = get_preset(config.experiment_preset)
-    if preset is None:
-        return df_wide
-    options = _build_preset_options(config)
-    df_wide = preset.transform(df_wide, options)
-    if config.y_label == "Value":
-        config.y_label = preset.default_y_label
-    return df_wide
+    return _application_analysis.apply_preset(df_wide, config)[0]
 
 
 def _friendly_message(message: str) -> str:
     """Translate raw Python/library error messages into user-friendly hints."""
     # Mapping: (substring in raw message) → friendly message
-    _PATTERNS: list[tuple[str, str]] = [
+    _PATTERNS: list[tuple[str, str | None]] = [
         (
             "arg must be a list, tuple, 1-d array, or Series",
             "Please select a valid data range.\n\n"
@@ -170,7 +146,7 @@ def _friendly_message(message: str) -> str:
     return message
 
 
-def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> None:
+def _show_error(book: Any, message: str, *, is_unexpected: bool = False) -> None:
     """Display a user-friendly error message via a Tkinter popup and Excel status bar."""
     friendly = _friendly_message(message)
     if is_unexpected:
@@ -195,15 +171,13 @@ def _show_error(book: xw.Book, message: str, *, is_unexpected: bool = False) -> 
         messagebox.showerror("Excel-Prism", friendly, parent=root)
         root.destroy()
     except Exception:
-        # Last resort: try VBA MsgBox
-        try:
+        # Last resort: try VBA MsgBox.
+        with suppress(Exception):
             book.app.macro("MsgBox")(
                 f"Excel-Prism Error\n\n{friendly}",
                 16,  # vbCritical
                 "Excel-Prism",
             )
-        except Exception:
-            pass
 
 
 _USER_ERRORS = (ValueError, TypeError, KeyError)
@@ -275,20 +249,17 @@ def run_elisa() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_elisa_impl(book: xw.Book) -> None:
+def _run_elisa_impl(book: Any) -> None:
     """ELISA flow: read std curve selection → fit → dialog → select samples → back-calc → stats → plot."""
     import matplotlib
     import numpy as np
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     from .presets.elisa_dialog import ELISADialog
     from .styles import get_prism_context
-    from .tools.standard_curve import (
-        back_calculate,
-        wide_to_conc_od,
-    )
+    from .tools.standard_curve import back_calculate, wide_to_conc_od
+
+    matplotlib.use("Agg")
+    plt = import_module("matplotlib.pyplot")
 
     sheet = book.selection.sheet
     sel = book.selection
@@ -312,9 +283,7 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
     conc, od = wide_to_conc_od(df_std)
     if len(conc) < 2:
-        raise ValueError(
-            "Need at least 2 valid data points for standard curve fitting."
-        )
+        raise ValueError("Need at least 2 valid data points for standard curve fitting.")
 
     # 2. Show ELISA dialog (fit + chart/theme/output settings in one window)
     dialog = ELISADialog(conc, od)
@@ -335,8 +304,8 @@ def _run_elisa_impl(book: xw.Book) -> None:
     # 4. Back-calculate: sample OD → concentration
     conc_df = sample_df.copy()
     for col in conc_df.columns:
-        od_vals = pd.to_numeric(conc_df[col], errors="coerce").to_numpy()
-        conc_df[col] = back_calculate(fit, od_vals)
+        od_series = pd.Series(pd.to_numeric(conc_df[col], errors="coerce"))
+        conc_df[col] = back_calculate(fit, od_series.to_numpy())
 
     # 5. Stats + plot
     handler.validate(conc_df)
@@ -376,9 +345,8 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
     # Concentration data
     if config.output_data:
-        out_row = _write_transformed_data(
-            sheet, out_row, out_col, conc_df, "Back-Calculated Concentrations"
-        )
+        out_row = _write_transformed_data(sheet, out_row, out_col, conc_df,
+                                          "Back-Calculated Concentrations")
 
     # 7. Insert analysis chart below tables
     insert_left = sheet.range((out_row, out_col)).left
@@ -396,9 +364,8 @@ def _run_elisa_impl(book: xw.Book) -> None:
         with get_prism_context(config.journal_preset, config.base_theme):
             fig_std, ax = plt.subplots(figsize=(4.5, 3.5), dpi=config.dpi)
 
-            ax.scatter(
-                conc, od, color=config.palette[0], s=30, zorder=5, label="Standards"
-            )
+            ax.scatter(conc, od, color=config.palette[0], s=30, zorder=5,
+                       label="Standards")
 
             conc_pos = conc[conc > 0]
             cmin_pos = conc_pos.min() if len(conc_pos) > 0 else 1e-6
@@ -409,14 +376,8 @@ def _run_elisa_impl(book: xw.Book) -> None:
             else:
                 x_fit = np.geomspace(cmin_pos * 0.5, cmax_pos * 1.5, 200)
             y_fit = fit.predict(x_fit)
-            ax.plot(
-                x_fit,
-                y_fit,
-                "-",
-                color=config.palette[1],
-                linewidth=1.5,
-                label=fit.method,
-            )
+            ax.plot(x_fit, y_fit, "-", color=config.palette[1], linewidth=1.5,
+                    label=fit.method)
 
             use_log = len(conc_pos) >= 2 and cmax_pos / cmin_pos > 10
             if use_log:
@@ -447,15 +408,13 @@ def _run_elisa_impl(book: xw.Book) -> None:
 
 def _has_label_column(df: pd.DataFrame) -> bool:
     """Check if the first column of a raw DataFrame contains non-numeric labels."""
-    import pandas as pd
-
-    first_col = df.iloc[:, 0]
-    numeric = pd.to_numeric(first_col, errors="coerce")
+    first_col = pd.Series(df.iloc[:, 0])
+    numeric = pd.Series(pd.to_numeric(first_col, errors="coerce"))
     # If more than half the values failed numeric conversion, it's a label column
-    return numeric.isna().sum() > len(first_col) // 2
+    return int(numeric.isna().sum()) > len(first_col) // 2
 
 
-def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
+def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
     """Like _run_impl but pre-selects the experiment preset."""
     sheet = book.selection.sheet
     handler = DataHandler()
@@ -476,10 +435,7 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
     if preset_type == ExperimentPreset.CCK8 and not base_config.preset_blank_group:
         base_config.preset_blank_group = _guess_blank(groups)
     # If labels detected, default to has_reference=True for WB and qPCR
-    if wb_labels is not None and preset_type in (
-        ExperimentPreset.WB,
-        ExperimentPreset.QPCR,
-    ):
+    if wb_labels is not None and preset_type in (ExperimentPreset.WB, ExperimentPreset.QPCR):
         base_config.preset_has_reference = True
 
     dialog = SettingsDialog(groups, sizes, base_config=base_config)
@@ -505,90 +461,21 @@ def _run_preset_impl(book: xw.Book, preset_type: ExperimentPreset) -> None:
         _run_qpcr_labeled(book, sheet, handler, wb_labels, df_wide, config)
         return
 
-    # Apply preset transform
-    preset = get_preset(config.experiment_preset)
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    # Populate IC50 fit info for dose-response chart
-    if (
-        isinstance(preset, CCK8Preset)
-        and preset.last_result
-        and preset.last_result.ic50 is not None
-        and preset.last_result.fit_params is not None
-    ):
-        opts = _build_preset_options(config)
-        dose_cols = [c for c in df_wide.columns if c != opts.control_group]
-        if opts.concentrations and len(opts.concentrations) == len(dose_cols):
-            config.ic50_fit_info = CCK8FitInfo(
-                concentrations=opts.concentrations,
-                fit_params=preset.last_result.fit_params,
-                dose_col_names=dose_cols,
-            )
-
-    # Stats
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(stats_input_frame(df_wide, preset))
-
-    # Plot
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
-    if config.export_path:
-        export_figure(fig, config.export_path, config.export_dpi)
-
-    # Stats summary table below data selection
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        if config.experiment_preset is ExperimentPreset.QPCR:
-            stats_df = qpcr_stats_table(stats_df)
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-        # IC50 results for CCK-8
-        if (
-            isinstance(preset, CCK8Preset)
-            and preset.last_result
-            and preset.last_result.ic50 is not None
-        ):
-            ic50_dest = sheet.range((next_row, start_col))
-            res = preset.last_result
-            ic50_data = [
-                ["IC50", res.ic50],
-                ["R²", res.r_squared],
-            ]
-            if res.ic50_95ci:
-                ic50_data.append(
-                    ["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"]
-                )
-            ic50_dest.value = ic50_data
-            next_row += len(ic50_data) + 2
-
-    # Write processed data
-    if config.output_data:
-        title = "Processed Data"
-        if config.experiment_preset is ExperimentPreset.QPCR:
-            title += PROCESSED_DATA_SUFFIX
-        next_row = _write_transformed_data(sheet, next_row, start_col, df_wide, title)
-
-    # Insert chart below stats/data tables
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=True,
     )
-
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
 def _run_wb_labeled(
-    book: xw.Book,
+    book: Any,
     sheet,
     handler: DataHandler,
     labels: pd.Series,
@@ -598,7 +485,7 @@ def _run_wb_labeled(
     """WB labeled reference mode: produce one figure per target protein."""
     from .presets.wb import WBPreset
 
-    preset = WBPreset()
+    preset = cast(Any, WBPreset())
     options = _build_preset_options(config)
     target_dfs = preset.transform_labeled(labels, df_numeric, options)
 
@@ -621,12 +508,10 @@ def _run_wb_labeled(
         stats_result = engine.analyze(fold_df)
 
         # Set title to protein name
-        plot_config = PrismConfig(
-            **{
-                f.name: getattr(config, f.name)
-                for f in config.__dataclass_fields__.values()
-            }
-        )
+        plot_config = PrismConfig(**{
+            f.name: getattr(config, f.name)
+            for f in config.__dataclass_fields__.values()
+        })
         plot_config.title = protein_name
 
         plotter = PlotEngine(plot_config)
@@ -643,7 +528,6 @@ def _run_wb_labeled(
 
         if config.export_path:
             from pathlib import Path
-
             p = Path(config.export_path)
             export_path = str(p.with_stem(f"{p.stem}_{protein_name}"))
             export_figure(fig, export_path, config.export_dpi)
@@ -664,20 +548,14 @@ def _run_wb_labeled(
         # Write processed data
         if config.output_data:
             stats_start_row = _write_transformed_data(
-                sheet,
-                stats_start_row,
-                stats_col,
-                fold_df,
-                f"Processed Data — {protein_name}",
+                sheet, stats_start_row, stats_col, fold_df, f"Processed Data — {protein_name}"
             )
 
-    book.app.status_bar = (
-        f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
-    )
+    book.app.status_bar = f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
 
 
 def _run_qpcr_labeled(
-    book: xw.Book,
+    book: Any,
     sheet,
     handler: DataHandler,
     labels: pd.Series,
@@ -687,7 +565,7 @@ def _run_qpcr_labeled(
     """qPCR labeled reference mode: produce one figure per target gene."""
     from .presets.qpcr import QPCRPreset
 
-    preset = QPCRPreset()
+    preset = cast(Any, QPCRPreset())
     options = _build_preset_options(config)
     target_dfs = preset.transform_labeled(labels, df_numeric, options)
 
@@ -707,15 +585,15 @@ def _run_qpcr_labeled(
         handler.validate(fold_df)
 
         engine = StatsEngine(config)
-        stats_result = engine.analyze(stats_input_frame(fold_df, preset))
+        stats_result = engine.analyze(
+            _application_analysis.stats_input_frame(fold_df, config)
+        )
 
         # Set title to gene name
-        plot_config = PrismConfig(
-            **{
-                f.name: getattr(config, f.name)
-                for f in config.__dataclass_fields__.values()
-            }
-        )
+        plot_config = PrismConfig(**{
+            f.name: getattr(config, f.name)
+            for f in config.__dataclass_fields__.values()
+        })
         plot_config.title = gene_name
 
         plotter = PlotEngine(plot_config)
@@ -732,7 +610,6 @@ def _run_qpcr_labeled(
 
         if config.export_path:
             from pathlib import Path
-
             p = Path(config.export_path)
             export_path = str(p.with_stem(f"{p.stem}_{gene_name}"))
             export_figure(fig, export_path, config.export_dpi)
@@ -742,7 +619,9 @@ def _run_qpcr_labeled(
 
         # Stats table
         if config.output_stats:
-            stats_df = qpcr_stats_table(stats_result.to_dataframe())
+            stats_df = _application_analysis.qpcr_stats_table(
+                stats_result.to_dataframe()
+            )
             dest = sheet.range((stats_start_row, stats_col))
             dest.value = [[gene_name]]
             stats_start_row += 1
@@ -757,15 +636,13 @@ def _run_qpcr_labeled(
                 stats_start_row,
                 stats_col,
                 fold_df,
-                f"Processed Data — {gene_name}{PROCESSED_DATA_SUFFIX}",
+                f"Processed Data — {gene_name}{_application_analysis.PROCESSED_DATA_SUFFIX}",
             )
 
-    book.app.status_bar = (
-        f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
-    )
+    book.app.status_bar = f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
 
 
-def _read_selection_auto(handler: DataHandler, book: xw.Book):
+def _read_selection_auto(handler: DataHandler, book: Any):
     """Read Excel selection, auto-detecting a label column in the first column.
 
     Returns (wb_labels, df_wide) where wb_labels is a Series of string labels
@@ -792,7 +669,7 @@ def _read_selection_auto(handler: DataHandler, book: xw.Book):
     return None, handler.clean(raw)
 
 
-def _run_impl(book: xw.Book) -> None:
+def _run_impl(book: Any) -> None:
     sheet = book.selection.sheet
 
     # 1. Read data (auto-detect label column)
@@ -824,68 +701,20 @@ def _run_impl(book: xw.Book) -> None:
         _run_wb_labeled(book, sheet, handler, wb_labels, df_wide, config)
         return
 
-    # 2b. Apply experiment preset transform
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    # 3. Statistics
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
-
-    # 4. Plot
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
-    # 5. Export figure to file if requested
-    if config.export_path:
-        export_figure(fig, config.export_path, config.export_dpi)
-
-    # 6. Write stats summary table below the data selection
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        if config.experiment_preset is ExperimentPreset.QPCR:
-            stats_df = qpcr_stats_table(stats_df)
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-        # Write IC50 results if CCK-8 preset was used
-        preset = get_preset(config.experiment_preset)
-        if (
-            isinstance(preset, CCK8Preset)
-            and preset.last_result
-            and preset.last_result.ic50 is not None
-        ):
-            ic50_dest = sheet.range((next_row, start_col))
-            res = preset.last_result
-            ic50_data = [
-                ["IC50", res.ic50],
-                ["R²", res.r_squared],
-            ]
-            if res.ic50_95ci:
-                ic50_data.append(
-                    ["IC50 95% CI", f"{res.ic50_95ci[0]:.4g} – {res.ic50_95ci[1]:.4g}"]
-                )
-            ic50_dest.value = ic50_data
-            next_row += len(ic50_data) + 2
-
-    # 7. Insert chart below stats table
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=False,
     )
-
-    # Show decision path in status bar
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
-def _run_quick_impl(book: xw.Book) -> None:
+def _run_quick_impl(book: Any) -> None:
     sheet = book.selection.sheet
 
     config = PrismConfig.load()
@@ -894,38 +723,17 @@ def _run_quick_impl(book: xw.Book) -> None:
     _labels, df_wide = _read_selection_auto(handler, book)
     handler.validate(df_wide)
 
-    # Apply experiment preset transform
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
-
-    engine = StatsEngine(config)
-    stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
-
-    plotter = PlotEngine(config)
-    fig = plotter.plot(df_wide, stats_result)
-
+    result = _application_analysis.analyze_dataframe(df_wide, config)
     sel = book.selection
-    start_col = sel.column
-    next_row = sel.row + sel.rows.count + 2
-
-    # Write stats summary table below the data selection
-    if config.output_stats:
-        stats_df = stats_result.to_dataframe()
-        if config.experiment_preset is ExperimentPreset.QPCR:
-            stats_df = qpcr_stats_table(stats_df)
-        dest = sheet.range((next_row, start_col))
-        dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
-        next_row += len(stats_df) + 2
-
-    # Insert chart below stats table
-    sheet.pictures.add(
-        fig,
-        name=_next_plot_name(sheet),
-        left=sheet.range((next_row, start_col)).left,
-        top=sheet.range((next_row, start_col)).top,
+    _application_analysis.build_analysis_writeback_plan(
+        result,
+        config,
+        start_row=_selection_output_row(sel, len(df_wide)),
+        start_column=sel.column,
+        image_name=_next_plot_name(sheet),
+        include_processed_data=False,
     )
-
-    book.app.status_bar = f"XSTARS: {stats_result.decision_path}"
+    _execute_analysis_writeback(book, sheet, result)
 
 
 def run_export() -> None:
@@ -939,14 +747,12 @@ def run_export() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _get_selected_shapes(book: xw.Book) -> list:
+def _get_selected_shapes(book: Any) -> list:
     """Return COM Shape objects the user has selected, or XSTARS charts as fallback."""
-    try:
+    with suppress(Exception):
         sel = book.app.api.Selection
-        type_name = sel.ShapeRange.Item(1).Type  # will succeed if a shape is selected
+        _ = sel.ShapeRange.Item(1).Type  # succeeds only when a shape is selected
         return [sel.ShapeRange.Item(i) for i in range(1, sel.ShapeRange.Count + 1)]
-    except Exception:
-        pass
     # Fallback: find XSTARS charts on the active sheet
     sheet = book.selection.sheet
     pics = [p for p in sheet.pictures if p.name.startswith("XSTARS_Plot")]
@@ -981,9 +787,10 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
         shape.CopyPicture(1, 2)
         time.sleep(0.3)  # let clipboard settle
 
-        img = ImageGrab.grabclipboard()
-        if img is None:
+        clipboard_image = ImageGrab.grabclipboard()
+        if clipboard_image is None or isinstance(clipboard_image, list):
             raise RuntimeError("Could not capture image from clipboard.")
+        img = cast(Any, clipboard_image)
 
         ext = save_path.rsplit(".", 1)[-1].lower()
         if ext == "pdf":
@@ -1006,13 +813,10 @@ def _export_shape_highres(shape, save_path: str, dpi: int) -> None:
 
 def _show_export_dialog() -> tuple[str, int] | None:
     """Show export dialog with format, DPI, and path options. Returns (path, dpi) or None."""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    if HAS_TTKB:
-        import ttkbootstrap as ttkb
-    else:
-        ttkb = None
+    tk = import_module("tkinter")
+    filedialog = import_module("tkinter.filedialog")
+    tk_ttk = import_module("tkinter.ttk")
+    ttkb = _ttkb if HAS_TTKB else None
 
     _FORMAT_MAP = {
         "PNG image": ("png", ".png"),
@@ -1025,43 +829,33 @@ def _show_export_dialog() -> tuple[str, int] | None:
 
     result = {}
 
-    root = (
-        ttkb.Window(title="Export Image", themename="cosmo", size=(460, 240))
-        if ttkb
-        else tk.Tk()
-    )
+    root = ttkb.Window(title="Export Image", themename="cosmo", size=(460, 240)) if ttkb else tk.Tk()
     if not ttkb:
         root.title("Export Image")
         root.geometry("460x240")
     root.resizable(False, False)
     root.attributes("-topmost", True)
 
-    frame = ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15)
+    frame = (ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15))
     frame.pack(fill="both", expand=True)
 
-    Label = ttkb.Label if ttkb else tk.Label
-    Entry = ttkb.Entry if ttkb else tk.Entry
-    Button = ttkb.Button if ttkb else tk.Button
-    Combo = ttkb.Combobox if ttkb else tk.ttk.Combobox
+    Label: Any = ttkb.Label if ttkb else tk.Label
+    Entry: Any = ttkb.Entry if ttkb else tk.Entry
+    Button: Any = ttkb.Button if ttkb else tk.Button
+    Combo: Any = ttkb.Combobox if ttkb else tk_ttk.Combobox
 
     # Format
     Label(frame, text="Format:").grid(row=0, column=0, sticky="w", pady=(0, 8))
     fmt_var = tk.StringVar(value="PNG image")
-    fmt_combo = Combo(
-        frame,
-        textvariable=fmt_var,
-        values=list(_FORMAT_MAP.keys()),
-        state="readonly",
-        width=20,
-    )
+    fmt_combo = Combo(frame, textvariable=fmt_var, values=list(_FORMAT_MAP.keys()),
+                      state="readonly", width=20)
     fmt_combo.grid(row=0, column=1, columnspan=2, sticky="w", pady=(0, 8), padx=(8, 0))
 
     # DPI
     Label(frame, text="DPI:").grid(row=1, column=0, sticky="w", pady=(0, 8))
     dpi_var = tk.StringVar(value="300")
-    dpi_combo = Combo(
-        frame, textvariable=dpi_var, values=_DPI_OPTIONS, state="readonly", width=20
-    )
+    dpi_combo = Combo(frame, textvariable=dpi_var, values=_DPI_OPTIONS,
+                      state="readonly", width=20)
     dpi_combo.grid(row=1, column=1, columnspan=2, sticky="w", pady=(0, 8), padx=(8, 0))
 
     # Output path
@@ -1084,8 +878,7 @@ def _show_export_dialog() -> tuple[str, int] | None:
 
     browse_kw = {"bootstyle": "secondary"} if ttkb else {}
     Button(frame, text="Browse...", command=browse, **browse_kw).grid(
-        row=2, column=2, sticky="w", pady=(0, 8), padx=(4, 0)
-    )
+        row=2, column=2, sticky="w", pady=(0, 8), padx=(4, 0))
 
     # Auto-update extension when format changes
     def on_fmt_change(_event=None):
@@ -1093,7 +886,6 @@ def _show_export_dialog() -> tuple[str, int] | None:
         if cur:
             _, ext = _FORMAT_MAP.get(fmt_var.get(), ("png", ".png"))
             from pathlib import Path
-
             path_var.set(str(Path(cur).with_suffix(ext)))
 
     fmt_combo.bind("<<ComboboxSelected>>", on_fmt_change)
@@ -1113,23 +905,15 @@ def _show_export_dialog() -> tuple[str, int] | None:
     def on_cancel():
         root.destroy()
 
-    btn_frame = ttkb.Frame(frame) if ttkb else tk.Frame(frame)
+    btn_frame = (ttkb.Frame(frame) if ttkb else tk.Frame(frame))
     btn_frame.grid(row=3, column=0, columnspan=3, sticky="e", pady=(12, 0))
 
     if ttkb:
-        ttkb.Button(
-            btn_frame, text="Export", bootstyle="primary", command=on_export, width=10
-        ).pack(side="right", padx=(8, 0))
-        ttkb.Button(
-            btn_frame, text="Cancel", bootstyle="secondary", command=on_cancel, width=10
-        ).pack(side="right")
+        ttkb.Button(btn_frame, text="Export", bootstyle="primary", command=on_export, width=10).pack(side="right", padx=(8, 0))
+        ttkb.Button(btn_frame, text="Cancel", bootstyle="secondary", command=on_cancel, width=10).pack(side="right")
     else:
-        tk.Button(btn_frame, text="Export", command=on_export, width=10).pack(
-            side="right", padx=(8, 0)
-        )
-        tk.Button(btn_frame, text="Cancel", command=on_cancel, width=10).pack(
-            side="right"
-        )
+        tk.Button(btn_frame, text="Export", command=on_export, width=10).pack(side="right", padx=(8, 0))
+        tk.Button(btn_frame, text="Cancel", command=on_cancel, width=10).pack(side="right")
 
     # Center on screen
     root.update_idletasks()
@@ -1145,7 +929,7 @@ def _show_export_dialog() -> tuple[str, int] | None:
     return None
 
 
-def _run_export_impl(book: xw.Book) -> None:
+def _run_export_impl(book: Any) -> None:
     """Export selected picture(s) at high resolution."""
     shapes = _get_selected_shapes(book)
     if not shapes:
@@ -1179,7 +963,6 @@ def run_reset_settings() -> None:
     book = xw.Book.caller()
     try:
         from .config import DEFAULT_SETTINGS_PATH
-
         if DEFAULT_SETTINGS_PATH.exists():
             DEFAULT_SETTINGS_PATH.unlink()
         try:
@@ -1199,7 +982,6 @@ def run_set_theme(theme_name: str) -> None:
     book = xw.Book.caller()
     try:
         from .config import JournalPreset
-
         preset = JournalPreset(theme_name)
         config = PrismConfig.load()
         config.journal_preset = preset
@@ -1224,7 +1006,6 @@ def run_set_base_theme(theme_name: str) -> None:
     book = xw.Book.caller()
     try:
         from .config import BaseTheme
-
         theme = BaseTheme(theme_name)
         config = PrismConfig.load()
         config.base_theme = theme
@@ -1240,7 +1021,6 @@ def run_set_palette(palette_name: str) -> None:
     try:
         from .config import PalettePreset
         from .styles import get_palette
-
         preset = PalettePreset(palette_name)
         config = PrismConfig.load()
         config.palette_preset = preset
@@ -1258,7 +1038,6 @@ def run_set_journal_palette(palette_name: str) -> None:
     try:
         from .config import JournalPalette
         from .styles import get_palette
-
         jp = JournalPalette(palette_name)
         config = PrismConfig.load()
         config.journal_palette = jp
@@ -1274,109 +1053,35 @@ def run_set_journal_palette(palette_name: str) -> None:
 # These are called by RunFrozenPython which can only pass simple string args.
 # Each wraps a parameterized setter with a fixed argument.
 
+def run_set_base_theme_classic() -> None: run_set_base_theme("classic")
+def run_set_base_theme_bw() -> None: run_set_base_theme("bw")
+def run_set_base_theme_minimal() -> None: run_set_base_theme("minimal")
+def run_set_base_theme_dark() -> None: run_set_base_theme("dark")
 
-def run_set_base_theme_classic() -> None:
-    run_set_base_theme("classic")
+def run_set_theme_none() -> None: run_set_theme("none")
+def run_set_theme_nature() -> None: run_set_theme("nature")
+def run_set_theme_science() -> None: run_set_theme("science")
+def run_set_theme_cell() -> None: run_set_theme("cell")
+def run_set_theme_lancet() -> None: run_set_theme("lancet")
+def run_set_theme_nejm() -> None: run_set_theme("nejm")
+def run_set_theme_jama() -> None: run_set_theme("jama")
+def run_set_theme_bmj() -> None: run_set_theme("bmj")
 
+def run_set_journal_palette_default() -> None: run_set_journal_palette("default")
+def run_set_journal_palette_nature() -> None: run_set_journal_palette("nature")
+def run_set_journal_palette_science() -> None: run_set_journal_palette("science")
+def run_set_journal_palette_cell() -> None: run_set_journal_palette("cell")
+def run_set_journal_palette_lancet() -> None: run_set_journal_palette("lancet")
+def run_set_journal_palette_nejm() -> None: run_set_journal_palette("nejm")
+def run_set_journal_palette_jama() -> None: run_set_journal_palette("jama")
+def run_set_journal_palette_bmj() -> None: run_set_journal_palette("bmj")
 
-def run_set_base_theme_bw() -> None:
-    run_set_base_theme("bw")
-
-
-def run_set_base_theme_minimal() -> None:
-    run_set_base_theme("minimal")
-
-
-def run_set_base_theme_dark() -> None:
-    run_set_base_theme("dark")
-
-
-def run_set_theme_none() -> None:
-    run_set_theme("none")
-
-
-def run_set_theme_nature() -> None:
-    run_set_theme("nature")
-
-
-def run_set_theme_science() -> None:
-    run_set_theme("science")
-
-
-def run_set_theme_cell() -> None:
-    run_set_theme("cell")
-
-
-def run_set_theme_lancet() -> None:
-    run_set_theme("lancet")
-
-
-def run_set_theme_nejm() -> None:
-    run_set_theme("nejm")
-
-
-def run_set_theme_jama() -> None:
-    run_set_theme("jama")
-
-
-def run_set_theme_bmj() -> None:
-    run_set_theme("bmj")
-
-
-def run_set_journal_palette_default() -> None:
-    run_set_journal_palette("default")
-
-
-def run_set_journal_palette_nature() -> None:
-    run_set_journal_palette("nature")
-
-
-def run_set_journal_palette_science() -> None:
-    run_set_journal_palette("science")
-
-
-def run_set_journal_palette_cell() -> None:
-    run_set_journal_palette("cell")
-
-
-def run_set_journal_palette_lancet() -> None:
-    run_set_journal_palette("lancet")
-
-
-def run_set_journal_palette_nejm() -> None:
-    run_set_journal_palette("nejm")
-
-
-def run_set_journal_palette_jama() -> None:
-    run_set_journal_palette("jama")
-
-
-def run_set_journal_palette_bmj() -> None:
-    run_set_journal_palette("bmj")
-
-
-def run_set_palette_default() -> None:
-    run_set_palette("default")
-
-
-def run_set_palette_colorblind() -> None:
-    run_set_palette("colorblind")
-
-
-def run_set_palette_vibrant() -> None:
-    run_set_palette("vibrant")
-
-
-def run_set_palette_pastel() -> None:
-    run_set_palette("pastel")
-
-
-def run_set_palette_deep() -> None:
-    run_set_palette("deep")
-
-
-def run_set_palette_muted() -> None:
-    run_set_palette("muted")
+def run_set_palette_default() -> None: run_set_palette("default")
+def run_set_palette_colorblind() -> None: run_set_palette("colorblind")
+def run_set_palette_vibrant() -> None: run_set_palette("vibrant")
+def run_set_palette_pastel() -> None: run_set_palette("pastel")
+def run_set_palette_deep() -> None: run_set_palette("deep")
+def run_set_palette_muted() -> None: run_set_palette("muted")
 
 
 def run_about() -> None:
@@ -1413,7 +1118,7 @@ def run_standard_curve() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_standard_curve_impl(book: xw.Book) -> None:
+def _run_standard_curve_impl(book: Any) -> None:
     """Read wide-format standard data, fit curve, optionally back-calculate samples.
 
     Input: wide DataFrame where column headers are concentration values and
@@ -1487,25 +1192,21 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
         if sample_df is not None:
             result_df = sample_df.copy()
             for col in result_df.columns:
-                od_vals = pd.to_numeric(result_df[col], errors="coerce").to_numpy()
-                result_df[col] = back_calculate(fit, od_vals)
+                od_series = pd.Series(pd.to_numeric(result_df[col], errors="coerce"))
+                result_df[col] = back_calculate(fit, od_series.to_numpy())
 
             out_row = _write_transformed_data(
-                sheet,
-                out_row,
-                out_col,
-                result_df,
+                sheet, out_row, out_col, result_df,
                 "Back-Calculated Concentrations",
             )
 
     # 3. Insert standard curve chart
     import matplotlib
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     from .styles import get_prism_context
 
+    matplotlib.use("Agg")
+    plt = import_module("matplotlib.pyplot")
     cfg = PrismConfig.load()
     with get_prism_context(cfg.journal_preset, cfg.base_theme):
         fig, ax = plt.subplots(figsize=(4.5, 3.5), dpi=cfg.dpi)
@@ -1521,9 +1222,8 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
         else:
             x_fit = np.geomspace(cmin_pos * 0.5, cmax_pos * 1.5, 200)
         y_fit = fit.predict(x_fit)
-        ax.plot(
-            x_fit, y_fit, "-", color=cfg.palette[1], linewidth=1.5, label=fit.method
-        )
+        ax.plot(x_fit, y_fit, "-", color=cfg.palette[1], linewidth=1.5,
+                label=fit.method)
 
         use_log = len(conc_pos) >= 2 and cmax_pos / cmin_pos > 10
         if use_log:
@@ -1550,7 +1250,7 @@ def _run_standard_curve_impl(book: xw.Book) -> None:
     book.app.status_bar = f"XSTARS: Standard curve fitted ({fit.method}{r2_str})"
 
 
-def _select_sample_data(book: xw.Book, sheet) -> pd.DataFrame | None:
+def _select_sample_data(book: Any, sheet) -> pd.DataFrame | None:
     """Prompt user to select a sample OD region in Excel via InputBox.
 
     Returns a wide DataFrame (columns = sample group names, rows = OD replicates),
@@ -1592,7 +1292,7 @@ def run_transform_only() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
-def _run_transform_only_impl(book: xw.Book) -> None:
+def _run_transform_only_impl(book: Any) -> None:
     """Apply preset transform and write processed data only (no stats/plot)."""
     sheet = book.selection.sheet
     handler = DataHandler()
@@ -1630,14 +1330,12 @@ def _run_transform_only_impl(book: xw.Book) -> None:
     ):
         if preset_type == ExperimentPreset.WB:
             from .presets.wb import WBPreset
-
             preset_cls = WBPreset
         else:
             from .presets.qpcr import QPCRPreset
-
             preset_cls = QPCRPreset
 
-        preset = preset_cls()
+        preset = cast(Any, preset_cls())
         options = _build_preset_options(config)
         target_dfs = preset.transform_labeled(wb_labels, df_wide, options)
 
@@ -1645,10 +1343,12 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         for target_name, fold_df in target_dfs:
             if include_stats:
                 engine = StatsEngine(config)
-                stats_result = engine.analyze(stats_input_frame(fold_df, preset))
+                stats_result = engine.analyze(
+                    _application_analysis.stats_input_frame(fold_df, config)
+                )
                 stats_df = stats_result.to_dataframe()
                 if preset_type is ExperimentPreset.QPCR:
-                    stats_df = qpcr_stats_table(stats_df)
+                    stats_df = _application_analysis.qpcr_stats_table(stats_df)
                 dest = sheet.range((current_row, start_col))
                 dest.value = [[f"Statistics — {target_name}"]]
                 current_row += 1
@@ -1657,7 +1357,7 @@ def _run_transform_only_impl(book: xw.Book) -> None:
                 current_row += len(stats_df) + 2
             title = f"Processed Data — {target_name}"
             if preset_type is ExperimentPreset.QPCR:
-                title += PROCESSED_DATA_SUFFIX
+                title += _application_analysis.PROCESSED_DATA_SUFFIX
             current_row = _write_transformed_data(
                 sheet, current_row, start_col, fold_df, title
             )
@@ -1666,22 +1366,23 @@ def _run_transform_only_impl(book: xw.Book) -> None:
         return
 
     # Single-target mode
-    df_wide = _apply_preset(df_wide, config)
-    handler.validate(df_wide)
+    df_wide, _preset = _application_analysis.transform_dataframe(df_wide, config)
 
     current_row = start_row
     if include_stats:
         engine = StatsEngine(config)
-        stats_result = engine.analyze(stats_input_frame_for_config(df_wide, config))
+        stats_result = engine.analyze(
+            _application_analysis.stats_input_frame(df_wide, config)
+        )
         stats_df = stats_result.to_dataframe()
-        if preset_type is ExperimentPreset.QPCR:
-            stats_df = qpcr_stats_table(stats_df)
+        if config.experiment_preset is ExperimentPreset.QPCR:
+            stats_df = _application_analysis.qpcr_stats_table(stats_df)
         dest = sheet.range((current_row, start_col))
         dest.value = [stats_df.columns.tolist()] + stats_df.values.tolist()
         current_row += len(stats_df) + 2
 
     title = "Processed Data"
-    if preset_type is ExperimentPreset.QPCR:
-        title += PROCESSED_DATA_SUFFIX
+    if config.experiment_preset is ExperimentPreset.QPCR:
+        title += _application_analysis.PROCESSED_DATA_SUFFIX
     _write_transformed_data(sheet, current_row, start_col, df_wide, title)
     book.app.status_bar = "XSTARS: Transform only — data written"

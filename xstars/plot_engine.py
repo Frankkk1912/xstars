@@ -222,6 +222,15 @@ class PlotEngine:
         means = [df_wide[g].mean() for g in groups]
         errors = [self._error_value(df_wide[g].dropna()) for g in groups]
 
+        if self._is_qpcr():
+            geo_means, lower_err, upper_err = [], [], []
+            for group in groups:
+                geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
+                geo_means.append(geo)
+                lower_err.append(lower)
+                upper_err.append(upper)
+            means, errors = geo_means, [lower_err, upper_err]
+
         ax.errorbar(
             x_positions,
             means,

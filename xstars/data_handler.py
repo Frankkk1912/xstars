@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import Any, Protocol
 
-import numpy as np
 import pandas as pd
 
-if TYPE_CHECKING:
-    import xlwings as xw
-
 from .config import PrismConfig
+
+
+class SelectionPayloadLike(Protocol):
+    """Structural type accepted by the host-independent constructor."""
+
+    values: list[list[Any]]
 
 
 class DataHandler:
@@ -29,10 +32,10 @@ class DataHandler:
         Columns = group names (from the first row of the selection).
         Rows = replicate values.
         """
-        import xlwings as xw
+        xw = import_module("xlwings")
 
         book = xw.Book.caller()
-        sel: xw.Range = book.selection
+        sel = book.selection
         self._selection_ref = sel  # cache for insertion later
 
         raw = sel.options(pd.DataFrame, header=1, index=False).value
@@ -47,10 +50,10 @@ class DataHandler:
         (labels, numeric_df) where labels is a Series of strings and
         numeric_df is a wide-format DataFrame with group columns.
         """
-        import xlwings as xw
+        xw = import_module("xlwings")
 
         book = xw.Book.caller()
-        sel: xw.Range = book.selection
+        sel = book.selection
         self._selection_ref = sel
 
         raw = sel.options(pd.DataFrame, header=1, index=False).value
@@ -72,14 +75,14 @@ class DataHandler:
 
         return labels, numeric_df
 
-    def read_from_range(self, sheet: "xw.Sheet", address: str) -> pd.DataFrame:
+    def read_from_range(self, sheet: Any, address: str) -> pd.DataFrame:
         """Read a specific range (e.g. ``"A1:D10"``) as wide DataFrame."""
         rng = sheet.range(address)
         raw = rng.options(pd.DataFrame, header=1, index=False).value
         self._selection_ref = rng
         return self.clean(raw)
 
-    def get_insertion_cell(self, sheet: "xw.Sheet") -> str:
+    def get_insertion_cell(self, sheet: Any) -> str:
         """Return the cell address where the chart should be placed.
 
         Default: *insert_offset_cols* columns to the right of the selection.
@@ -88,6 +91,33 @@ class DataHandler:
         top_row = sel.row
         right_col = sel.column + sel.columns.count + self.config.insert_offset_cols
         return sheet.range(top_row, right_col).address
+
+    # ------------------------------------------------------------------
+    # Host-independent construction
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_values(cls, values: list[list[object]]) -> pd.DataFrame:
+        """Build a clean wide DataFrame from a rectangular 2D value matrix.
+
+        The first row contains column headers, matching Excel/WPS Selection
+        serialization. Contract validation is intentionally performed before
+        this method at host boundaries; this constructor remains usable by the
+        in-process Excel adapter and unit tests.
+        """
+        if not values or not values[0]:
+            raise ValueError("Selection values must include a header row.")
+        width = len(values[0])
+        if any(len(row) != width for row in values):
+            raise ValueError("Selection values must be rectangular.")
+        headers = [str(value).strip() for value in values[0]]
+        raw = pd.DataFrame(values[1:], columns=headers)
+        return cls.clean(raw)
+
+    @classmethod
+    def from_selection_payload(cls, payload: SelectionPayloadLike) -> pd.DataFrame:
+        """Build a clean DataFrame from a validated SelectionPayload DTO."""
+        return cls.from_values(payload.values)
 
     # ------------------------------------------------------------------
     # Data cleaning & transformation

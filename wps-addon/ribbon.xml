@@ -1,0 +1,58 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
+    <ribbon startFromScratch="false">
+        <tabs>
+            <tab id="xstarsTab" label="XSTARS">
+                <group id="xstarsAnalysisGroup" label="分析">
+                    <button id="xstarsRun" label="Run" screentip="配置并运行 XSTARS 分析" onAction="OnAction" getImage="GetImage" visible="true" size="large"/>
+                    <button id="xstarsQuickRun" label="Quick Run" screentip="使用当前设置运行 XSTARS 分析" onAction="OnAction" getImage="GetImage" visible="true" size="large"/>
+                    <button id="xstarsWB" label="WB" onAction="OnAction" getImage="GetImage"/>
+                    <button id="xstarsQPCR" label="qPCR" onAction="OnAction" getImage="GetImage"/>
+                    <button id="xstarsCCK8" label="CCK-8" onAction="OnAction" getImage="GetImage"/>
+                    <button id="xstarsELISA" label="ELISA" onAction="OnAction" getImage="GetImage"/>
+                    <button id="xstarsTransform" label="Transform" onAction="OnAction" getImage="GetImage"/>
+                    <button id="xstarsStandardCurve" label="Standard Curve" onAction="OnAction" getImage="GetImage"/>
+                </group>
+                <group id="xstarsExportGroup" label="导出">
+                    <button id="xstarsExport" label="High-Res Export" screentip="重渲染 XSTARS 图或导出选中图片" onAction="OnAction" getImage="GetImage" size="large"/>
+                </group>
+                <group id="xstarsSettingsGroup" label="主题与设置">
+                    <menu id="xstarsBaseThemeMenu" label="Base Theme">
+                        <button id="xstarsBaseClassic" label="Classic" onAction="OnAction"/>
+                        <button id="xstarsBaseBW" label="B/W" onAction="OnAction"/>
+                        <button id="xstarsBaseMinimal" label="Minimal" onAction="OnAction"/>
+                        <button id="xstarsBaseDark" label="Dark" onAction="OnAction"/>
+                    </menu>
+                    <menu id="xstarsJournalThemeMenu" label="Journal Theme">
+                        <button id="xstarsThemeNone" label="Default" onAction="OnAction"/>
+                        <button id="xstarsThemeNature" label="Nature" onAction="OnAction"/>
+                        <button id="xstarsThemeScience" label="Science" onAction="OnAction"/>
+                        <button id="xstarsThemeCell" label="Cell" onAction="OnAction"/>
+                        <button id="xstarsThemeLancet" label="Lancet" onAction="OnAction"/>
+                        <button id="xstarsThemeNEJM" label="NEJM" onAction="OnAction"/>
+                        <button id="xstarsThemeJAMA" label="JAMA" onAction="OnAction"/>
+                        <button id="xstarsThemeBMJ" label="BMJ" onAction="OnAction"/>
+                    </menu>
+                    <menu id="xstarsJournalPaletteMenu" label="Journal Palette">
+                        <button id="xstarsJournalPaletteDefault" label="Default" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteNature" label="Nature" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteScience" label="Science" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteCell" label="Cell" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteLancet" label="Lancet" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteNEJM" label="NEJM" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteJAMA" label="JAMA" onAction="OnAction"/>
+                        <button id="xstarsJournalPaletteBMJ" label="BMJ" onAction="OnAction"/>
+                    </menu>
+                    <menu id="xstarsColorStyleMenu" label="Color Style">
+                        <button id="xstarsPaletteDefault" label="Original" onAction="OnAction"/>
+                        <button id="xstarsPaletteColorblind" label="Colorblind" onAction="OnAction"/>
+                        <button id="xstarsPaletteVibrant" label="Vibrant" onAction="OnAction"/>
+                        <button id="xstarsPalettePastel" label="Pastel" onAction="OnAction"/>
+                        <button id="xstarsPaletteDeep" label="Deep" onAction="OnAction"/>
+                        <button id="xstarsPaletteMuted" label="Muted" onAction="OnAction"/>
+                    </menu>
+                    <button id="xstarsResetSettings" label="Reset Settings" onAction="OnAction"/>
+                </group>
+            </tab>
+        </tabs>
+    </ribbon>
+</customUI>
