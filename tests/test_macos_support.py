@@ -79,9 +79,7 @@ def _darwin_book(tmp_path, pictures=(), selection=None):
         path=str(tmp_path),
         fullname=str(tmp_path / "experiment.xlsx"),
         selection=(
-            selection
-            if selection is not None
-            else SimpleNamespace(sheet=sheet)
+            selection if selection is not None else SimpleNamespace(sheet=sheet)
         ),
         sheets=SimpleNamespace(active=sheet),
         app=DarwinApp(),
@@ -195,6 +193,21 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
         main._workbook_artifact_identifier(
             SimpleNamespace(fullname="Book1", name="Book1")
         )
+
+
+def test_ensure_export_extension_appends_when_missing(tmp_path):
+    """DC2 finding B-4: a bare export path surfaced a cryptic
+    "Format '<random-token>' is not supported" from the temp-file suffix."""
+    base = tmp_path / "e07"
+    assert main._ensure_export_extension(str(base), ".pdf") == str(base) + ".pdf"
+    assert (
+        main._ensure_export_extension(str(base) + ".pdf", ".pdf")
+        == str(base) + ".pdf"
+    )
+    assert (
+        main._ensure_export_extension(str(base) + ".png", ".pdf")
+        == str(base) + ".png"
+    )
 
 
 def test_silenced_stderr_fd_restores_descriptor():

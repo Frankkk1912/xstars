@@ -1175,7 +1175,8 @@ def _show_export_dialog() -> tuple[str, int] | None:
                     parent=root,
                 )
                 return
-            result["path"] = path
+            _, ext = _FORMAT_MAP.get(fmt_var.get(), ("png", ".png"))
+            result["path"] = _ensure_export_extension(path, ext)
             result["dpi"] = dpi
         root.destroy()
 
@@ -1695,6 +1696,23 @@ def _silenced_stderr_fd():
         os.dup2(saved_fd, 2)
         os.close(saved_fd)
         os.close(devnull_fd)
+
+
+def _ensure_export_extension(path: str, ext: str) -> str:
+    """Append *ext* when the export path has no extension.
+
+    Matplotlib infers the output format from the final file suffix, and the
+    export writes through a NamedTemporaryFile next to the destination; a
+    bare path would surface a cryptic "Format '<random-token>' is not
+    supported" error instead (DC2 finding B-4). A path that already carries
+    an extension is left untouched: the suffix, not the dialog combo, is
+    what matplotlib obeys.
+    """
+    from pathlib import Path
+
+    if not Path(path).suffix:
+        return path + ext
+    return path
 
 
 def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
