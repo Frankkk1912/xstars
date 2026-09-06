@@ -421,6 +421,25 @@ def run_elisa() -> None:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
 
+def _entry_selection_or_error(book: Any):
+    """Return ``book.selection``, or ``None`` after a friendly error.
+
+    Clicking a picture in Excel for Mac makes ``book.selection`` return
+    ``None``; Run-style entries need a data range, so fail with a clear
+    message instead of an ``AttributeError`` traceback (DC2 finding B-3's
+    sibling case on the Run side, residual R1).
+    """
+    sel = getattr(book, "selection", None)
+    if sys.platform == "darwin" and sel is None:
+        _show_error(
+            book,
+            "Please select a data range on a worksheet first (a picture or "
+            "chart appears to be selected).",
+        )
+        return None
+    return sel
+
+
 def _run_elisa_impl(book: Any) -> None:
     """ELISA flow: read std curve selection → fit → dialog → select samples → back-calc → stats → plot."""
     import matplotlib
@@ -432,8 +451,10 @@ def _run_elisa_impl(book: Any) -> None:
     matplotlib.use("Agg")
     plt = import_module("matplotlib.pyplot")
 
-    sheet = book.selection.sheet
-    sel = book.selection
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
     handler = DataHandler()
 
     # 1. Read current selection as standard curve data (columns = concentrations)
@@ -578,7 +599,10 @@ def _has_label_column(df: pd.DataFrame) -> bool:
 
 def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
     """Like _run_impl but pre-selects the experiment preset."""
-    sheet = book.selection.sheet
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
     handler = DataHandler()
 
     # Auto-detect label column for all presets (strip non-numeric first column)
@@ -858,7 +882,10 @@ def _read_selection_auto(handler: DataHandler, book: Any):
 
 
 def _run_impl(book: Any) -> None:
-    sheet = book.selection.sheet
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
 
     # 1. Read data (auto-detect label column)
     handler = DataHandler()
@@ -904,7 +931,10 @@ def _run_impl(book: Any) -> None:
 
 
 def _run_quick_impl(book: Any) -> None:
-    sheet = book.selection.sheet
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
 
     config = PrismConfig.load()
 
@@ -1089,7 +1119,12 @@ def _show_export_dialog() -> tuple[str, int] | None:
         root.title("Export Image")
         root.geometry("460x240")
     root.resizable(False, False)
-    root.attributes("-topmost", True)
+    try:
+        root.attributes("-topmost", True)
+    except Exception as exc:
+        # Same graceful degradation as the error dialog (plan T2.4): the
+        # topmost hint is best-effort only.
+        _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
 
     frame = ttkb.Frame(root, padding=15) if ttkb else tk.Frame(root, padx=15, pady=15)
     frame.pack(fill="both", expand=True)
@@ -1208,7 +1243,11 @@ def _show_export_dialog() -> tuple[str, int] | None:
     y = (root.winfo_screenheight() - h) // 2
     root.geometry(f"+{x}+{y}")
 
-    root.mainloop()
+    # Silence fd 2 for the modal loop: the same Tcl/Tk keyboard noise that
+    # motivated the A1-dialog silencing (DC2 N-1) fires while the user types
+    # into this dialog, and xlwings would surface it as a run failure.
+    with _silenced_stderr_fd():
+        root.mainloop()
 
     if "path" in result:
         return result["path"], result["dpi"]
@@ -1564,8 +1603,10 @@ def _run_standard_curve_impl(book: Any) -> None:
     from .tools.standard_curve import back_calculate, wide_to_conc_od
     from .tools.standard_curve_dialog import StandardCurveDialog
 
-    sheet = book.selection.sheet
-    sel = book.selection
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
     handler = DataHandler()
 
     # Read wide-format selection (columns = concentration labels, rows = OD)
@@ -1825,7 +1866,10 @@ def run_transform_only() -> None:
 
 def _run_transform_only_impl(book: Any) -> None:
     """Apply preset transform and write processed data only (no stats/plot)."""
-    sheet = book.selection.sheet
+    sel = _entry_selection_or_error(book)
+    if sel is None:
+        return
+    sheet = sel.sheet
     handler = DataHandler()
     wb_labels, df_wide = _read_selection_auto(handler, book)
     handler.validate(df_wide)

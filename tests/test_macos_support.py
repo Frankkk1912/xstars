@@ -76,7 +76,8 @@ class DarwinApp:
 def _darwin_book(tmp_path, pictures=(), selection=None):
     sheet = SimpleNamespace(name="Analysis", pictures=list(pictures))
     book = SimpleNamespace(
-        path=str(tmp_path),
+        # NOTE: real xlwings.Book has no ``path`` attribute (DC2 B-1 root
+        # cause); the double intentionally does not fake one.
         fullname=str(tmp_path / "experiment.xlsx"),
         selection=(
             selection if selection is not None else SimpleNamespace(sheet=sheet)
@@ -195,6 +196,23 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
         )
 
 
+def test_darwin_run_entries_fail_friendly_when_picture_selected(tmp_path):
+    """DC2 residual R1: with a picture selected (Mac selection=None), the
+    Run-style entries must show a friendly error instead of an
+    AttributeError traceback."""
+    book, _ = _darwin_book(tmp_path, [])
+    book.selection = None  # a clicked picture makes Mac selection return None
+
+    for entry in (main._run_quick_impl, main._run_transform_only_impl):
+        with (
+            patch("xstars.main.sys.platform", "darwin"),
+            patch("xstars.main._show_error") as show_error,
+        ):
+            entry(book)
+        assert show_error.called, f"{entry.__name__} did not surface a friendly error"
+        assert "data range" in show_error.call_args.args[1]
+
+
 def test_ensure_export_extension_appends_when_missing(tmp_path):
     """DC2 finding B-4: a bare export path surfaced a cryptic
     "Format '<random-token>' is not supported" from the temp-file suffix."""
@@ -252,8 +270,8 @@ def test_get_insertion_cell_uses_tuple_range_for_macos_compatibility():
 def test_darwin_unsaved_workbook_export_reports_save_and_regenerate(tmp_path):
     picture = StrictPicture("XSTARS_Plot_1")
     book, _ = _darwin_book(tmp_path, [picture])
+    # Unsaved workbooks report a bare name with no directory component.
     book.fullname = "Book1"
-    book.path = ""
     book.name = "Book1"
 
     with (
@@ -865,9 +883,8 @@ def _generation_host(tmp_path, frame, events):
     selection.column = 1
     selection.rows.count = len(frame)
     selection.options.return_value.value = frame.copy()
-    book = MagicMock(fullname=str(tmp_path / "experiment.xlsx"), path=str(tmp_path))
+    book = MagicMock(fullname=str(tmp_path / "experiment.xlsx"))
     book.fullname = str(tmp_path / "experiment.xlsx")
-    book.path = str(tmp_path)
     book.selection = selection
     book.sheets.active = sheet
     return book, sheet, pictures

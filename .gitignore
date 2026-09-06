@@ -54,3 +54,7 @@ wps-addon/config.js
 wps-addon/wps-addon-publish/
 wps-addon/wps-addon-build/
 wps-addon/deploy/
+
+# Local review snapshots and lint caches
+.review-tmp/
+.ruff_cache/

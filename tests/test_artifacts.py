@@ -228,7 +228,8 @@ def test_registration_failure_is_best_effort_and_diagnostic(
     )
 
     book = MagicMock()
-    book.path = str(tmp_path)
+    # NOTE: real xlwings.Book has no ``path`` attribute (DC2 B-1); do not
+    # fake one here either.
     book.fullname = str(tmp_path / "example.xlsx")
     sheet = MagicMock()
     sheet.name = "Analysis"
