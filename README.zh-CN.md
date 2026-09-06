@@ -176,6 +176,10 @@ XSTARS 现已提供面向 **WPS 电子表格** 的独立发行版本：
 - **完全离线运行**：仅监听本地回环端口（`127.0.0.1`），无任何云端依赖或外网连接。
 - 完整安装与配置流程参见 [WPS 版安装与使用指南](docs/wps-installation.md)（使用 `XSTARS_WPS_Setup.exe`）。
 
+### macOS：🛠️ 开发者模式（需要 Python）
+
+macOS 仅支持开发者模式：在 Python 3.10+ 虚拟环境中安装 XSTARS 与 xlwings 桥接，并复用现有 RunPython VBA 回调。本项目不提供独立 `.app`，也不支持 WPS for Mac。完整安装、权限与已验证的 Ribbon 打包步骤见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)。
+
 ### 方式 C：🛠️ 开发者安装（需要 Python）
 
 ```bash
@@ -229,9 +233,8 @@ xlwings addin install
 
 ## 📌 系统要求
 
-- 🪟 Windows + Microsoft Excel
-- **安装包模式**：无其他要求 —— `.exe` 已打包所有依赖
-- **开发者模式**：Python ≥ 3.10
+- 🪟 **Windows**：Microsoft Excel；安装包模式无其他要求（`.exe` 已打包所有依赖），开发者模式需 Python ≥ 3.10
+- 🍎 **macOS**：Microsoft Excel for Mac 2016+ 并按开发者模式安装 —— Python ≥ 3.10 虚拟环境 + xlwings 桥接与 Ribbon 加载项，详见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)（无独立 `.app`，不支持 WPS for Mac）
 
 ---
 

@@ -177,6 +177,10 @@ XSTARS provides a standalone distribution for **Kingsoft WPS Spreadsheet**:
 - **Offline & Secure**: Runs entirely on local loopback (`127.0.0.1`) without external network dependencies.
 - See the [WPS Installation & User Guide](docs/wps-installation.md) for full setup instructions (`XSTARS_WPS_Setup.exe`).
 
+### macOS: 🛠️ Developer Mode (Python required)
+
+macOS support is developer mode only: install XSTARS and the xlwings bridge in a Python 3.10+ virtual environment, then reuse the existing RunPython VBA callbacks. It does not provide a standalone `.app` and does not support WPS for Mac. Full setup, permissions, and verified Ribbon packaging steps: [docs/macos-developer-setup.md](docs/macos-developer-setup.md).
+
 ### Option C: 🛠️ Developer Setup (Python required)
 
 ```bash
@@ -230,9 +234,8 @@ Settings persist across sessions in `~/.xstars/settings.json`. 💾
 
 ## 📌 Requirements
 
-- 🪟 Windows with Microsoft Excel
-- **Installer mode**: Nothing else — the `.exe` bundles everything
-- **Dev mode**: Python ≥ 3.10
+- 🪟 **Windows**: Microsoft Excel; Installer mode needs nothing else (the `.exe` bundles everything), Dev mode needs Python ≥ 3.10
+- 🍎 **macOS**: Microsoft Excel for Mac 2016+ with the developer-mode setup — Python ≥ 3.10 virtual environment plus the xlwings bridge and ribbon add-in; see [docs/macos-developer-setup.md](docs/macos-developer-setup.md) (no standalone `.app`, no WPS for Mac)
 
 ---
 

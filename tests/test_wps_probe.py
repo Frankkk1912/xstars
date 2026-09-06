@@ -152,6 +152,11 @@ def service_post(server, path, payload):
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="ELISA probe round-trip opens a Tk mainloop that cannot be interrupted "
+    "headlessly on macOS (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_elisa_selection_echoes_matrix_statistics(gate0_service):
     status, _, body = service_post(
         gate0_service,
@@ -203,6 +208,11 @@ def test_elisa_selection_echoes_matrix_statistics(gate0_service):
         ({"source": "inputbox"}, "MISSING_RANGES"),
     ],
 )
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="elisa-selection endpoint opens a Tk mainloop on macOS that cannot be "
+    "interrupted headlessly (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_elisa_selection_rejects_invalid_ranges(
     gate0_service, request_payload, error_code
 ):
@@ -223,6 +233,11 @@ def test_elisa_selection_rejects_invalid_ranges(
         ({"format": "png", "dpi": 300.5}, "INVALID_DPI"),
     ],
 )
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="wps-service endpoint round-trip opens a Tk mainloop on macOS that "
+    "cannot be interrupted headlessly (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_shape_export_rejects_invalid_parameters(
     gate0_service, request_payload, error_code
 ):
@@ -234,6 +249,11 @@ def test_shape_export_rejects_invalid_parameters(
     assert json.loads(body)["error"]["code"] == error_code
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="wps-service endpoint round-trip opens a Tk mainloop on macOS that "
+    "cannot be interrupted headlessly (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_shape_export_reports_empty_clipboard_without_real_pillow(
     gate0_service, monkeypatch
 ):
@@ -261,6 +281,11 @@ def install_fake_win32com(monkeypatch, get_active_object):
     monkeypatch.setitem(sys.modules, "win32com.client", client)
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="wps-service endpoint round-trip opens a Tk mainloop on macOS that "
+    "cannot be interrupted headlessly (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_com_probe_reports_running_wps(gate0_service, monkeypatch):
     install_fake_win32com(
         monkeypatch,
@@ -280,6 +305,11 @@ def test_com_probe_reports_running_wps(gate0_service, monkeypatch):
     }
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="wps-service endpoint round-trip opens a Tk mainloop on macOS that "
+    "cannot be interrupted headlessly (pytest-timeout cannot cancel C-level Tk)",
+)
 def test_com_probe_returns_diagnostic_failure(gate0_service, monkeypatch):
     def unavailable(_prog_id):
         raise OSError("class string is invalid")

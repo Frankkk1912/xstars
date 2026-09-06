@@ -1,13 +1,18 @@
 """Standard curve fitting and back-calculation for ELISA, BCA, etc."""
 
+# scipy interpolation and pandas overloads are broader than their available stubs.
+# pyright: reportArgumentType=false, reportAttributeAccessIssue=false
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from typing import cast
 
 import numpy as np
-from scipy.optimize import curve_fit
+import pandas as pd
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 
 
 def four_param_logistic(x, bottom, top, ec50, hill):
@@ -24,20 +29,25 @@ def three_param_logistic(x, bottom, ec50, hill):
 
 def _three_pl_factory(top: float):
     """Return a 3PL function with a fixed top value."""
+
     def func(x, bottom, ec50, hill):
         return bottom + (top - bottom) / (1.0 + (x / ec50) ** hill)
+
     return func
 
 
 @dataclass
 class CurveFitResult:
     """Result of standard curve fitting."""
-    method: str               # "four_pl" / "three_pl" / "linear" / "log_linear_reg" / "interpolation"
-    params: dict              # fitted parameters
+
+    method: (
+        str  # "four_pl" / "three_pl" / "linear" / "log_linear_reg" / "interpolation"
+    )
+    params: dict  # fitted parameters
     r_squared: float | None
-    equation_str: str         # human-readable equation
-    predict: Callable         # concentration -> OD (forward)
-    inverse: Callable         # OD -> concentration (reverse)
+    equation_str: str  # human-readable equation
+    predict: Callable  # concentration -> OD (forward)
+    inverse: Callable  # OD -> concentration (reverse)
     conc_range: tuple[float, float]  # (min, max) concentration in standards
 
 
@@ -57,13 +67,17 @@ def _fit_four_pl(conc, od) -> CurveFitResult | None:
             [-np.inf, -np.inf, 1e-20, -np.inf],
             [np.inf, np.inf, np.inf, np.inf],
         )
-        popt, _ = curve_fit(four_param_logistic, conc, od, p0=p0, bounds=bounds, maxfev=10000)
+        popt, _ = curve_fit(
+            four_param_logistic, conc, od, p0=p0, bounds=bounds, maxfev=10000
+        )
         bottom, top, ec50, hill = popt
         predicted = four_param_logistic(conc, *popt)
         r2 = _r_squared(od, predicted)
 
         def predict(c):
-            return four_param_logistic(np.asarray(c, dtype=float), bottom, top, ec50, hill)
+            return four_param_logistic(
+                np.asarray(c, dtype=float), bottom, top, ec50, hill
+            )
 
         def inverse(y):
             y = np.asarray(y, dtype=float)
@@ -81,7 +95,12 @@ def _fit_four_pl(conc, od) -> CurveFitResult | None:
 
         return CurveFitResult(
             method="four_pl",
-            params={"bottom": float(bottom), "top": float(top), "ec50": float(ec50), "hill": float(hill)},
+            params={
+                "bottom": float(bottom),
+                "top": float(top),
+                "ec50": float(ec50),
+                "hill": float(hill),
+            },
             r_squared=float(r2) if r2 is not None else None,
             equation_str=f"y = {bottom:.4g} + ({top:.4g} - {bottom:.4g}) / (1 + (x/{ec50:.4g})^{hill:.4g})",
             predict=predict,
@@ -125,7 +144,12 @@ def _fit_three_pl(conc, od) -> CurveFitResult | None:
 
         return CurveFitResult(
             method="three_pl",
-            params={"bottom": float(bottom), "top": top_val, "ec50": float(ec50), "hill": float(hill)},
+            params={
+                "bottom": float(bottom),
+                "top": top_val,
+                "ec50": float(ec50),
+                "hill": float(hill),
+            },
             r_squared=float(r2) if r2 is not None else None,
             equation_str=f"y = {bottom:.4g} + ({top_val:.4g} - {bottom:.4g}) / (1 + (x/{ec50:.4g})^{hill:.4g})",
             predict=predict,
@@ -211,23 +235,34 @@ def _fit_interpolation(conc, od) -> CurveFitResult:
     log_conc = np.log10(unique_conc)
 
     # Forward: log(conc) -> OD
-    fwd = interp1d(log_conc, mean_od, kind="linear", fill_value="extrapolate")
+    fwd = interp1d(
+        log_conc,
+        mean_od,
+        kind="linear",
+        fill_value=cast(float, "extrapolate"),
+    )
     # Inverse: OD -> log(conc) — requires monotonic; enforce by sorting
     if np.all(np.diff(mean_od) > 0) or np.all(np.diff(mean_od) < 0):
         inv_sort = np.argsort(mean_od)
-        inv = interp1d(mean_od[inv_sort], log_conc[inv_sort], kind="linear",
-                       bounds_error=False, fill_value=np.nan)
+        inv = interp1d(
+            mean_od[inv_sort],
+            log_conc[inv_sort],
+            kind="linear",
+            bounds_error=False,
+            fill_value=np.nan,
+        )
     else:
         # Non-monotonic: use the forward function with numerical inversion
-        inv = interp1d(mean_od, log_conc, kind="linear",
-                       bounds_error=False, fill_value=np.nan)
+        inv = interp1d(
+            mean_od, log_conc, kind="linear", bounds_error=False, fill_value=np.nan
+        )
 
     def predict(c):
         return fwd(np.log10(np.asarray(c, dtype=float)))
 
     def inverse(y):
         log_c = inv(np.asarray(y, dtype=float))
-        return 10.0 ** log_c
+        return 10.0**log_c
 
     return CurveFitResult(
         method="interpolation",
@@ -240,7 +275,7 @@ def _fit_interpolation(conc, od) -> CurveFitResult:
     )
 
 
-def wide_to_conc_od(df_wide: "pd.DataFrame") -> tuple["np.ndarray", "np.ndarray"]:
+def wide_to_conc_od(df_wide: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Extract (conc, od) arrays from a wide DataFrame.
 
     Columns are concentration labels (parsed as floats), rows are OD replicates.
@@ -251,19 +286,18 @@ def wide_to_conc_od(df_wide: "pd.DataFrame") -> tuple["np.ndarray", "np.ndarray"
     conc : 1-D array of concentrations (repeated per replicate)
     od : 1-D array of OD values
     """
-    import pandas as pd
-
     conc_list = []
     od_list = []
     for col in df_wide.columns:
         try:
             c = float(col)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
             raise ValueError(
                 f"Column name '{col}' cannot be parsed as a concentration. "
                 "All column headers must be numeric (e.g. 0.1, 1, 10, 100)."
-            )
-        vals = pd.to_numeric(df_wide[col], errors="coerce").dropna().to_numpy()
+            ) from exc
+        numeric = cast(pd.Series, pd.to_numeric(df_wide[col], errors="coerce"))
+        vals = numeric.dropna().to_numpy()
         conc_list.append(np.full(len(vals), c))
         od_list.append(vals)
 
@@ -317,7 +351,9 @@ def fit_standard_curve(
                 # Fall back to linear if not enough positive points
                 result = _fit_linear(conc, od)
                 if result is None:
-                    raise ValueError("Linear fitting failed (only method usable with zero concentrations)")
+                    raise ValueError(
+                        "Linear fitting failed (only method usable with zero concentrations)"
+                    )
                 return result
             raise ValueError(
                 f"Method '{method}' requires at least 2 positive concentrations, "
@@ -356,9 +392,12 @@ def fit_standard_curve(
         # If we have zeros and a linear fit might be better overall, compare
         if has_zeros:
             linear = _fit_linear(conc, od)
-            if linear is not None and linear.r_squared is not None:
-                if result.r_squared is None or linear.r_squared > result.r_squared:
-                    return linear
+            if (
+                linear is not None
+                and linear.r_squared is not None
+                and (result.r_squared is None or linear.r_squared > result.r_squared)
+            ):
+                return linear
         return result
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -402,6 +441,11 @@ def back_calculate(
 
     if clip_to_range:
         cmin, cmax = fit_result.conc_range
+        if cmin == 0:
+            # Linear inversion can return a tiny negative value for an exact
+            # zero-concentration OD because of floating-point roundoff.
+            zero_tolerance = np.finfo(float).eps * max(1.0, abs(cmax)) * 64
+            concentrations[np.abs(concentrations) <= zero_tolerance] = 0.0
         mask = (concentrations < cmin * 0.1) | (concentrations > cmax * 10)
         concentrations[mask] = np.nan
 

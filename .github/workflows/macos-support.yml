@@ -1,0 +1,73 @@
+---
+name: macOS support validation
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - feat/macos-support
+
+permissions:
+  contents: read
+
+jobs:
+  macos-tests:
+    name: macOS / Python 3.10
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run macOS support target tests
+        run: >-
+          python -m pytest tests/test_artifacts.py
+          tests/test_macos_support.py -v
+      - name: Run full regression suite
+        run: python -m pytest
+      - name: Compile Python sources and tests
+        run: python -m compileall -q xstars tests
+
+  windows-tests:
+    name: Windows / Python 3.10
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run macOS support target tests
+        run: >-
+          python -m pytest tests/test_artifacts.py
+          tests/test_macos_support.py -v
+      - name: Run full regression suite
+        run: python -m pytest
+      - name: Compile Python sources and tests
+        run: python -m compileall -q xstars tests
+
+  vba-immutability:
+    name: Existing VBA files are unchanged
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Ribbon VBA is unchanged from main
+        run: git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'
