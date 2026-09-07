@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Pin VBA module sources to LF so Windows checkouts match byte-compare
+# assertions against committed artifacts (Plan R24, rev 3).
+*.bas text eol=lf
