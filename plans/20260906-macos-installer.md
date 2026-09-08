@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：6**
+- **rev：7**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -14,6 +14,7 @@
 | rev 4 | 2026-09-08 | **T0.1 完成 + 待决 D2 裁定**：① D2 裁定为「内置兜底」——xlam 内置隐藏 `xlwings.conf` sheet，`Interpreter` 留空（researcher 双保险方案）；② `XSTARS.xlam` 在 Windows 侧由 Agent 全自动制作并入库（`installer/mac/assets/XSTARS.xlam`，commit `20ba6c8`）：customUI14→2006 转换（去 1 处 `insertAfterMso`）、真 Excel 16.0 COM 导入 `RibbonCallbacks`、OOXML 注入 customUI part；验收断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、真机打开无修复、模块与 `.bas` 逐行一致〔仅行尾归一化，D11 范围〕、`xlwings.conf` VeryHidden）。③ **实施环境事实**：本机 WPS Office 在 HKCU 劫持 Excel CLSID（`{00024500-...}` → `et.exe`），COM 自动化需启动 Office16 `EXCEL.EXE /automation` 后经 ROT 绑定真实例；Excel COM `VBProject` 为 null 时优先排查此劫持 | 2026-09-08 用户访谈裁定 D2 + Agent 实施记录（commit `20ba6c8`） |
 | rev 5 | 2026-09-08 | **D11 裁定落盘**：T0.1 逐字节断言改为「行尾归一化（`\r\n`→`\n`）后逐字节一致」。实测证据：oletools 提取制品内 RibbonCallbacks 源码 5452B 全 CRLF（163 行）vs 仓库 `.bas` 5289B 全 LF，差值恰为行数→纯 VBE 存储行为；归一化后逐字节一致，两侧均含 `Attribute VB_Name` 头，**制品无需重做**。另补入 F 项验证：customUI rel 包根挂载（2006 type）与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致；8.1 安装器单测覆盖面同步扩充 | 2026-09-08 用户确认 D11 回退；父 Agent 独立复验（oletools 提取 + `git ls-files --eol`） |
 | rev 6 | 2026-09-08 | **M0 闭合**：① T0.2 完成——`XSTARS_mac.xlsm` 源自 DC2 验收工作簿（无需 Windows 折返），三模块归一化后与仓库 `.bas`/0.37.0 wheel 逐字节一致、`Dictionary` 在位、`xlwings.conf!Interpreter` 已清空，入库（`b9fac14`）；② **新增隐私发现与清洗**：Excel 2010+ 保存时在 `xl/workbook.xml` 写入 `x15ac:absPath`（泄露构建机用户路径 `/Users/frank`、`C:\Users\<user>`），两制品均外科手术移除（xlam 为 `9b92364`），`vbaProject.bin` 逐字节不变，T2.2 复扫范围增补 absPath；③ T0.3 完成（assets/README.md：用途矩阵 + 5 条硬不变量 + 双主机再制作步骤 + WPS CLSID 劫持/Mac VBE 拒 `.cls` 绕行）；④ D3/D5 随交付物裁定闭合。**M0 三任务全部完成，M1 解锁** | 用户交付另存文件 + 父 Agent zipfile/oletools 独立复验与清洗 |
+| rev 7 | 2026-09-08 | **M1 完成（T1.1–T1.4 [x]，`aef6a32`）**：① D1 落定——pin `20260901`/`cpython-3.12.14` aarch64 `install_only_stripped`，SHA256 `81a359f1…e4b2b`、size 24,981,445（官方 SHA256SUMS 双源核对）；② `build_pkg.py`（纯函数+注入式下载/命令执行器）+ `runtime.lock.json` + 15 项无网络单测全绿；③ 真实干跑通过：staging import（脱离仓库根）`xstars.__file__` 位于 staging site-packages、依赖装齐、无 dev 项、`xlwings.applescript` 已汇集；④ 新增仓库级事实与处置：ruff 全仓存量 117 error（`xstars/main.py` 34 等，main 从未 ruff-clean 且相关文件在「明确不修改」清单）→ ruff 验收范围明确为**新文件 0 error**；staging 构建产物目录入 `.gitignore`（与 `installer/output/` 同类）并在 compileall/ruff 中排除；⑤ VBA 占位符澄清：断言用 `/Users/(?!<User>)`——上游 `xlwings.bas` 规范占位 `/Users/<User>` 不是泄漏（worker 裁决，D11 语义补充）；⑥ 实施记录：worker 45min 超时一次（pip 装栈耗时），编排者接手完成验证与收尾；oletools 入 `[dev]`（T1.4 授权决定）。全量回归 374 passed/13 skipped 零新增失败；ribbon 门禁空 diff | pytest/ruff/compileall/真实干跑实测；worker 报告 + 编排者复验 |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -204,7 +205,7 @@
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
 | **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [x] **已完成（rev 6）**：T0.1 ✅（`20ba6c8`+`9b92364` 隐私清洗）、T0.2 ✅（`b9fac14`）、T0.3 ✅（README.md） | 无 | 两制品均在 `installer/mac/assets/`；静态断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、rel 包根挂载、三模块归一化一致、Interpreter 空、无 absPath）；pytest 文件随 T1.4 落地 | **M0 闭合，M1 解锁** |
-| **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [ ] | M0 | `installer/mac/build_pkg.py --prepare-runtime` 干跑产出可执行 staging（`staging/python/bin/python3 -c "import xstars, xlwings, ttkbootstrap"` 通过）；SHA256 不匹配样本 → 非零退出；T1.4 单测全绿 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages（venv 搬迁不可行，§4.3） |
+| **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [x] **已完成（rev 7，`aef6a32`）**：T1.1–T1.4 ✅ | M0 | staging 干跑：脱离仓库根 `import xstars, xlwings, ttkbootstrap, matplotlib, PIL` OK 且 `xstars.__file__` 在 staging site-packages；SHA256 篡改样本 → 非零退出；T1.4 单测 15/15 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages；staging 目录已 gitignore（rev 7） |
 | **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [ ] | M1 | `xar -t -f XSTARS-<ver>.pkg` 列出预期 Payload/Scripts；`pkgutil --expandpkg` 后 payload 无 `._*` AppleDouble 文件；distribution.xml 断言 `hostArchitectures="arm64"`、`min="12.0"`、`enable_currentUserHome="true"`；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3） |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [ ] | M2 | postinstall 结构测试通过（路径常数、四件事齐备、Console User/chown 逻辑、幂等、退出码策略）；`xlwings.conf` 写入内容断言（`"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"`） | 用户域安装下 postinstall 以安装用户运行，属主逻辑保留双保险（§4.3 TCC 行） |
 | **M4 卸载与残留清理** | [ ] | M3 | T4.2 静态/单元断言通过；`uninstall.sh --help` 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7） |
@@ -237,22 +238,22 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M1 运行时组装
 
-- [ ] T1.1 新建 `installer/mac/build_pkg.py` 构建入口框架 + 版本单一来源读取
+- [x] T1.1 **已完成（rev 7，`aef6a32`）**：`installer/mac/build_pkg.py`（14.7KB，纯函数+注入式下载/命令执行器）；`--version` 输出 1.1.1 与 pyproject 一致；fail-closed 单测覆盖
   - 文件：新建 `installer/mac/build_pkg.py`
   - 修改：纯新增；`--prepare-runtime` / `--build-pkg` 子命令骨架；版本一律 `tomllib.load(pyproject.toml)["project"]["version"]`（R6，不移植旧 `_extract_version()`〔C〕正则方案）；所有装配步骤抽为纯函数（R20）
   - 验收：`build_pkg.py --version` 输出 1.1.1 且与 `pyproject.toml:7` 一致；单测覆盖版本读取函数（含 pyproject 缺失/损坏时 fail-closed 非零退出）
   - 依赖：无（支撑 G2 入口、G8）
-- [ ] T1.2 新建 `installer/mac/runtime.lock.json`（钉值清单）+ 下载与 SHA256 校验模块
+- [x] T1.2 **已完成（rev 7）**：lock 字段齐备（url/sha256/size/python_version/arch/variant/tag，D1 钉值 `20260901`/3.12.14）；篡改样本 → 非零退出；下载器可注入 fake urlopen
   - 文件：新建 `installer/mac/runtime.lock.json`；`installer/mac/build_pkg.py`（新增下载/校验函数）
   - 修改：lock 文件含 `python_build_standalone` 下载 URL、SHA256（**具体钉值实施时从 astral-sh/python-build-standalone Releases 页取**，待决 D1）、目标 Python 版本（3.12，R2）、架构（aarch64-apple-darwin）、变体（install_only_stripped，R1）；下载后 `hashlib.sha256` 逐块校验，不匹配 → 打印期望/实际并 `sys.exit(1)`（fail-closed，R1）
   - 验收：单测用篡改样本校验失败路径（exit 非 0）；网络下载函数可被注入 fake urlopen 测试；lock 文件被 pytest 断言字段齐备
   - 依赖：T1.1（支撑 G1）
-- [ ] T1.3 运行时解压 + 依赖安装 + xstars 非 editable 安装到 staging
+- [x] T1.3 **已完成（rev 7）**：真实干跑通过——staging `python/bin/python3 -c "import xstars, xlwings, ttkbootstrap, matplotlib, PIL"` OK（脱离仓库根执行，`xstars.__file__` 在 staging site-packages）；`pip list` 无 dev 项；`xlwings.applescript` 已汇集至 staging/bin
   - 文件：`installer/mac/build_pkg.py`（新增 staging 组装函数）
   - 修改：解压 tarball 至 `staging/python/`（可重定位，§4.3）；用该解释器执行 `pip install --no-cache-dir <repo>`（xstars 本体，**非 editable**，R16①）+ 全部运行时依赖（来自 pyproject dependencies，自动含 ttkbootstrap；**不含 dev extras**；`xlwings` wheel 的 mac 侧原生依赖 psutil/appscript 随 pip 解析）；定位 site-packages 内 `xlwings.applescript` 文件并断言存在（§4.5 缺口 1 的实施期核实）；产出 `staging/python/`、`staging/bin/`（xlam/applescript/xlsm 汇集）
   - 验收：staging 内 `python/bin/python3 -c "import xstars, xlwings, ttkbootstrap, matplotlib, PIL"` 成功且 `xstars.__file__` 位于 staging site-packages（非源码目录）；`pip list` 无 pytest/dev 项；`xlwings.applescript` 已复制到 `staging/bin/`
   - 依赖：T0.1, T0.2, T1.2（支撑 G1、G6 汇集）
-- [ ] T1.4 新建 `tests/test_macos_installer.py`：M1 部分单测
+- [x] T1.4 **已完成（rev 7）**：15 项单测全绿（版本 fail-closed/SHA 篡改/staging 布局/xlam 全断言含 rel 包根挂载/xlsm 三模块+D11 归一化比对/占位符规则 `/Users/(?!<User>)`）；oletools 入 `[dev]`
   - 文件：新建 `tests/test_macos_installer.py`
   - 修改：纯新增；沿用仓库 pytest 约定（cartographer §3.3：能 mock 则 monkeypatch，不打 `skipif`）
   - 验收：覆盖：版本读取、SHA256 校验失败 fail-closed、staging 布局断言、xlam 2006 命名空间断言（T0.1 验收落点）、xlsm 宏项目断言（T0.2 验收落点）；本地 `pytest tests/test_macos_installer.py` 全绿
@@ -362,7 +363,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | 检查项 | 命令/方式 | 预期结果 | 通过标准 |
 | --- | --- | --- | --- |
 | 全量 pytest 回归 | `python -m pytest` | 基线量级：main 上 353 passed / 13 skipped（**以实际运行为准**，本 Plan 未实测基线） | 无新增 failed；新增测试全绿 |
-| ruff | `ruff check .` | 0 error（含 `installer/mac/build_pkg.py` 与新测试文件） | 0 error |
+| ruff | `ruff check .`（staging 已 gitignore 排除） | 新增文件 0 error（`installer/mac/build_pkg.py`、`tests/test_macos_installer.py`）✅；全仓存量 117 error（`xstars/main.py` 34 等）为 main 从未 ruff-clean 的先存债，相关文件在「明确不修改」清单，不在本 Plan 范围 | 新文件 0 error；CI 不跑 ruff（既有事实） |
 | compileall | `python -m compileall -q xstars tests installer/mac` | 静默成功 | 退出码 0 |
 | 安装器单测 | `python -m pytest tests/test_macos_installer.py -v` | 覆盖：版本单源、SHA256 fail-closed、staging/payload 布局、AppleDouble 扫描、distribution.xml 三参数、postinstall/uninstall 静态断言、xlam 2006 命名空间、xlam customUI rel 包根挂载（2006 type，对照 `xlwings/addin/xlwings.xlam` 已验证模式）、VBA 源行尾归一化比对（D11，VBA 提取用 oletools，已验证可行；T1.4 决定是否入 `[dev]`）、xlsm 宏项目、`render_xlwings_conf()` | 全绿 |
 | **VBA 零修改门禁** | `git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` | **必须为空**（`macos-support.yml:73` 既有 job） | diff 为空，job 绿 |
@@ -493,7 +494,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 | ID | 事项 | 现状 |
 | --- | --- | --- |
-| D1 | python-build-standalone **SHA256 具体钉值**与 cpython **3.12.x 具体小版本** | 实施时从 astral-sh/python-build-standalone Releases 取（T1.2） |
+| D1 | python-build-standalone **SHA256 具体钉值**与 cpython **3.12.x 具体小版本** | **已裁定（rev 7，实施时取）**：`20260901` / `cpython-3.12.14+20260901`，SHA256 `81a359f1cfadd4da11766534c5913791cea55f26e1bb902cacd2a531bb1e4b2b`，size 24,981,445；已写入 `runtime.lock.json` |
 | D2 | `XSTARS.xlam` 是否内置隐藏 `xlwings.conf` sheet 作兜底（researcher 建议双保险，与 V-02/RK-02 相关） | **已裁定（rev 4，2026-09-08）**：内置兜底，`Interpreter` 留空；已落地于已入库的 `XSTARS.xlam` 制品（T0.1） |
 | D3 | `XSTARS_mac.xlsm` 是否含示例数据及其内容范围 | **已裁定（rev 6，随交付物）**：用户另存版本保留模板表头与精简示例（Data 32 值、各 Template 45–92 值），已清除 DC2 验收原数据；pytest 仅断言结构不锁定具体值 |
 | D4 | 覆盖安装/升级/卸载时是否保留用户 `~/.xstars` 配置与 artifacts | 本 Plan 默认「全程保留」（RK-07 缓解）；如需「卸载时可选清理」需用户确认后加 `--purge-data` 开关 |
@@ -554,5 +555,5 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 5. **每个任务四项齐备**：全部 23 个 To-do（T0.1–T6.2；rev 2 审计计数）均含文件/修改/验收/依赖。✅
 6. **Validation contract 可判定**：每项含命令/方式 + 预期 + 通过标准；无法执行项（8.4–8.6 真机）已注明原因与责任人（=用户）。✅
 7. **Git 策略齐备**：分支 `feat/macos-installer`、Draft PR 标题、可直接使用的 PR 描述草稿、单 PR 拆分决策与依据、串行合并顺序。✅
-8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D2（rev 4）、D11（rev 5）、D3/D5（rev 6，随交付物）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
+8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D1（rev 7，钉值取定）、D2（rev 4）、D3/D5（rev 6，随交付物）、D11（rev 5）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
 9. **只写入 Plan 文件**：本文件为唯一写入目标（`plans/20260906-macos-installer.md`）；未修改任何源码、测试、配置、脚本或生成物。✅
