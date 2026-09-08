@@ -1,8 +1,8 @@
 # Plan: XSTARS macOS 独立安装器（.pkg，arm64-only，用户级免提权，未签名）
 
-- **状态：待批准**
-- **日期：2026-09-06**
-- **rev：3**
+- **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
+- **日期：2026-09-06**（rev 4 更新：2026-09-08）
+- **rev：4**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -11,6 +11,7 @@
 | rev 1 | 2026-09-06 | 初稿：新建 Plan（路径 A），9 段结构，M0–M6 共 7 个 Milestone，20 个 To-do 任务，17 个功能缺口 | explore-20260906-macos-installer.md + researcher 调研 + cartographer 报告 + 2026-09-06 访谈 11 项裁定 |
 | rev 2 | 2026-09-06 | 父 Agent 独立审计后的事实校正（不涉及任何产品/范围决策）：① 补入「旧仓锚点 ground-truth 校正表」，消除正文声明的 ±5 行漂移；② To-do 任务实测为 **23** 个（rev 1 摘要误记 20），四要素齐备、与 17 个缺口双向映射无孤立；③ 校正 `application/export.py` 的 Pillow 证据行号 | `grep -n` 实测 xstars-dev 与当前仓库；Plan 结构审计脚本输出 |
 | rev 3 | 2026-09-06 | **用户批准 Plan（rev 2）并裁定三项**：① 行尾修正采用方案 A（`.gitattributes` 追加 `*.bas text eol=lf`，否决方案 B）；② 推送 `feat/macos-installer` 分支供 Windows 侧 M0 制作；③ 进入实施。新增 R24 与待决 D11（VBE CRLF 残余风险的预登记回退路径）；修正 R21 与 §9 中 `.gitattributes` 的处置描述 | 2026-09-06 用户明确批准 + 三项裁定；`git ls-files --eol` 实证 |
+| rev 4 | 2026-09-08 | **T0.1 完成 + 待决 D2 裁定**：① D2 裁定为「内置兜底」——xlam 内置隐藏 `xlwings.conf` sheet，`Interpreter` 留空（researcher 双保险方案）；② `XSTARS.xlam` 在 Windows 侧由 Agent 全自动制作并入库（`installer/mac/assets/XSTARS.xlam`，commit `20ba6c8`）：customUI14→2006 转换（去 1 处 `insertAfterMso`）、真 Excel 16.0 COM 导入 `RibbonCallbacks`、OOXML 注入 customUI part；验收断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、真机打开无修复、模块与 `.bas` 逐行一致〔仅行尾归一化，D11 范围〕、`xlwings.conf` VeryHidden）。③ **实施环境事实**：本机 WPS Office 在 HKCU 劫持 Excel CLSID（`{00024500-...}` → `et.exe`），COM 自动化需启动 Office16 `EXCEL.EXE /automation` 后经 ROT 绑定真实例；Excel COM `VBProject` 为 null 时优先排查此劫持 | 2026-09-08 用户访谈裁定 D2 + Agent 实施记录（commit `20ba6c8`） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -69,7 +70,7 @@
 | R2 | **内置 Python 版本 3.12**（cpython-3.12.x，具体小版本与钉值见待决事项 D1）。 | 访谈裁定 2 | 〔硬〕 |
 | R3 | **用户级免提权安装**：安装位置 `~/Library/Application Support/XSTARS/`；`distribution.xml` 使用 `domains enable_currentUserHome="true"`；**不写 /Applications、不要求管理员密码**（与 `docs/wps-installation.md:34` 单用户免提权约定一致，见已核对该文件 §3「安装器为当前用户单用户安装（无需管理员提权）」）。 | 访谈裁定 3 | 〔硬〕 |
 | R4 | **入库二进制制品范围**：`XSTARS.xlam`（2006-format customUI ribbon）**+** 预置 `XSTARS_mac.xlsm` 模板（工作簿内嵌 `RibbonCallbacks` + `xlwings.bas` + `Dictionary` 三模块）。依据：`ribbon/README.md:67`（实测确认功能区回调在活动工作簿解析，该行已核对，原文 "Excel resolves `RibbonCallbacks.*` in the **active workbook**"）；`docs/macos-developer-setup.md:88-99`（§4 要求工作簿内嵌三模块，已核对）。 | 访谈裁定 4 | 〔硬〕 |
-| R5 | **制品制作人/时点**：**用户在实施开始前手工制作并交给 Agent 入库**——这是 M0 的输入前提，Plan 中显式标为**阻塞前置**；制作步骤引用 `ribbon/README.md:44-51`（RibbonX Editor 打包 2006-format xlam 的已验证流程，已核对）与 `docs/macos-developer-setup.md:88-99`。 | 访谈裁定 5 | 〔硬，阻塞前置〕 |
+| R5 | **制品制作人/时点**：**用户在实施开始前手工制作并交给 Agent 入库**——这是 M0 的输入前提，Plan 中显式标为**阻塞前置**；制作步骤引用 `ribbon/README.md:44-51`（RibbonX Editor 打包 2006-format xlam 的已验证流程，已核对）与 `docs/macos-developer-setup.md:88-99`。**rev 4 实施记录**：T0.1 已例外地由 Agent 在 Windows 侧全自动完成（真 Excel 16 COM + OOXML 注入，绕过 WPS CLSID 劫持，见 Changelog rev 4）；T0.2（xlsm）仍为用户手工（Mac Excel 无 VBProject，不可自动化） | 访谈裁定 5；rev 4 实施记录 | 〔硬，阻塞前置：T0.2 仍阻塞〕 |
 | R6 | **版本单一来源**：以 `pyproject.toml:7`（已核实 `version = "1.1.1"`）为唯一来源，构建脚本读 pyproject（`tomllib`，**不再**像旧 `build_installer.py:49-55`〔C〕那样正则抓 `__init__.py`）；并把 `xstars/__init__.py:3`（已核实 `"1.0.0"`）对齐到 `"1.1.1"`。 | 访谈裁定 6 | 〔硬〕 |
 | R7 | **卸载**：交付 `uninstall.sh` + 文档；必须覆盖 Excel 启动项清理与 `~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/*.reg` 中 `OPENn` 残留清理（依据 `docs/macos-developer-setup.md:191-193`「cannot find add-in」故障段，已核对）；必须含**备份步骤**与 `PRAGMA integrity_check`。 | 访谈裁定 7 | 〔硬〕 |
 | R8 | **CI**：新增 `macos-latest` build job，产出 `.pkg` 并上传为 workflow artifact（可参照既有 `.github/workflows/macos-support.yml:16` 的 macOS job，已核对）。 | 访谈裁定 8 | 硬 |
@@ -200,7 +201,7 @@
 
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
-| **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [ ] | 无（**阻塞前置**：用户手工制作制品，R5） | `installer/mac/assets/` 下存在 `XSTARS.xlam` 与 `XSTARS_mac.xlsm`；pytest 断言 xlam 内 customUI 为 2006 命名空间、无 `customUI14` 残留；assets/README.md 记录来源、版本与再制作步骤 | 用户动作 + Agent 入库；不完成则 M1 起全部阻塞 |
+| **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [~] **进行中**（rev 4：T0.1 ✅，T0.2/T0.3 待 xlsm） | 无（**阻塞前置**：T0.2 xlsm 需用户在 Mac 侧手工制作，R5；T0.1 已由 Agent 自动完成） | `installer/mac/assets/` 下存在 `XSTARS.xlam`（✅ 已入库）与 `XSTARS_mac.xlsm`（待交付）；pytest 断言 xlam 内 customUI 为 2006 命名空间、无 `customUI14` 残留（静态断言已人工预验 PASS，pytest 文件待 T1.4 落地）；assets/README.md 记录来源、版本与再制作步骤（待 T0.3） | 用户动作 + Agent 入库；不完成则 M1 起全部阻塞 |
 | **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [ ] | M0 | `installer/mac/build_pkg.py --prepare-runtime` 干跑产出可执行 staging（`staging/python/bin/python3 -c "import xstars, xlwings, ttkbootstrap"` 通过）；SHA256 不匹配样本 → 非零退出；T1.4 单测全绿 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages（venv 搬迁不可行，§4.3） |
 | **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [ ] | M1 | `xar -t -f XSTARS-<ver>.pkg` 列出预期 Payload/Scripts；`pkgutil --expandpkg` 后 payload 无 `._*` AppleDouble 文件；distribution.xml 断言 `hostArchitectures="arm64"`、`min="12.0"`、`enable_currentUserHome="true"`；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3） |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [ ] | M2 | postinstall 结构测试通过（路径常数、四件事齐备、Console User/chown 逻辑、幂等、退出码策略）；`xlwings.conf` 写入内容断言（`"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"`） | 用户域安装下 postinstall 以安装用户运行，属主逻辑保留双保险（§4.3 TCC 行） |
@@ -216,7 +217,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M0 制品与前置就绪（阻塞前置）
 
-- [ ] T0.1 用户手工制作 `XSTARS.xlam` 并交付，Agent 入库至 `installer/mac/assets/XSTARS.xlam`
+- [x] T0.1 ~~用户手工制作 `XSTARS.xlam` 并交付~~ **已完成（rev 4，2026-09-08）**：Agent 在 Windows 侧全自动制作（customUI 转换 + 真 Excel 16 COM + OOXML 注入，绕过 WPS CLSID 劫持经 ROT 绑定），入库至 `installer/mac/assets/XSTARS.xlam`（commit `20ba6c8`），验收断言全 PASS；含 D2 裁定的隐藏 `xlwings.conf` 兜底 sheet（`Interpreter` 留空）
   - 文件：新建 `installer/mac/assets/XSTARS.xlam`（二进制制品，常规 blob，R21）
   - 修改：无源码修改；由用户按 `ribbon/README.md:44-51` 在 Windows/RibbonX Editor 侧制作：以 2006-format customUI part（`customUI/customUI.xml`，命名空间 `http://schemas.microsoft.com/office/2006/01/customui`，去除全部 `insertAfterMso`）+ 未修改的 `ribbon_callbacks.bas` 副本，另存为 Excel Add-In（`.xlam`）后拷回
   - 验收：pytest 打开 xlam（zip 容器）断言：存在 `customUI/customUI.xml` 且命名空间为 2006 URI、无 `customUI14` part、无 `insertAfterMso` 属性；VBA 模块源文本与 `ribbon/ribbon_callbacks.bas` 逐字节一致（防漂移，RK-04；行尾已由 R24 钉 LF，若仍因 VBE 内部存储失败则按 D11 回退，制品无需重做）
@@ -491,7 +492,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | ID | 事项 | 现状 |
 | --- | --- | --- |
 | D1 | python-build-standalone **SHA256 具体钉值**与 cpython **3.12.x 具体小版本** | 实施时从 astral-sh/python-build-standalone Releases 取（T1.2） |
-| D2 | `XSTARS.xlam` 是否内置隐藏 `xlwings.conf` sheet 作兜底（researcher 建议双保险，与 V-02/RK-02 相关） | 影响 T0.1 制品制作要求，需用户在 M0 前裁定 |
+| D2 | `XSTARS.xlam` 是否内置隐藏 `xlwings.conf` sheet 作兜底（researcher 建议双保险，与 V-02/RK-02 相关） | **已裁定（rev 4，2026-09-08）**：内置兜底，`Interpreter` 留空；已落地于已入库的 `XSTARS.xlam` 制品（T0.1） |
 | D3 | `XSTARS_mac.xlsm` 是否含示例数据及其内容范围 | 影响 T0.2 制作要求，需用户裁定 |
 | D4 | 覆盖安装/升级/卸载时是否保留用户 `~/.xstars` 配置与 artifacts | 本 Plan 默认「全程保留」（RK-07 缓解）；如需「卸载时可选清理」需用户确认后加 `--purge-data` 开关 |
 | D5 | 制品在仓库的确切路径命名最终确认（本 Plan 采用 `installer/mac/assets/`，已核实不被 ignore） | 如用户偏好其他目录（如 `installer/excel-mac/`）需在 M0 前提出 |
