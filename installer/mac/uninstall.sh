@@ -5,6 +5,7 @@
 set -eu
 
 MODE="dry-run"
+MODE_OPTION=""
 PACKAGE_IDENTIFIER="com.frank-sysu.xstars"
 
 usage() {
@@ -23,8 +24,17 @@ EOF
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-    --dry-run) MODE="dry-run" ;;
-    --apply) MODE="apply" ;;
+    --dry-run | --apply)
+        if [ -n "$MODE_OPTION" ]; then
+            echo "uninstall: specify --dry-run or --apply only once" >&2
+            usage >&2
+            exit 2
+        fi
+        MODE_OPTION=$1
+        if [ "$1" = "--apply" ]; then
+            MODE="apply"
+        fi
+        ;;
     --help | -h)
         usage
         exit 0
@@ -45,6 +55,9 @@ APP_SCRIPTS_DIR="$USER_HOME/Library/Application Scripts/com.microsoft.Excel"
 LEGACY_LAUNCH_SCRIPT="$APP_SCRIPTS_DIR/xstars_launch.scpt"
 XLWINGS_APPLESCRIPT="$APP_SCRIPTS_DIR/xlwings.applescript"
 XLWINGS_CONF="$USER_HOME/Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
+PREINSTALL_BACKUP_DIR="$INSTALL_ROOT/preinstall-backup"
+APPLESCRIPT_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.applescript"
+CONF_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.conf"
 REGISTRATION_DIR="$USER_HOME/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB"
 BACKUP_PARENT="$USER_HOME/Documents/XSTARS-uninstall-backups"
 
@@ -59,7 +72,7 @@ warn() {
 applications_running() {
     local process
     for process in "Microsoft Excel" "WPS Office" "wpsoffice"; do
-        if /usr/bin/pgrep -x "$process" >/dev/null 2>&1; then
+        if pgrep -x "$process" >/dev/null 2>&1; then
             warn "$process is running; quit it before uninstalling"
             return 0
         fi
@@ -71,8 +84,8 @@ print_dry_run() {
     log "dry-run only; no files will be changed (pass --apply to proceed)"
     log "would remove Excel Startup add-in: $EXCEL_STARTUP_ADDIN"
     log "would remove legacy launch script: $LEGACY_LAUNCH_SCRIPT"
-    log "would remove xlwings AppleScript: $XLWINGS_APPLESCRIPT"
-    log "would remove only INTERPRETER_MAC from: $XLWINGS_CONF"
+    log "would restore pre-install xlwings AppleScript when backed up; otherwise remove: $XLWINGS_APPLESCRIPT"
+    log "would restore pre-install xlwings configuration when backed up; otherwise remove only INTERPRETER_MAC from: $XLWINGS_CONF"
     log "would back up MicrosoftRegistrationDB .reg files under: $BACKUP_PARENT"
     log "would delete Excel OPEN/OPENn values that point to XSTARS.xlam"
     log "would require PRAGMA integrity_check to return ok; otherwise restore backup"
@@ -109,7 +122,18 @@ remove_file_if_present() {
 
 remove_file_if_present "$EXCEL_STARTUP_ADDIN" "Excel Startup add-in"
 remove_file_if_present "$LEGACY_LAUNCH_SCRIPT" "legacy launch script"
-remove_file_if_present "$XLWINGS_APPLESCRIPT" "xlwings AppleScript"
+
+restore_xlwings_applescript() {
+    if [ -f "$APPLESCRIPT_BACKUP" ]; then
+        /bin/mkdir -p "$APP_SCRIPTS_DIR"
+        /bin/cp -p "$APPLESCRIPT_BACKUP" "$XLWINGS_APPLESCRIPT"
+        log "restored pre-install xlwings AppleScript"
+    else
+        remove_file_if_present "$XLWINGS_APPLESCRIPT" "xlwings AppleScript"
+    fi
+}
+
+restore_xlwings_applescript
 
 remove_interpreter_mac() {
     local temporary
@@ -137,7 +161,17 @@ remove_interpreter_mac() {
     fi
 }
 
-remove_interpreter_mac
+restore_xlwings_conf() {
+    if [ -f "$CONF_BACKUP" ]; then
+        /bin/mkdir -p "$(/usr/bin/dirname "$XLWINGS_CONF")"
+        /bin/cp -p "$CONF_BACKUP" "$XLWINGS_CONF"
+        log "restored pre-install xlwings configuration"
+    else
+        remove_interpreter_mac
+    fi
+}
+
+restore_xlwings_conf
 
 BACKUP_DIR=""
 restore_registration_backup() {

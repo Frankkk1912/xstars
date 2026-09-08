@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：12**
+- **rev：13**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -20,6 +20,7 @@
 | rev 10 | 2026-09-08 | **M4 完成（T4.1–T4.2，详见提交）+ T2.2 验证深度缺陷更正**：① uninstall.sh（250 行，默认 dry-run/`--apply` 真删，六步清理含 RegistrationDB `OPENn` 备份+integrity_check 失败即回滚；Excel 运行中拒绝执行；不碰 `~/.xstars`）；② docs/macos-installer.md 卸载章节先行（安装/放行属 T5.2）；③ **T2.2 验证深度缺陷更正（worker 发现）**：M3 的零 AppleDouble 仅查 pkgutil 外层，内层 component Payload cpio 实有 `._XSTARS-payload.tar.gz` 等 4 条 → build_pkg.py 加内层 cpio 清洗，重出包后内层外层均为 0，嵌套断言入 tests；8.2 表同步扩充。安装器单测 31/31；全量回归 390 passed/13 skipped | worker 报告 + 编排者独立复验（终态重出包 + cpio 实测 + uninstall 安全审计） |
 | rev 11 | 2026-09-08 | **M5 完成（T5.1–T5.5 [x]，`c52f80c`）**：① 版本单源——`xstars/__init__.py` 1.0.0→1.1.1 + 防漂移单测（tomllib，CI 3.10 回归用 tomli 条件导入）；② pyproject 显式声明 `Pillow>=10.0`（直呼导入点 main.py:1053/export.py:328）；③ `docs/macos-installer.md` 补全（含 M2 实测的 CurrentUserHomeDirectory 落位语义、Sequoia 三途放行、无右键打开过时话术）；④ 双语 README 安装包模式为推荐路径、开发者模式降级 fallback；⑤ 三 docs 同步（manual-acceptance 增安装器验收组；strategy 路线表「独立 `.pkg` 安装器交付中」）；⑥ ribbon/README ship 制品澄清。安装器单测 32/32；全量回归 391 passed/13 skipped；过时话术 grep 零命中；ribbon 门禁空 diff。**新事实**：CI 既有测试 job 跑 Python 3.10，新测试已兼容（tomli 条件导入）；tests/ 存量 ruff 21 error（M4 HEAD 同，非本次引入，不在范围） | worker 报告 + 编排者独立复验（含策略/过时话术 grep 与 T5.1 逐行 diff） |
 | rev 12 | 2026-09-08 | **T6.1 完成（`10cab2d`）**：`.github/workflows/macos-support.yml` 新增 `macos-pkg-build` job（macos-latest 已为 arm64，经 runner-images 元数据核实；Python 3.12 构建宿主；**两步构建** `--prepare-runtime` → `--build-pkg`——编排者任务规格曾误写单命令，worker 预检拦下并裁决修正；installer 测试 + compileall + upload-artifact retention 7d；permissions contents: read，无 secrets）；既有三 job 未动；YAML 有效（psych）。M6 标记进行中：T6.2（真机 V-01~V-05）待用户，随 PR 首次 CI 运行验证 job 本身 | worker 报告 + 编排者复验（YAML psych + diff 全文审读） |
+| rev 13 | 2026-09-08 | **Review 第 1 轮（三路 fresh-context）完成 + F1–F10 修复批落地**：coverage lane 产 14 findings（1 Blocker + 4 值得修复 + 6 可选 + 3 延期）；correctness lane 产 1 Blocker + 2 值得修复（fallback 模型续跑成功）；quality lane 产 3 值得修复（fallback 模型续跑成功）；另两 lane 首跑因 provider 500 中断后恢复。修复批（fix worker，全验收绿：安装器单测 43/43、全量 402 passed/13 skipped、pkg 重出 ≈137MiB、三层 AppleDouble 零）详见文末「Review 记录」；可选改进 9 项记入残余清单不在本轮实施；RK-01 处置：staging 实测 Tcl/Tk 资源在位 + F1 的 CI 冒烟 import ttkbootstrap 间接覆盖 Tk 链路，sitecustomize 缓解推迟至 V-01 实测需要时 | 三路 reviewer 报告 + fix worker 报告 + 编排者复验（43/43、402/13、ruff、YAML、bash -n、门禁） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -563,3 +564,32 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 7. **Git 策略齐备**：分支 `feat/macos-installer`、Draft PR 标题、可直接使用的 PR 描述草稿、单 PR 拆分决策与依据、串行合并顺序。✅
 8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D1（rev 7，钉值取定）、D2（rev 4）、D3/D5（rev 6，随交付物）、D11（rev 5）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
 9. **只写入 Plan 文件**：本文件为唯一写入目标（`plans/20260906-macos-installer.md`）；未修改任何源码、测试、配置、脚本或生成物。✅
+
+---
+
+## Review 记录（阶段四）
+
+### 第 1 轮（2026-09-08，三路 fresh-context reviewer 并行）
+
+| Lane | 结果 | 要点 |
+| --- | --- | --- |
+| 测试与验收覆盖 | 完成 | 14 findings（见下） |
+| 正确性与回归 | 完成（fallback 模型续跑） | 1 Blocker + 2 值得修复 + 2 可选 |
+| 简洁性与可维护性 | 完成（fallback 模型续跑） | 3 值得修复 + 4 可选；bash LF/路径常数/文档一致性核验干净 |
+
+**F1–F10 修复映射（fix worker 全部落地，验收全绿）**：
+
+| # | 来源 | 修复 | 验证 |
+| --- | --- | --- | --- |
+| F1 🔴 | coverage | workflow `--prepare-runtime` 与 `--build-pkg` 之间插入 staging import 冒烟（`PYTHONSAFEPATH=1` 防仓库源码遮蔽） | 步骤入 workflow，CI 验证 |
+| F2 | correctness+quality | distribution 显式 `enable_localSystem="false" enable_anywhere="false"`；docs 删 `-target /` 变体 | attrib 断言更新 + grep 零命中 |
+| F3 | coverage | `BUILT_PACKAGE` 版本化 + 缺包在 darwin 上改 FAIL（不再静默 SKIP） | 单测 |
+| F4 | coverage | xlwings 版本不变量对齐制品（AppleScript 文件名版本 vs 内嵌 `xlwings.bas` 版本），删除宿主断言；assets/README 不变量 3 同步更新 | 单测 + README rev 13 |
+| F5 | coverage | 真包调 `validate_payload_archive` + `python/bin/python3` 断言 + required 缺失分支 `pytest.raises` 用例 | 单测 |
+| F6 | coverage | `--apply` 行为测试（合成 .reg + fake pgrep）：`~/.xstars` 存活、`OPEN` 行删除、备份存在、conf 保留 | 单测（darwin） |
+| F7 | quality | uninstall 冲突/重复模式参数 → exit 2 + 回归测试 | 单测 |
+| F8 | quality | 双语 README 功能表 "独立安装器（`.exe` / `.pkg`）" | grep |
+| F9 | correctness | postinstall 备份共享 xlwings 状态、uninstall 恢复/删除双路径（保护开发者模式共存） | 单测 |
+| F10 | correctness | prepare 写 `staging/manifest.json`（xstars/xlwings/lock），build 严格比对不匹配即 fail-closed | 单测 |
+
+**残余清单（可选改进，不在本轮实施）**：D11 归一化半径（`read_text` 连孤立 `\r` 一起吞；编码维度纯 ASCII 下非现存）；R24 零自动校验 + `*.sh` 不在 eol=lf；`Dictionary`/`ThisWorkbook` 模块无锚定（rev 6「三模块一致」声明 2/3 成立）；隐私扫描不覆盖压缩 `vbaProject.bin` 内部；postinstall awk 合并逻辑（生效实现）无行为测试、静态断言宽松项；build_pkg 多条 fail-closed 分支无测试（含 size 不匹配）；Pillow 无防漂移断言；D7 未拍板但被测试锁成双投契约；CI 可缓存 staging/downloads。**RK-01 处置**：staging 实测 Tcl/Tk 资源在位（`tcl9.0/init.tcl` 等）+ F1 冒烟 import ttkbootstrap 间接覆盖，sitecustomize 缓解推迟至 V-01 实测需要时。**验证终态**：安装器单测 43/43；全量 402 passed/13 skipped；pkg ≈137MiB 三层 AppleDouble 零；CI 四项全绿。

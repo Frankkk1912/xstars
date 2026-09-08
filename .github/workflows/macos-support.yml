@@ -87,10 +87,17 @@ jobs:
           python-version: "3.12"
       - name: Install project and build dependencies
         run: python -m pip install -e ".[dev]"
-      - name: Prepare runtime and build unsigned macOS installer
-        run: |
-          python installer/mac/build_pkg.py --prepare-runtime
-          python installer/mac/build_pkg.py --build-pkg
+      - name: Prepare bundled runtime
+        run: python installer/mac/build_pkg.py --prepare-runtime
+      - name: Smoke-test bundled runtime imports
+        env:
+          PYTHONSAFEPATH: "1"
+        run: >-
+          installer/mac/staging/python/bin/python3 -c
+          "import xstars, xlwings, ttkbootstrap, matplotlib, PIL; import sys;
+          assert 'staging' in xstars.__file__; print('OK')"
+      - name: Build unsigned macOS installer
+        run: python installer/mac/build_pkg.py --build-pkg
       - name: Run macOS installer tests
         run: python -m pytest tests/test_macos_installer.py -q
       - name: Compile Python sources, tests, and installer tools

@@ -44,6 +44,15 @@ PACKAGE_IDENTIFIER = "com.frank-sysu.xstars"
 COMPONENT_PACKAGE_NAME = "XSTARS-component.pkg"
 PAYLOAD_ARCHIVE_NAME = "XSTARS-payload.tar.gz"
 XLWINGS_CONF_NAME = "xlwings.conf"
+STAGING_MANIFEST_NAME = "manifest.json"
+XLWINGS_APPLESCRIPT_VERSION_PATTERN = re.compile(
+    r"^xlwings-(?P<version>[^/]+)\.applescript$",
+    flags=re.IGNORECASE,
+)
+XLWINGS_VBA_VERSION_PATTERN = re.compile(
+    r"^\s*'Version:\s*(?P<version>\S+)\s*$",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
 XLWINGS_INTERPRETER_LINE = (
     '"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"'
 )
@@ -364,6 +373,128 @@ def find_xlwings_applescript(python_dir: Path) -> Path:
     return candidates.pop()
 
 
+def xlwings_applescript_version(applescript: Path) -> str:
+    """Read the xlwings version encoded in a wheel AppleScript filename."""
+    match = XLWINGS_APPLESCRIPT_VERSION_PATTERN.fullmatch(applescript.name)
+    if match is None:
+        raise BuildError(
+            f"xlwings AppleScript filename does not contain a version: {applescript}"
+        )
+    return match.group("version")
+
+
+def embedded_xlwings_vba_version(workbook: Path) -> str:
+    """Read the Version comment from the workbook's embedded xlwings.bas."""
+    try:
+        from oletools.olevba import VBA_Parser
+    except ImportError as exc:
+        raise BuildError(
+            "oletools is required to validate embedded xlwings.bas"
+        ) from exc
+
+    parser = VBA_Parser(str(workbook))
+    try:
+        sources = [
+            source
+            for _, _, module_name, source in parser.extract_macros()
+            if isinstance(module_name, str)
+            and module_name.casefold().startswith("xlwings")
+            and isinstance(source, str)
+        ]
+    except Exception as exc:
+        raise BuildError(f"cannot inspect xlwings.bas in {workbook}: {exc}") from exc
+    finally:
+        parser.close()
+    if len(sources) != 1:
+        raise BuildError(
+            f"expected one embedded xlwings.bas in {workbook}; found {len(sources)}"
+        )
+    match = XLWINGS_VBA_VERSION_PATTERN.search(sources[0])
+    if match is None:
+        raise BuildError(f"embedded xlwings.bas has no Version comment: {workbook}")
+    return match.group("version")
+
+
+def validate_xlwings_versions(applescript: Path, workbook: Path) -> str:
+    """Require the runtime AppleScript and embedded VBA bridge to match."""
+    runtime_version = xlwings_applescript_version(applescript)
+    embedded_version = embedded_xlwings_vba_version(workbook)
+    if runtime_version != embedded_version:
+        raise BuildError(
+            "xlwings bridge version mismatch: "
+            f"runtime AppleScript={runtime_version}, embedded xlwings.bas={embedded_version}"
+        )
+    return runtime_version
+
+
+def write_staging_manifest(
+    staging_dir: Path,
+    *,
+    xstars_version: str,
+    xlwings_version: str,
+    runtime_lock_sha256: str,
+) -> Path:
+    """Write the version identity required to consume a prepared staging tree."""
+    manifest = staging_dir / STAGING_MANIFEST_NAME
+    document = {
+        "xstars_version": xstars_version,
+        "xlwings_version": xlwings_version,
+        "runtime_lock_sha256": runtime_lock_sha256,
+    }
+    try:
+        manifest.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise BuildError(f"cannot write staging manifest {manifest}: {exc}") from exc
+    return manifest
+
+
+def validate_staging_manifest(
+    staging_dir: Path,
+    *,
+    xstars_version: str,
+    lock_file: Path = LOCK_FILE,
+) -> dict[str, str]:
+    """Fail closed if staging does not match current project and runtime pins."""
+    manifest = staging_dir / STAGING_MANIFEST_NAME
+    try:
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise BuildError(
+            f"staging manifest is missing; run --prepare-runtime first: {manifest}"
+        ) from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BuildError(f"cannot read staging manifest {manifest}: {exc}") from exc
+
+    lock = load_runtime_lock(lock_file)
+    expected = {
+        "xstars_version": xstars_version,
+        "runtime_lock_sha256": lock.sha256,
+    }
+    mismatches = [
+        f"{key} expected={value} actual={document.get(key)}"
+        for key, value in expected.items()
+        if document.get(key) != value
+    ]
+    if mismatches:
+        raise BuildError("staging manifest mismatch: " + "; ".join(mismatches))
+
+    xlwings_version = document.get("xlwings_version")
+    if not isinstance(xlwings_version, str) or not xlwings_version:
+        raise BuildError("staging manifest has no xlwings_version")
+    installed_version = xlwings_applescript_version(
+        find_xlwings_applescript(staging_dir / "python")
+    )
+    if installed_version != xlwings_version:
+        raise BuildError(
+            "staging manifest mismatch: "
+            f"xlwings_version expected={xlwings_version} actual={installed_version}"
+        )
+    return document
+
+
 def assemble_staging(
     staging_dir: Path,
     repo_root: Path = REPO_ROOT,
@@ -380,6 +511,7 @@ def assemble_staging(
     ensure_runtime_pip(python_executable, runner=runner)
     install_project(python_executable, repo_root, runner=runner)
     applescript = find_xlwings_applescript(python_dir)
+    validate_xlwings_versions(applescript, assets_dir / "XSTARS_mac.xlsm")
 
     bin_dir = staging_dir / "bin"
     if bin_dir.exists():
@@ -413,12 +545,21 @@ def prepare_runtime(
     lock = load_runtime_lock(lock_file)
     archive = download_runtime(lock, staging_dir / "downloads", opener=opener)
     extract_runtime(archive, staging_dir)
-    return assemble_staging(
+    layout = assemble_staging(
         staging_dir,
         repo_root=repo_root,
         assets_dir=assets_dir,
         runner=runner,
     )
+    write_staging_manifest(
+        staging_dir,
+        xstars_version=read_project_version(repo_root / "pyproject.toml"),
+        xlwings_version=xlwings_applescript_version(
+            find_xlwings_applescript(layout.python)
+        ),
+        runtime_lock_sha256=lock.sha256,
+    )
+    return layout
 
 
 def staging_layout(staging_dir: Path) -> StagingLayout:
@@ -976,6 +1117,11 @@ def build_package(
 ) -> Path:
     """Build a final package while keeping only the requested output."""
     staging_layout(staging_dir)
+    validate_staging_manifest(
+        staging_dir,
+        xstars_version=version,
+        lock_file=LOCK_FILE,
+    )
     with TemporaryDirectory(prefix="xstars-pkg-") as temporary:
         layout = assemble_package(
             staging_dir,

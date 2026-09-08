@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -35,13 +36,19 @@ RUNTIME_LOCK = MAC_INSTALLER_DIR / "runtime.lock.json"
 DISTRIBUTION_TEMPLATE = MAC_INSTALLER_DIR / "distribution.xml"
 POSTINSTALL_SCRIPT = MAC_INSTALLER_DIR / "postinstall.sh"
 UNINSTALL_SCRIPT = MAC_INSTALLER_DIR / "uninstall.sh"
-BUILT_PACKAGE = REPO_ROOT / "installer" / "output" / "XSTARS-1.1.1.pkg"
 
 _spec = importlib.util.spec_from_file_location("xstars_macos_build_pkg", BUILD_SCRIPT)
 assert _spec is not None and _spec.loader is not None
 build_pkg = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = build_pkg
 _spec.loader.exec_module(build_pkg)
+
+BUILT_PACKAGE = (
+    REPO_ROOT
+    / "installer"
+    / "output"
+    / f"XSTARS-{build_pkg.read_project_version()}.pkg"
+)
 
 SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 DOCUMENT_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -324,7 +331,9 @@ def test_extract_runtime_rejects_entries_outside_python(tmp_path):
     assert not (tmp_path / "staging" / "python").exists()
 
 
-def test_assemble_staging_installs_non_editably_and_gathers_assets(tmp_path):
+def test_assemble_staging_installs_non_editably_and_gathers_assets(
+    monkeypatch, tmp_path
+):
     staging = tmp_path / "staging"
     python_executable = staging / "python" / "bin" / "python3"
     python_executable.parent.mkdir(parents=True)
@@ -341,6 +350,11 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     commands = []
+    monkeypatch.setattr(
+        build_pkg,
+        "embedded_xlwings_vba_version",
+        lambda _workbook: "0.37.0",
+    )
 
     def fake_runner(command):
         commands.append(tuple(command))
@@ -377,6 +391,23 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(tmp_path):
     assert "-e" not in install
     assert all("dev" not in argument for argument in install)
     assert commands[2:] == commands[:2]
+
+
+def test_xlwings_bridge_versions_match_packaged_workbook(monkeypatch, tmp_path):
+    applescript = tmp_path / "xlwings-0.37.0.applescript"
+    applescript.write_text("script", encoding="utf-8")
+
+    assert (
+        build_pkg.embedded_xlwings_vba_version(ASSETS_DIR / "XSTARS_mac.xlsm")
+        == "0.37.0"
+    )
+    monkeypatch.setattr(
+        build_pkg,
+        "embedded_xlwings_vba_version",
+        lambda _workbook: "0.36.0",
+    )
+    with pytest.raises(build_pkg.BuildError, match="bridge version mismatch"):
+        build_pkg.validate_xlwings_versions(applescript, tmp_path / "workbook.xlsm")
 
 
 def test_xlam_has_2006_custom_ui_and_root_relationship():
@@ -417,7 +448,6 @@ def test_office_artifacts_embed_expected_normalized_vba_sources():
         _macro_by_prefix(workbook_macros, "RibbonCallbacks")
     ) == _normalize_vba(repository_callbacks)
 
-    assert xlwings.__version__ == "0.37.0"
     wheel_xlwings_bas = (
         Path(xlwings.__file__).with_name("xlwings.bas").read_text(encoding="utf-8")
     )
@@ -467,6 +497,20 @@ def _fake_m2_staging(tmp_path: Path) -> Path:
     return staging
 
 
+def test_staging_manifest_rejects_stale_project_version(tmp_path):
+    staging = _fake_m2_staging(tmp_path)
+    lock = build_pkg.load_runtime_lock(RUNTIME_LOCK)
+    build_pkg.write_staging_manifest(
+        staging,
+        xstars_version="0.0.0",
+        xlwings_version="0.37.0",
+        runtime_lock_sha256=lock.sha256,
+    )
+
+    with pytest.raises(build_pkg.BuildError, match="xstars_version expected=1.1.1"):
+        build_pkg.build_package(staging, "1.1.1", output_dir=tmp_path / "output")
+
+
 def test_distribution_template_and_rendering(tmp_path):
     raw = _xml_root(DISTRIBUTION_TEMPLATE.read_bytes())
     domains = raw.find("domains")
@@ -474,7 +518,11 @@ def test_distribution_template_and_rendering(tmp_path):
     os_version = raw.find("./volume-check/allowed-os-versions/os-version")
 
     assert domains is not None
-    assert domains.attrib == {"enable_currentUserHome": "true"}
+    assert domains.attrib == {
+        "enable_currentUserHome": "true",
+        "enable_localSystem": "false",
+        "enable_anywhere": "false",
+    }
     assert options is not None
     assert options.attrib["hostArchitectures"] == "arm64"
     assert options.attrib["customize"] == "never"
@@ -660,6 +708,11 @@ def test_postinstall_has_user_domain_deployment_and_fail_closed_runtime_contract
     assert "/usr/bin/dscl . -read" in script
     assert "/usr/sbin/chown -R" in script
     assert "copy_user_file" in script and "|| true" in script
+    assert "backup_user_file_once" in script
+    assert script.index('"$APPLESCRIPT_BACKUP"') < script.rindex(
+        '"xlwings AppleScript" || true'
+    )
+    assert script.index('"$CONF_BACKUP"') < script.index("merge_xlwings_conf || true")
     assert "merge_xlwings_conf || true" in script
     assert "rm -rf" not in script
     assert "~/.xstars" not in script
@@ -783,9 +836,10 @@ def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
 
     assert script.startswith("#!/bin/bash\n")
     assert 'MODE="dry-run"' in script
-    assert '--apply) MODE="apply"' in script
+    assert "--dry-run | --apply)" in script
+    assert "specify --dry-run or --apply only once" in script
     assert "no files will be changed" in script
-    assert '/usr/bin/pgrep -x "$process"' in script
+    assert 'pgrep -x "$process"' in script
     assert '"Microsoft Excel" "WPS Office" "wpsoffice"' in script
     assert "xstars_launch.scpt" in script
     assert "xlwings.applescript" in script
@@ -797,6 +851,8 @@ def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
     assert "XSTARS.XLAM" in script
     assert "PRAGMA integrity_check;" in script
     assert "restore_registration_backup" in script
+    assert "restore_xlwings_applescript" in script
+    assert "restore_xlwings_conf" in script
     assert "/usr/sbin/pkgutil --forget" in script
     assert 'PACKAGE_IDENTIFIER="com.frank-sysu.xstars"' in script
     assert "~/.xstars" not in script.casefold()
@@ -837,6 +893,178 @@ def test_uninstall_help_and_default_dry_run_do_not_write(tmp_path):
     assert tuple(tmp_path.iterdir()) == before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="uninstall.sh is a POSIX bash script; Windows cannot exec it directly",
+)
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--bogus"],
+        ["--apply", "--dry-run"],
+        ["--dry-run", "--apply"],
+        ["--apply", "--apply"],
+    ],
+)
+def test_uninstall_rejects_unknown_conflicting_and_repeated_modes(tmp_path, arguments):
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOME": str(tmp_path), "TMPDIR": str(tmp_path)},
+    )
+
+    assert result.returncode == 2
+
+
+def _uninstall_environment(tmp_path: Path, *, pgrep_exit: int) -> dict[str, str]:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    pgrep = fake_bin / "pgrep"
+    pgrep.write_text(f"#!/bin/sh\nexit {pgrep_exit}\n", encoding="utf-8")
+    pgrep.chmod(0o755)
+    return {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+    }
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")
+def test_uninstall_apply_cleans_registration_and_preserves_user_data(tmp_path):
+    settings = tmp_path / ".xstars"
+    settings.mkdir()
+    (settings / "settings.json").write_text("{}", encoding="utf-8")
+
+    install_root = tmp_path / "Library/Application Support/XSTARS"
+    install_root.mkdir(parents=True)
+    app_scripts = tmp_path / "Library/Application Scripts/com.microsoft.Excel"
+    app_scripts.mkdir(parents=True)
+    applescript = app_scripts / "xlwings.applescript"
+    applescript.write_text("installed bridge", encoding="utf-8")
+    conf = tmp_path / "Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text(
+        '"LOG_FILE","$HOME/xlwings.log"\n"INTERPRETER_MAC","/installed/python"\n',
+        encoding="utf-8",
+    )
+
+    registration = tmp_path / (
+        "Library/Group Containers/UBF8T346G9.Office/"
+        "MicrosoftRegistrationDB/registration.reg"
+    )
+    registration.parent.mkdir(parents=True)
+    with sqlite3.connect(registration) as database:
+        database.execute(
+            "CREATE TABLE HKEY_CURRENT_USER_values (name TEXT, value BLOB)"
+        )
+        database.executemany(
+            "INSERT INTO HKEY_CURRENT_USER_values VALUES (?, ?)",
+            [
+                ("OPEN1", str(tmp_path / "XSTARS.XLAM")),
+                ("OPEN2", str(tmp_path / "OTHER.XLAM")),
+            ],
+        )
+
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--apply"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_uninstall_environment(tmp_path, pgrep_exit=1),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert settings.is_dir()
+    assert not install_root.exists()
+    assert not applescript.exists()
+    assert conf.read_text(encoding="utf-8") == '"LOG_FILE","$HOME/xlwings.log"\n'
+    with sqlite3.connect(registration) as database:
+        assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert database.execute(
+            "SELECT name FROM HKEY_CURRENT_USER_values ORDER BY name"
+        ).fetchall() == [("OPEN2",)]
+    backups = list(
+        (tmp_path / "Documents/XSTARS-uninstall-backups").glob("uninstall-backup-*")
+    )
+    assert len(backups) == 1
+    assert (backups[0] / "registration.reg").is_file()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")
+def test_uninstall_apply_restores_preinstall_xlwings_files(tmp_path):
+    install_root = tmp_path / "Library/Application Support/XSTARS"
+    backup = install_root / "preinstall-backup"
+    backup.mkdir(parents=True)
+    (backup / "xlwings.applescript").write_text("original bridge", encoding="utf-8")
+    (backup / "xlwings.conf").write_text(
+        '"INTERPRETER_MAC","/original/python"\n"OTHER","value"\n',
+        encoding="utf-8",
+    )
+    app_scripts = tmp_path / "Library/Application Scripts/com.microsoft.Excel"
+    app_scripts.mkdir(parents=True)
+    applescript = app_scripts / "xlwings.applescript"
+    applescript.write_text("installed bridge", encoding="utf-8")
+    conf = tmp_path / "Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text('"INTERPRETER_MAC","/installed/python"\n', encoding="utf-8")
+
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--apply"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_uninstall_environment(tmp_path, pgrep_exit=1),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert applescript.read_text(encoding="utf-8") == "original bridge"
+    assert conf.read_text(encoding="utf-8") == (
+        '"INTERPRETER_MAC","/original/python"\n"OTHER","value"\n'
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")
+def test_uninstall_apply_refuses_when_excel_is_running(tmp_path):
+    before = tuple(tmp_path.iterdir())
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--apply"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_uninstall_environment(tmp_path, pgrep_exit=0),
+    )
+
+    assert result.returncode == 1
+    assert "refusing to continue" in result.stderr
+    assert (
+        tuple(path for path in tmp_path.iterdir() if path.name != "fake-bin") == before
+    )
+
+
+def test_payload_validation_rejects_missing_required_entry(tmp_path):
+    archive = tmp_path / "XSTARS-payload.tar.gz"
+    source = tmp_path / "python"
+    source.mkdir()
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(source, arcname="XSTARS/python")
+
+    with pytest.raises(build_pkg.BuildError, match="is missing entries"):
+        build_pkg.validate_payload_archive(archive)
+
+
+def test_component_payload_validation_rejects_missing_payload_archive(tmp_path):
+    payload = tmp_path / "Payload"
+    names = _clean_component_payload_names()
+    names.remove("./Library/Application Support/XSTARS/XSTARS-payload.tar.gz")
+    _write_odc_payload(payload, names)
+
+    with pytest.raises(build_pkg.BuildError, match="component payload is missing"):
+        build_pkg.validate_component_payload(payload)
+
+
 def test_component_payload_validation_rejects_nested_appledouble(tmp_path):
     payload = tmp_path / "Payload"
     names = _clean_component_payload_names()
@@ -851,10 +1079,11 @@ def test_component_payload_validation_rejects_nested_appledouble(tmp_path):
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin" or not BUILT_PACKAGE.is_file(),
-    reason="requires the locally built macOS package",
+    sys.platform != "darwin",
+    reason="requires macOS package inspection tools",
 )
 def test_built_pkg_is_unsigned_product_archive(tmp_path):
+    assert BUILT_PACKAGE.is_file(), f"missing locally built package: {BUILT_PACKAGE}"
     listing = subprocess.run(
         ["xar", "-tf", str(BUILT_PACKAGE)],
         check=True,
@@ -899,9 +1128,11 @@ def test_built_pkg_is_unsigned_product_archive(tmp_path):
         / "XSTARS"
         / build_pkg.PAYLOAD_ARCHIVE_NAME
     )
+    build_pkg.validate_payload_archive(payload_archive)
     with tarfile.open(payload_archive, "r:gz") as archive:
         archive_names = {PurePosixPath(name) for name in archive.getnames()}
     assert PurePosixPath("XSTARS/uninstall.sh") in archive_names
+    assert PurePosixPath("XSTARS/python/bin/python3") in archive_names
 
     scripts_dir = component_dir / "Scripts"
     assert (scripts_dir / "postinstall").is_file()

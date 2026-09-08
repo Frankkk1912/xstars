@@ -54,6 +54,11 @@ EXCEL_STARTUP="$USER_HOME/Library/Group Containers/UBF8T346G9.Office/User Conten
 APP_SCRIPTS_DIR="$USER_HOME/Library/Application Scripts/com.microsoft.Excel"
 XLWINGS_CONF_DIR="$USER_HOME/Library/Containers/com.microsoft.Excel/Data"
 XLWINGS_CONF="$XLWINGS_CONF_DIR/xlwings.conf"
+PREINSTALL_BACKUP_DIR="$INSTALL_ROOT/preinstall-backup"
+APPLESCRIPT_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.applescript"
+APPLESCRIPT_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.applescript.absent"
+CONF_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.conf"
+CONF_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.conf.absent"
 
 run_as_user() {
     if [ "$(/usr/bin/id -u)" -eq 0 ]; then
@@ -116,19 +121,53 @@ copy_user_file() {
     return 0
 }
 
+backup_user_file_once() {
+    local target=$1
+    local backup=$2
+    local absent_marker=$3
+    local label=$4
+
+    if [ -f "$backup" ] || [ -f "$absent_marker" ]; then
+        return 0
+    fi
+    if ! run_as_user /bin/mkdir -p "$PREINSTALL_BACKUP_DIR"; then
+        warn "cannot create pre-install backup directory: $PREINSTALL_BACKUP_DIR"
+        return 1
+    fi
+    if [ -f "$target" ]; then
+        if ! run_as_user /bin/cp -p "$target" "$backup"; then
+            warn "cannot back up existing $label: $target"
+            return 1
+        fi
+        echo "postinstall: backed up existing $label to $backup"
+    elif ! run_as_user /usr/bin/touch "$absent_marker"; then
+        warn "cannot record that $label was absent before installation"
+        return 1
+    fi
+    return 0
+}
+
 # Both integrations are best-effort: sandbox/TCC denial must not corrupt an
-# otherwise usable runtime installation. The directories are pre-created for
-# Excel's first launch and repeated installs overwrite the same files.
+# otherwise usable runtime installation. Preserve shared xlwings state once,
+# so an uninstall can restore the exact files that predated XSTARS.
 copy_user_file \
     "$INSTALL_ROOT/bin/XSTARS.xlam" \
     "$EXCEL_STARTUP" \
     "XSTARS.xlam" \
     "Excel add-in" || true
-copy_user_file \
-    "$INSTALL_ROOT/bin/xlwings.applescript" \
-    "$APP_SCRIPTS_DIR" \
-    "xlwings.applescript" \
-    "xlwings AppleScript" || true
+if backup_user_file_once \
+    "$APP_SCRIPTS_DIR/xlwings.applescript" \
+    "$APPLESCRIPT_BACKUP" \
+    "$APPLESCRIPT_ABSENT_MARKER" \
+    "xlwings AppleScript"; then
+    copy_user_file \
+        "$INSTALL_ROOT/bin/xlwings.applescript" \
+        "$APP_SCRIPTS_DIR" \
+        "xlwings.applescript" \
+        "xlwings AppleScript" || true
+else
+    warn "leaving the existing xlwings AppleScript unchanged"
+fi
 
 merge_xlwings_conf() {
     local configured_line
@@ -196,7 +235,15 @@ merge_xlwings_conf() {
     return 0
 }
 
-merge_xlwings_conf || true
+if backup_user_file_once \
+    "$XLWINGS_CONF" \
+    "$CONF_BACKUP" \
+    "$CONF_ABSENT_MARKER" \
+    "xlwings configuration"; then
+    merge_xlwings_conf || true
+else
+    warn "leaving the existing xlwings configuration unchanged"
+fi
 
 echo "postinstall: done"
 exit 0

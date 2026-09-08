@@ -6,7 +6,8 @@
 <installer-gui-script minSpecVersion="1">
     <title>XSTARS</title>
     <organization>com.frank-sysu</organization>
-    <domains enable_currentUserHome="true"/>
+    <domains enable_currentUserHome="true" enable_localSystem="false"
+             enable_anywhere="false"/>
     <options customize="never" require-scripts="true"
              hostArchitectures="arm64"/>
     <volume-check>

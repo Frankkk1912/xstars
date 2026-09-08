@@ -29,20 +29,12 @@ installing. Use one of these methods:
      -target CurrentUserHomeDirectory
    ```
 
-3. The equivalent root target accepted by the package distribution is:
-
-   ```bash
-   sudo installer -pkg "/path/to/XSTARS-1.1.1.pkg" -target /
-   ```
-
 The `CurrentUserHomeDirectory` form is the target used by the real-package
 layout validation. With the package's `/` install location and relative
 payload layout, it places the runtime under the signed-in user's
-`~/Library/Application Support/XSTARS/`, not in a system Python. The `/` form
-is an Installer command-line alternative; the package distribution still
-selects its enabled current-user domain. The Terminal alternatives invoke
-`sudo`, so macOS asks for an administrator password; normal graphical
-installation remains per-user.
+`~/Library/Application Support/XSTARS/`, not in a system Python. The Terminal
+form invokes `sudo`, so macOS asks for an administrator password; normal
+graphical installation remains per-user.
 
 After installation, the package deploys the bundled runtime, the XSTARS Excel
 startup add-in, the xlwings AppleScript bridge, and the xlwings

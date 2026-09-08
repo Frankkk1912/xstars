@@ -26,7 +26,9 @@ and VBA unqualified calls such as `RunPython` do not cross project boundaries
    as CRLF inside `vbaProject.bin` regardless of input, so a raw byte compare
    will always fail by design.
 3. **`xlwings.bas` version must match the xlwings bundled in the runtime**
-   (currently 0.37.0).
+   (CI-asserted: staging collects the version-encoded AppleScript filename from the xlwings wheel and the
+   test suite compares it with the `xlwings.bas` version embedded in the shipped `XSTARS_mac.xlsm`;
+   currently 0.37.0).
 4. **`xlwings.conf!Interpreter` must stay empty** in both artifacts. A
    workbook-level entry would override the installer-written
    `INTERPRETER_MAC` and point every user at a non-existent interpreter.

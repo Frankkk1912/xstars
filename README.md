@@ -59,7 +59,7 @@
 | **💰 Price** | 🟢 Free | 🔴 ~$300–600/yr | 🟢 Free |
 | **📊 Works inside Excel** | ✅ | ❌ | ❌ |
 | **🖱️ No coding required** | ✅ | ✅ | ❌ |
-| **📦 No Python/R install** | ✅ (standalone .exe) | N/A | ❌ |
+| **📦 No Python/R install** | ✅ (standalone installer: `.exe` / `.pkg`) | N/A | ❌ |
 | **🤖 Auto stat test selection** | ✅ | ❌ Manual | ❌ Manual |
 | **📐 Significance brackets** | ✅ Automatic | ⚠️ Manual placement | ❌ Code required |
 | **🧪 Experiment presets** | ✅ WB, qPCR, CCK-8, ELISA | ❌ | ❌ Build your own |
