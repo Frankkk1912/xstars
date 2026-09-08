@@ -8,6 +8,7 @@ metadata-free payload archive, then invoke ``pkgbuild`` and ``productbuild``.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -561,6 +562,71 @@ def validate_payload_archive(archive: Path) -> None:
         )
 
 
+def list_component_payload_paths(payload: Path) -> list[PurePosixPath]:
+    """Read path names from a gzip-compressed POSIX odc cpio payload."""
+    paths = []
+    try:
+        with gzip.open(payload, "rb") as archive:
+            while True:
+                header = archive.read(76)
+                if not header:
+                    raise BuildError(
+                        f"component payload has no cpio trailer: {payload}"
+                    )
+                if len(header) != 76 or header[:6] != b"070707":
+                    raise BuildError(
+                        f"component payload is not POSIX odc cpio: {payload}"
+                    )
+                try:
+                    name_size = int(header[59:65], 8)
+                    file_size = int(header[65:76], 8)
+                except ValueError as exc:
+                    raise BuildError(
+                        f"component payload has an invalid cpio header: {payload}"
+                    ) from exc
+                if name_size <= 0:
+                    raise BuildError(
+                        f"component payload has an invalid cpio path size: {payload}"
+                    )
+                encoded_name = archive.read(name_size)
+                if len(encoded_name) != name_size or not encoded_name.endswith(b"\0"):
+                    raise BuildError(
+                        f"component payload has a truncated path: {payload}"
+                    )
+                name = encoded_name[:-1].decode("utf-8", errors="surrogateescape")
+                if name == "TRAILER!!!":
+                    return paths
+                paths.append(PurePosixPath(name))
+                remaining = file_size
+                while remaining:
+                    chunk = archive.read(min(remaining, 1024 * 1024))
+                    if not chunk:
+                        raise BuildError(
+                            f"component payload has truncated file data: {payload}"
+                        )
+                    remaining -= len(chunk)
+    except (OSError, EOFError) as exc:
+        raise BuildError(f"cannot inspect component payload {payload}: {exc}") from exc
+
+
+def validate_component_payload(payload: Path) -> None:
+    """Reject AppleDouble/Finder entries inside a component's cpio Payload."""
+    paths = list_component_payload_paths(payload)
+    forbidden = [
+        str(path)
+        for path in paths
+        if any(part == ".DS_Store" or part.startswith("._") for part in path.parts)
+    ]
+    if forbidden:
+        raise BuildError(
+            "component payload contains forbidden macOS metadata: "
+            + ", ".join(forbidden[:5])
+        )
+    required = PurePosixPath("Library/Application Support/XSTARS/XSTARS-payload.tar.gz")
+    if required not in paths:
+        raise BuildError(f"component payload is missing {required}: {payload}")
+
+
 def create_payload_archive(
     install_tree: Path,
     component_root: Path,
@@ -720,13 +786,70 @@ def stage_package_scripts(work_dir: Path, source: Path | None) -> Path | None:
     return scripts_dir
 
 
+def sanitize_component_payload(
+    payload: Path,
+    work_dir: Path,
+    *,
+    runner: CommandRunner = default_command_runner,
+) -> None:
+    """Repack a component cpio Payload without AppleDouble or Finder entries."""
+    extracted = work_dir / "payload-expanded"
+    cleaned = work_dir / "Payload-clean"
+    if extracted.exists():
+        shutil.rmtree(extracted)
+    cleaned.unlink(missing_ok=True)
+    extracted.mkdir(parents=True)
+
+    extract_command = [
+        "/usr/bin/env",
+        "COPYFILE_DISABLE=1",
+        "/usr/bin/tar",
+        "--no-xattrs",
+        "--no-mac-metadata",
+        "-xzf",
+        str(payload),
+        "-C",
+        str(extracted),
+    ]
+    _run_checked(extract_command, runner, "component payload expansion")
+    for metadata in find_macos_metadata(extracted):
+        if metadata.is_dir() and not metadata.is_symlink():
+            shutil.rmtree(metadata)
+        else:
+            metadata.unlink()
+
+    create_command = [
+        "/usr/bin/env",
+        "COPYFILE_DISABLE=1",
+        "/usr/bin/tar",
+        "--no-xattrs",
+        "--no-mac-metadata",
+        "--format",
+        "odc",
+        "-czf",
+        str(cleaned),
+        "-C",
+        str(extracted),
+        ".",
+    ]
+    _run_checked(create_command, runner, "component payload metadata cleanup")
+    if not cleaned.is_file():
+        raise BuildError(f"payload cleanup did not create {cleaned}")
+    validate_component_payload(cleaned)
+    try:
+        cleaned.replace(payload)
+    except OSError as exc:
+        raise BuildError(f"cannot replace component payload {payload}: {exc}") from exc
+    shutil.rmtree(extracted)
+
+
 def sanitize_component_package(
     component_package: Path,
     work_dir: Path,
     *,
     runner: CommandRunner = default_command_runner,
 ) -> None:
-    """Remove AppleDouble generated from immutable Sequoia provenance xattrs."""
+    """Remove AppleDouble from both the package envelope and its cpio Payload."""
     expanded = work_dir / "component-expanded"
     verification = work_dir / "component-verification"
     cleaned_package = work_dir / "XSTARS-component-clean.pkg"
@@ -747,6 +870,7 @@ def sanitize_component_package(
             shutil.rmtree(metadata)
         else:
             metadata.unlink()
+    sanitize_component_payload(expanded / "Payload", work_dir, runner=runner)
 
     _run_checked(
         ["pkgutil", "--flatten", str(expanded), str(cleaned_package)],
@@ -773,6 +897,7 @@ def sanitize_component_package(
             "component package contains forbidden macOS metadata after cleanup: "
             + ", ".join(str(path) for path in forbidden[:5])
         )
+    validate_component_payload(verification / "Payload")
     shutil.rmtree(expanded)
     shutil.rmtree(verification)
 

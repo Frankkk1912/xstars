@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -25,6 +27,7 @@ BUILD_SCRIPT = MAC_INSTALLER_DIR / "build_pkg.py"
 RUNTIME_LOCK = MAC_INSTALLER_DIR / "runtime.lock.json"
 DISTRIBUTION_TEMPLATE = MAC_INSTALLER_DIR / "distribution.xml"
 POSTINSTALL_SCRIPT = MAC_INSTALLER_DIR / "postinstall.sh"
+UNINSTALL_SCRIPT = MAC_INSTALLER_DIR / "uninstall.sh"
 BUILT_PACKAGE = REPO_ROOT / "installer" / "output" / "XSTARS-1.1.1.pkg"
 
 _spec = importlib.util.spec_from_file_location("xstars_macos_build_pkg", BUILD_SCRIPT)
@@ -40,6 +43,45 @@ CUSTOM_UI_2006_NS = "http://schemas.microsoft.com/office/2006/01/customui"
 CUSTOM_UI_2006_REL = (
     "http://schemas.microsoft.com/office/2006/relationships/ui/extensibility"
 )
+
+
+def _write_odc_payload(path: Path, names: list[str]) -> None:
+    """Write the minimal POSIX odc cpio stream needed by package-cleanup tests."""
+
+    def write_entry(archive, name: str) -> None:
+        encoded_name = name.encode("utf-8") + b"\0"
+        header = (
+            "070707"
+            "000000"  # device
+            "000001"  # inode
+            "100644"  # mode
+            "000000"  # uid
+            "000000"  # gid
+            "000001"  # links
+            "000000"  # rdev
+            "00000000000"  # mtime
+            f"{len(encoded_name):06o}"
+            "00000000000"  # file size
+        ).encode("ascii")
+        assert len(header) == 76
+        archive.write(header)
+        archive.write(encoded_name)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wb") as archive:
+        for name in names:
+            write_entry(archive, name)
+        write_entry(archive, "TRAILER!!!")
+
+
+def _clean_component_payload_names() -> list[str]:
+    return [
+        ".",
+        "./Library",
+        "./Library/Application Support",
+        "./Library/Application Support/XSTARS",
+        "./Library/Application Support/XSTARS/XSTARS-payload.tar.gz",
+    ]
 
 
 def _runtime_lock_for(content: bytes, *, sha256: str | None = None):
@@ -626,7 +668,7 @@ def test_stage_package_scripts_includes_executable_postinstall_and_conf(tmp_path
     )
 
 
-def test_component_package_cleanup_removes_generated_appledouble(tmp_path):
+def test_component_package_cleanup_removes_outer_and_nested_appledouble(tmp_path):
     component = tmp_path / "XSTARS-component.pkg"
     component.write_bytes(b"original")
     commands = []
@@ -635,16 +677,32 @@ def test_component_package_cleanup_removes_generated_appledouble(tmp_path):
     def fake_runner(command):
         nonlocal expansion_count
         commands.append(tuple(command))
-        if command[1] == "--expand":
+        if command[0] == "pkgutil" and command[1] == "--expand":
             expansion_count += 1
             destination = Path(command[-1])
             scripts = destination / "Scripts"
             scripts.mkdir(parents=True)
             (scripts / "postinstall").write_text("script", encoding="utf-8")
+            payload_names = _clean_component_payload_names()
             if expansion_count == 1:
                 (scripts / "._postinstall").write_bytes(b"appledouble")
-        elif command[1] == "--flatten":
-            assert not build_pkg.find_macos_metadata(Path(command[2]))
+                payload_names.append("./Library/._Application Support")
+            _write_odc_payload(destination / "Payload", payload_names)
+        elif command[0] == "/usr/bin/env" and "-xzf" in command:
+            extracted = Path(command[command.index("-C") + 1])
+            nested = extracted / "Library" / "Application Support" / "XSTARS"
+            nested.mkdir(parents=True)
+            (nested / "XSTARS-payload.tar.gz").write_bytes(b"payload")
+            (nested / "._XSTARS-payload.tar.gz").write_bytes(b"appledouble")
+        elif command[0] == "/usr/bin/env" and "-czf" in command:
+            _write_odc_payload(
+                Path(command[command.index("-czf") + 1]),
+                _clean_component_payload_names(),
+            )
+        elif command[0] == "pkgutil" and command[1] == "--flatten":
+            expanded = Path(command[2])
+            assert not build_pkg.find_macos_metadata(expanded)
+            build_pkg.validate_component_payload(expanded / "Payload")
             Path(command[-1]).write_bytes(b"cleaned")
         return subprocess.CompletedProcess(command, 0)
 
@@ -655,13 +713,16 @@ def test_component_package_cleanup_removes_generated_appledouble(tmp_path):
     )
 
     assert component.read_bytes() == b"cleaned"
-    assert [command[1] for command in commands] == [
-        "--expand",
-        "--flatten",
-        "--expand",
+    assert [(command[0], command[1]) for command in commands] == [
+        ("pkgutil", "--expand"),
+        ("/usr/bin/env", "COPYFILE_DISABLE=1"),
+        ("/usr/bin/env", "COPYFILE_DISABLE=1"),
+        ("pkgutil", "--flatten"),
+        ("pkgutil", "--expand"),
     ]
     assert not (tmp_path / "component-expanded").exists()
     assert not (tmp_path / "component-verification").exists()
+    assert not (tmp_path / "payload-expanded").exists()
 
 
 def test_assemble_package_uses_injected_commands(tmp_path):
@@ -704,6 +765,74 @@ def test_assemble_package_uses_injected_commands(tmp_path):
     build_pkg.validate_payload_archive(layout.payload.archive)
 
 
+def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
+    script = UNINSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert script.startswith("#!/bin/bash\n")
+    assert 'MODE="dry-run"' in script
+    assert '--apply) MODE="apply"' in script
+    assert "no files will be changed" in script
+    assert '/usr/bin/pgrep -x "$process"' in script
+    assert '"Microsoft Excel" "WPS Office" "wpsoffice"' in script
+    assert "xstars_launch.scpt" in script
+    assert "xlwings.applescript" in script
+    assert "INTERPRETER_MAC" in script
+    assert 'BACKUP_PARENT="$USER_HOME/Documents/XSTARS-uninstall-backups"' in script
+    assert '/bin/cp -p "$database" "$backup"' in script
+    assert "HKEY_CURRENT_USER_values" in script
+    assert "OPEN[0-9]*" in script
+    assert "XSTARS.XLAM" in script
+    assert "PRAGMA integrity_check;" in script
+    assert "restore_registration_backup" in script
+    assert "/usr/sbin/pkgutil --forget" in script
+    assert 'PACKAGE_IDENTIFIER="com.frank-sysu.xstars"' in script
+    assert "~/.xstars" not in script.casefold()
+    assert "$user_home/.xstars" not in script.casefold()
+    deletion_lines = [line for line in script.splitlines() if "/bin/rm" in line]
+    assert all(".xstars" not in line.casefold() for line in deletion_lines)
+
+
+def test_uninstall_help_and_default_dry_run_do_not_write(tmp_path):
+    environment = {**os.environ, "HOME": str(tmp_path), "TMPDIR": str(tmp_path)}
+    before = tuple(tmp_path.iterdir())
+
+    help_result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    dry_run = subprocess.run(
+        [str(UNINSTALL_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert help_result.returncode == 0
+    assert "Usage: uninstall.sh" in help_result.stdout
+    assert dry_run.returncode == 0
+    assert "dry-run only" in dry_run.stdout
+    assert "would remove Excel Startup add-in" in dry_run.stdout
+    assert "would require PRAGMA integrity_check" in dry_run.stdout
+    assert tuple(tmp_path.iterdir()) == before
+
+
+def test_component_payload_validation_rejects_nested_appledouble(tmp_path):
+    payload = tmp_path / "Payload"
+    names = _clean_component_payload_names()
+    names.append("./Library/Application Support/._XSTARS")
+    _write_odc_payload(payload, names)
+
+    with pytest.raises(
+        build_pkg.BuildError,
+        match="component payload contains forbidden macOS metadata",
+    ):
+        build_pkg.validate_component_payload(payload)
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin" or not BUILT_PACKAGE.is_file(),
     reason="requires the locally built macOS package",
@@ -726,7 +855,38 @@ def test_built_pkg_is_unsigned_product_archive(tmp_path):
         text=True,
     )
     assert not build_pkg.find_macos_metadata(expanded)
-    scripts_dir = expanded / "XSTARS-component.pkg" / "Scripts"
+    component_dir = expanded / "XSTARS-component.pkg"
+    build_pkg.validate_component_payload(component_dir / "Payload")
+    component_payload = tmp_path / "component-payload"
+    component_payload.mkdir()
+    subprocess.run(
+        [
+            "/usr/bin/env",
+            "COPYFILE_DISABLE=1",
+            "/usr/bin/tar",
+            "--no-xattrs",
+            "--no-mac-metadata",
+            "-xzf",
+            str(component_dir / "Payload"),
+            "-C",
+            str(component_payload),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload_archive = (
+        component_payload
+        / "Library"
+        / "Application Support"
+        / "XSTARS"
+        / build_pkg.PAYLOAD_ARCHIVE_NAME
+    )
+    with tarfile.open(payload_archive, "r:gz") as archive:
+        archive_names = {PurePosixPath(name) for name in archive.getnames()}
+    assert PurePosixPath("XSTARS/uninstall.sh") in archive_names
+
+    scripts_dir = component_dir / "Scripts"
     assert (scripts_dir / "postinstall").is_file()
     assert (scripts_dir / "postinstall").stat().st_mode & 0o111
     assert (scripts_dir / "xlwings.conf").read_text(encoding="utf-8") == (

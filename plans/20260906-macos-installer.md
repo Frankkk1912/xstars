@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：9**
+- **rev：10**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -17,6 +17,7 @@
 | rev 7 | 2026-09-08 | **M1 完成（T1.1–T1.4 [x]，`aef6a32`）**：① D1 落定——pin `20260901`/`cpython-3.12.14` aarch64 `install_only_stripped`，SHA256 `81a359f1…e4b2b`、size 24,981,445（官方 SHA256SUMS 双源核对）；② `build_pkg.py`（纯函数+注入式下载/命令执行器）+ `runtime.lock.json` + 15 项无网络单测全绿；③ 真实干跑通过：staging import（脱离仓库根）`xstars.__file__` 位于 staging site-packages、依赖装齐、无 dev 项、`xlwings.applescript` 已汇集；④ 新增仓库级事实与处置：ruff 全仓存量 117 error（`xstars/main.py` 34 等，main 从未 ruff-clean 且相关文件在「明确不修改」清单）→ ruff 验收范围明确为**新文件 0 error**；staging 构建产物目录入 `.gitignore`（与 `installer/output/` 同类）并在 compileall/ruff 中排除；⑤ VBA 占位符澄清：断言用 `/Users/(?!<User>)`——上游 `xlwings.bas` 规范占位 `/Users/<User>` 不是泄漏（worker 裁决，D11 语义补充）；⑥ 实施记录：worker 45min 超时一次（pip 装栈耗时），编排者接手完成验证与收尾；oletools 入 `[dev]`（T1.4 授权决定）。全量回归 374 passed/13 skipped 零新增失败；ribbon 门禁空 diff | pytest/ruff/compileall/真实干跑实测；worker 报告 + 编排者复验 |
 | rev 8 | 2026-09-08 | **M2 完成（T2.1–T2.4 [x]，`f352a05`）**：真实出包 `XSTARS-1.1.1.pkg`（189,756,535 B，unsigned 预期，SHA256 `7b8d128d…`）；**RK-08 实测解除**——`install-location /` + payload 相对布局 + `installer -target CurrentUserHomeDirectory` 实际落位 `~/Library/Application Support/XSTARS/`（测试安装+receipt 已完整清理）；`distribution.xml` 四项改造落地（arm64/min12.0/currentUserHome/**移除 rootVolumeOnly**）；安装器单测 23/23；全量回归 382 passed/13 skipped。**新增残余风险（已裁决接受）**：xlwings wheel 内置 `quickstart.xlsm` 含上游 `x15ac:absPath`（`C:\Users\felix\…`），系第三方文件且用户不会打开，不做包级清洗以维持“运行时=纯净 wheel 安装”可复现性；T2.2 扫描范围维持两件 XSTARS 制品 | worker 报告 + 编排者独立复验（pytest/ruff/compileall/门禁/单测重跑于 pi-lens 重排后） |
 | rev 9 | 2026-09-08 | **M3 完成（T3.1–T3.3 [x]，`15536c1`）**：postinstall.sh（201 行，幂等：payload 解包 fail-closed + xlam→Startup 预创建 + applescript→Application Scripts + INTERPRETER_MAC 写 Containers conf 保留未知键；无任何 rm -rf、不碰 `~/.xstars`）；`render_xlwings_conf()` 纯函数（合并逻辑单测）；**新发现并处置**：pkgbuild 会把 Sequoia provenance xattr 转为 `Scripts/._postinstall` AppleDouble → fail-closed 清理流程（expand→剥→flatten→重验，最终 pkg 零 AppleDouble，真实重出包 189,759,482 B，Scripts 含 postinstall+xlwings.conf）。真实安装未执行（V-02/V-03 责任人=用户，边界遵守）。安装器单测 28/28；全量回归 387 passed/13 skipped | worker 报告 + 编排者独立复验（含 postinstall 安全审计：无 rm -rf/无 ~/.xstars 触碰/无路径泄漏） |
+| rev 10 | 2026-09-08 | **M4 完成（T4.1–T4.2，详见提交）+ T2.2 验证深度缺陷更正**：① uninstall.sh（250 行，默认 dry-run/`--apply` 真删，六步清理含 RegistrationDB `OPENn` 备份+integrity_check 失败即回滚；Excel 运行中拒绝执行；不碰 `~/.xstars`）；② docs/macos-installer.md 卸载章节先行（安装/放行属 T5.2）；③ **T2.2 验证深度缺陷更正（worker 发现）**：M3 的零 AppleDouble 仅查 pkgutil 外层，内层 component Payload cpio 实有 `._XSTARS-payload.tar.gz` 等 4 条 → build_pkg.py 加内层 cpio 清洗，重出包后内层外层均为 0，嵌套断言入 tests；8.2 表同步扩充。安装器单测 31/31；全量回归 390 passed/13 skipped | worker 报告 + 编排者独立复验（终态重出包 + cpio 实测 + uninstall 安全审计） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -210,7 +211,7 @@
 | **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [x] **已完成（rev 7，`aef6a32`）**：T1.1–T1.4 ✅ | M0 | staging 干跑：脱离仓库根 `import xstars, xlwings, ttkbootstrap, matplotlib, PIL` OK 且 `xstars.__file__` 在 staging site-packages；SHA256 篡改样本 → 非零退出；T1.4 单测 15/15 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages；staging 目录已 gitignore（rev 7） |
 | **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [x] **已完成（rev 8，`f352a05`）** | M0, M1 | ✅ 真实出包 `XSTARS-1.1.1.pkg`；`xar`/`expandpkg` 结构验证；无 `._*`；unsigned 预期值；distribution 三参数断言；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3）；RK-08 实测解除 |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [x] **已完成（rev 9，`15536c1`）** | M1, M2 | ✅ postinstall 结构测试全绿（路径常数/四件事/幂等/退出码/conf 断言）；真实重出包含 Scripts/postinstall + xlwings.conf、零 AppleDouble；真机四件事由 V-02/V-03 覆盖（责任人=用户） | 用户域下以安装用户运行，属主逻辑保留双保险 |
-| **M4 卸载与残留清理** | [ ] | M3 | T4.2 静态/单元断言通过；`uninstall.sh --help` 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7） |
+| **M4 卸载与残留清理** | [x] **已完成（rev 10）**：uninstall.sh + 文档卸载章节 + payload 收入验证（T2.2 机制验证生效） | M3 | T4.2 静态/单元断言 31/31；`uninstall.sh --help`/默认 dry-run 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7）；真机破坏性验证归 8.4（责任人=用户） |
 | **M5 文档同步 + 版本单源 + Pillow 声明** | [ ] | M0（可与 M2–M4 并行推进，合并前完成） | `xstars/__init__.py:3` == pyproject 版本（单测断言）；pyproject 含 `Pillow`；ruff + pytest + compileall 全绿；文档全文不再有「macOS 仅开发者模式/无安装器」表述（grep 为空） | G8 后半、G9、G10 |
 | **M6 CI 出包 job + 真机验收回填** | [ ] | M1–M5 全部 | CI `macos-latest` build job 产出 `.pkg` 并上传 artifact 成功；`git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` 为空；V-01~V-05 由用户回填 Draft PR（R23） | 真机项责任人=用户（G14） |
 
@@ -304,12 +305,12 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M4 卸载与残留清理
 
-- [ ] T4.1 新建 `installer/mac/uninstall.sh`（并随 pkg 投递到安装目录）
+- [x] T4.1 **已完成（rev 10）**：uninstall.sh 250 行——默认 dry-run/`--apply` 真删；六步清理（Startup xlam → Application Scripts 双脚本 → conf 仅删 INTERPRETER_MAC 行 → RegistrationDB `OPENn` 备份+integrity_check 失败即回滚 → 安装目录删（不碰 `~/.xstars`）→ `pkgutil --forget`）；Excel 运行探测拒执行
   - 文件：新建 `installer/mac/uninstall.sh`（同时由 T2.2 收入 payload → `~/Library/Application Support/XSTARS/uninstall.sh`）
   - 修改：清理清单：① Excel 启动项 `XSTARS.xlam`（Group Containers Startup 目录，删前确认存在）；② `~/Library/Application Scripts/com.microsoft.Excel/xlwings.applescript`；③ `~/Library/Containers/com.microsoft.Excel/Data/xlwings.conf` 中的 `INTERPRETER_MAC` 行（保留其余键）；④ **Excel 注册残留**：`~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/*.reg` 中 `OPENn` 记录清理——**先备份原 .reg 文件到带时间戳目录，再用 sqlite3 删除 Excel options 节点下指向 XSTARS.xlam 的 `OPENn` 行，删后 `PRAGMA integrity_check` 必须返回 `ok` 否则恢复备份并报错退出**（R7，依据 `docs/macos-developer-setup.md:191-193` 已核对）；⑤ `~/Library/Application Support/XSTARS/` 整目录删除（**`~/.xstars/` 用户数据默认保留**，见待决 D4）；⑥ `pkgutil --forget com.frank-sysu.xstars`（收据标识，注意待决 D9 的 identifier 沿用问题）；仅当 Excel 未运行时执行（探测到运行则提示退出）
   - 验收：T4.2 断言通过；`--help` 与 dry-run 模式可用；真机由用户验证一次完整卸载后 Excel 启动无弹窗
   - 依赖：T3.1（部署物清单对齐）
-- [ ] T4.2 `tests/test_macos_installer.py` 补 M4 断言 + 卸载文档
+- [x] T4.2 **已完成（rev 10）**：静态断言（备份/integrity_check/forget/OPENn/`~/.xstars` 否定断言/dry-run 与 `--apply` 双模式/Excel 探测）全绿；payload 含 uninstall.sh（T2.2“存在才收入”验证生效）；`docs/macos-installer.md` 卸载章节先行
   - 文件：`tests/test_macos_installer.py`；`docs/macos-installer.md`（卸载章节，与 T5.2 同文件）
   - 修改：静态断言 uninstall 脚本含：备份命令、`PRAGMA integrity_check`、`pkgutil --forget`、`OPENn` 清理、`~/.xstars` 不被删除的否定断言；文档含逐步卸载指引与失败恢复（从备份还原 .reg）
   - 验收：pytest 全绿；文档评审通过（含 R7 全部要素）
@@ -377,7 +378,8 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | --- | --- | --- | --- |
 | 归档结构 | `xar -t -f installer/output/XSTARS-<ver>.pkg` | 列出 Payload、Scripts 等预期条目 | 条目齐备 |
 | Payload 内容 | `pkgutil --expandpkg <pkg> <dir> && find <dir>/Payload -type f` | 含 `python/bin/python3`、site-packages（xstars/xlwings/ttkbootstrap 等）、`bin/XSTARS.xlam`、`bin/xlwings.applescript`、`bin/XSTARS_mac.xlsm`、`uninstall.sh` | 全部存在 |
-| **无 AppleDouble** | 展开后 `find <dir> -name '._*' -o -name '.DS_Store'` | **零命中**（R19/G3） | 空输出 |
+| **无 AppleDouble（外层）** | 展开后 `find <dir> -name '._*' -o -name '.DS_Store'` | **零命中**（R19/G3） | 空输出 |
+| **无 AppleDouble（内层 Payload，rev 10 增）** | `gzip -dc Payload \| cpio -it \| grep -c '\._'` | **0**（rev 10：M3 曾仅查外层，内层实测 4 条已修复） | 0 |
 | 未签名状态 | `pkgutil --check-signature <pkg>` | 报 unsigned / no signature（**预期值**，R14） | 与预期一致（非错误） |
 | 干跑安装 | `sudo installer -pkg <pkg> -target ~`（或用户域等价目标，见 §4.5 缺口 2）——**仅限用户自愿的测试机** | postinstall 日志四件事齐备、`exit 0` | 日志含 4 个 deployed 项 |
 
