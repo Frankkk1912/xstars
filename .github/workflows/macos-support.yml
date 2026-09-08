@@ -99,6 +99,8 @@ jobs:
       - name: Build unsigned macOS installer
         run: python installer/mac/build_pkg.py --build-pkg
       - name: Run macOS installer tests
+        env:
+          XSTARS_BUILT_PKG: "1"
         run: python -m pytest tests/test_macos_installer.py -q
       - name: Compile Python sources, tests, and installer tools
         run: python -m compileall -q -x staging xstars tests installer/mac

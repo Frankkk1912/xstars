@@ -50,6 +50,10 @@ BUILT_PACKAGE = (
     / f"XSTARS-{build_pkg.read_project_version()}.pkg"
 )
 
+# The pkg-structure test only applies in a job that actually builds the package
+# (macos-pkg-build sets XSTARS_BUILT_PKG; plain test jobs legitimately have none).
+PKG_EXPECTED_IN_THIS_JOB = os.environ.get("XSTARS_BUILT_PKG") == "1"
+
 SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 DOCUMENT_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -1081,6 +1085,10 @@ def test_component_payload_validation_rejects_nested_appledouble(tmp_path):
 @pytest.mark.skipif(
     sys.platform != "darwin",
     reason="requires macOS package inspection tools",
+)
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not PKG_EXPECTED_IN_THIS_JOB,
+    reason="requires the macOS package-build job (which sets XSTARS_BUILT_PKG)",
 )
 def test_built_pkg_is_unsigned_product_archive(tmp_path):
     assert BUILT_PACKAGE.is_file(), f"missing locally built package: {BUILT_PACKAGE}"
