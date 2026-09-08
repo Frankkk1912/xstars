@@ -674,7 +674,8 @@ def test_stage_package_scripts_includes_executable_postinstall_and_conf(tmp_path
     assert scripts_dir == tmp_path / "work" / "scripts"
     postinstall = scripts_dir / "postinstall"
     assert postinstall.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
-    assert postinstall.stat().st_mode & 0o111
+    if sys.platform != "win32":
+        assert postinstall.stat().st_mode & 0o111
     assert (scripts_dir / "xlwings.conf").read_text(encoding="utf-8") == (
         build_pkg.render_xlwings_conf()
     )
@@ -804,6 +805,10 @@ def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
     assert all(".xstars" not in line.casefold() for line in deletion_lines)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="uninstall.sh is a POSIX bash script; Windows cannot exec it directly",
+)
 def test_uninstall_help_and_default_dry_run_do_not_write(tmp_path):
     environment = {**os.environ, "HOME": str(tmp_path), "TMPDIR": str(tmp_path)}
     before = tuple(tmp_path.iterdir())
