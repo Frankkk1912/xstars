@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：10**
+- **rev：11**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -18,6 +18,7 @@
 | rev 8 | 2026-09-08 | **M2 完成（T2.1–T2.4 [x]，`f352a05`）**：真实出包 `XSTARS-1.1.1.pkg`（189,756,535 B，unsigned 预期，SHA256 `7b8d128d…`）；**RK-08 实测解除**——`install-location /` + payload 相对布局 + `installer -target CurrentUserHomeDirectory` 实际落位 `~/Library/Application Support/XSTARS/`（测试安装+receipt 已完整清理）；`distribution.xml` 四项改造落地（arm64/min12.0/currentUserHome/**移除 rootVolumeOnly**）；安装器单测 23/23；全量回归 382 passed/13 skipped。**新增残余风险（已裁决接受）**：xlwings wheel 内置 `quickstart.xlsm` 含上游 `x15ac:absPath`（`C:\Users\felix\…`），系第三方文件且用户不会打开，不做包级清洗以维持“运行时=纯净 wheel 安装”可复现性；T2.2 扫描范围维持两件 XSTARS 制品 | worker 报告 + 编排者独立复验（pytest/ruff/compileall/门禁/单测重跑于 pi-lens 重排后） |
 | rev 9 | 2026-09-08 | **M3 完成（T3.1–T3.3 [x]，`15536c1`）**：postinstall.sh（201 行，幂等：payload 解包 fail-closed + xlam→Startup 预创建 + applescript→Application Scripts + INTERPRETER_MAC 写 Containers conf 保留未知键；无任何 rm -rf、不碰 `~/.xstars`）；`render_xlwings_conf()` 纯函数（合并逻辑单测）；**新发现并处置**：pkgbuild 会把 Sequoia provenance xattr 转为 `Scripts/._postinstall` AppleDouble → fail-closed 清理流程（expand→剥→flatten→重验，最终 pkg 零 AppleDouble，真实重出包 189,759,482 B，Scripts 含 postinstall+xlwings.conf）。真实安装未执行（V-02/V-03 责任人=用户，边界遵守）。安装器单测 28/28；全量回归 387 passed/13 skipped | worker 报告 + 编排者独立复验（含 postinstall 安全审计：无 rm -rf/无 ~/.xstars 触碰/无路径泄漏） |
 | rev 10 | 2026-09-08 | **M4 完成（T4.1–T4.2，详见提交）+ T2.2 验证深度缺陷更正**：① uninstall.sh（250 行，默认 dry-run/`--apply` 真删，六步清理含 RegistrationDB `OPENn` 备份+integrity_check 失败即回滚；Excel 运行中拒绝执行；不碰 `~/.xstars`）；② docs/macos-installer.md 卸载章节先行（安装/放行属 T5.2）；③ **T2.2 验证深度缺陷更正（worker 发现）**：M3 的零 AppleDouble 仅查 pkgutil 外层，内层 component Payload cpio 实有 `._XSTARS-payload.tar.gz` 等 4 条 → build_pkg.py 加内层 cpio 清洗，重出包后内层外层均为 0，嵌套断言入 tests；8.2 表同步扩充。安装器单测 31/31；全量回归 390 passed/13 skipped | worker 报告 + 编排者独立复验（终态重出包 + cpio 实测 + uninstall 安全审计） |
+| rev 11 | 2026-09-08 | **M5 完成（T5.1–T5.5 [x]，`c52f80c`）**：① 版本单源——`xstars/__init__.py` 1.0.0→1.1.1 + 防漂移单测（tomllib，CI 3.10 回归用 tomli 条件导入）；② pyproject 显式声明 `Pillow>=10.0`（直呼导入点 main.py:1053/export.py:328）；③ `docs/macos-installer.md` 补全（含 M2 实测的 CurrentUserHomeDirectory 落位语义、Sequoia 三途放行、无右键打开过时话术）；④ 双语 README 安装包模式为推荐路径、开发者模式降级 fallback；⑤ 三 docs 同步（manual-acceptance 增安装器验收组；strategy 路线表「独立 `.pkg` 安装器交付中」）；⑥ ribbon/README ship 制品澄清。安装器单测 32/32；全量回归 391 passed/13 skipped；过时话术 grep 零命中；ribbon 门禁空 diff。**新事实**：CI 既有测试 job 跑 Python 3.10，新测试已兼容（tomli 条件导入）；tests/ 存量 ruff 21 error（M4 HEAD 同，非本次引入，不在范围） | worker 报告 + 编排者独立复验（含策略/过时话术 grep 与 T5.1 逐行 diff） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -212,7 +213,7 @@
 | **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [x] **已完成（rev 8，`f352a05`）** | M0, M1 | ✅ 真实出包 `XSTARS-1.1.1.pkg`；`xar`/`expandpkg` 结构验证；无 `._*`；unsigned 预期值；distribution 三参数断言；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3）；RK-08 实测解除 |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [x] **已完成（rev 9，`15536c1`）** | M1, M2 | ✅ postinstall 结构测试全绿（路径常数/四件事/幂等/退出码/conf 断言）；真实重出包含 Scripts/postinstall + xlwings.conf、零 AppleDouble；真机四件事由 V-02/V-03 覆盖（责任人=用户） | 用户域下以安装用户运行，属主逻辑保留双保险 |
 | **M4 卸载与残留清理** | [x] **已完成（rev 10）**：uninstall.sh + 文档卸载章节 + payload 收入验证（T2.2 机制验证生效） | M3 | T4.2 静态/单元断言 31/31；`uninstall.sh --help`/默认 dry-run 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7）；真机破坏性验证归 8.4（责任人=用户） |
-| **M5 文档同步 + 版本单源 + Pillow 声明** | [ ] | M0（可与 M2–M4 并行推进，合并前完成） | `xstars/__init__.py:3` == pyproject 版本（单测断言）；pyproject 含 `Pillow`；ruff + pytest + compileall 全绿；文档全文不再有「macOS 仅开发者模式/无安装器」表述（grep 为空） | G8 后半、G9、G10 |
+| **M5 文档同步 + 版本单源 + Pillow 声明** | [x] **已完成（rev 11，`c52f80c`）** | M0（可与 M2–M4 并行推进，合并前完成） | ✅ `xstars/__init__.py:3` == pyproject 版本（防漂移单测）；pyproject 含 `Pillow`；ruff + pytest + compileall 全绿；文档全文无「macOS 仅开发者模式/无安装器」孤立表述（grep 零命中） | G8 后半、G9、G10 |
 | **M6 CI 出包 job + 真机验收回填** | [ ] | M1–M5 全部 | CI `macos-latest` build job 产出 `.pkg` 并上传 artifact 成功；`git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` 为空；V-01~V-05 由用户回填 Draft PR（R23） | 真机项责任人=用户（G14） |
 
 Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说明）。
@@ -318,27 +319,27 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M5 文档同步 + 版本单源 + Pillow 声明
 
-- [ ] T5.1 `xstars/__init__.py:3` 版本对齐 + `pyproject.toml` 显式声明 `Pillow`
+- [x] T5.1 **已完成（rev 11，`c52f80c`）**：`__init__.py` 1.1.1（仅一行）+ 防漂移单测；`Pillow>=10.0` 显式声明
   - 文件：修改 `xstars/__init__.py`（`:3` `"1.0.0"` → `"1.1.1"`）；修改 `pyproject.toml`（dependencies 增 `"Pillow>=10.0"`，具体下限实施时以当前 matplotlib 解析版本为准）
   - 修改：仅此两处顺手修（R6/R10，决策 10「仅此一项纳入」）；**不动 `requirements.txt`**（Non-goal 8）
   - 验收：新增单测断言 `xstars.__version__ == tomllib 读 pyproject 版本`（防再漂移）；pytest/ruff/compileall 全绿
   - 依赖：无硬依赖（支撑 G8 后半、G9）
-- [ ] T5.2 新建 `docs/macos-installer.md`（安装器用户文档：安装、放行、卸载）
+- [x] T5.2 **已完成（rev 11）**：文档 147 行——系统要求/双 CLI target（含 M2 实测 CurrentUserHomeDirectory 语义）/三途放行（无右键打开话术）/已知限制含 quickstart.xlsm 上游元数据残余；卸载章节衔接 --apply
   - 文件：新建 `docs/macos-installer.md`
   - 修改：内容必须含：系统要求（Apple Silicon、macOS 12+、Excel for Mac 2016+，R9）；安装步骤（双击 / `sudo installer -pkg ... -target /`）；**未签名放行三途**（Sequoia 已移除右键打开：「系统设置 → 隐私与安全性 → 仍要打开」+ 密码 / `xattr -d com.apple.quarantine <pkg>` / `sudo installer`，§4.3 Sequoia 行）；卸载指引（引用 `~/Library/Application Support/XSTARS/uninstall.sh`，含备份与 integrity_check 说明）；已知限制（arm64-only、不支持 WPS for Mac、`~/.xstars` 数据保留策略）
   - 验收：三途放行指引齐全且不含「右键打开」过时话术；与 R7/R15/R9 对齐
   - 依赖：T4.1（卸载脚本定型）
-- [ ] T5.3 更新 `README.md` 与 `README.zh-CN.md`
+- [x] T5.3 **已完成（rev 11）**：双语 README 安装包模式为推荐路径、开发者模式降级 fallback（`184` “source-debugging fallback”）；系统要求行分叉；过时表述 grep 零命中
   - 文件：修改 `README.md`（`:185-188, :244`）；修改 `README.zh-CN.md`（`:184-187, :243`）（cartographer §5.1/5.2 摘录的原文段）
   - 修改：新增「macOS Installer」章节（双击 `.pkg` 即装、免 Python、指向 `docs/macos-installer.md`）；原「Developer Mode」段降级保留为源码调试备选；系统要求行改为「安装包模式（Apple Silicon arm64, macOS 12+, Excel 2016+, 无需 Python）/ 开发者模式（Python ≥ 3.10）」双语对齐
   - 验收：两 README 表述同步；grep 无「developer mode only」孤立残留
   - 依赖：T5.2（链接目标存在）
-- [ ] T5.4 更新 `docs/macos-developer-setup.md`、`docs/macos-manual-acceptance.md`、`docs/cross-platform-office-technology-strategy.md`
+- [x] T5.4 **已完成（rev 11）**：developer-setup 前言指引（正文全保留）；manual-acceptance 增安装器验收组 + I-01~I-04 标注适用域；strategy 路线表「独立 `.pkg` 安装器交付中」
   - 文件：修改三文件（锚点：developer-setup `:3-5` 前言增补「终端用户请用 .pkg 安装器，本文档仅供源码开发」；manual-acceptance `:3-5, :60-67` 增补「安装器验收组」并把 I-01~I-04 标注为 Developer Mode 适用；strategy `:18-24` 路线表「Excel macOS」状态更新为「独立 .pkg 安装器交付中」）
   - 修改：不删除开发者模式内容（保留为 fallback，cartographer §5.3/5.4 处置标记）
   - 验收：三文件更新后与交付物一致；manual-acceptance 新增安装器检查组条目
   - 依赖：T5.2
-- [ ] T5.5 更新 `ribbon/README.md`
+- [x] T5.5 **已完成（rev 11）**：ship 制品澄清 + 手工流程保留为开发者备忘；“does not ship a prebuilt” grep 零命中
   - 文件：修改 `ribbon/README.md`（`:6-8`「does **not** ship a prebuilt `.xlsm` or `.xlam`」与 `:66`「No standalone macOS `.app` is provided」两段，均已核对原文）
   - 修改：澄清：仓库现经 `installer/mac/assets/` ship 预构建 `XSTARS.xlam` 与 `XSTARS_mac.xlsm`（供 `.pkg` 使用）；仍无 `.app`，但提供 `.pkg` 完整安装包；手工 RibbonX Editor 流程保留为开发者备忘
   - 验收：表述与 R4/R21 一致；grep 无「does not ship a prebuilt」残留
