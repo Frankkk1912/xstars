@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：14**
+- **rev：15**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -21,7 +21,8 @@
 | rev 11 | 2026-09-08 | **M5 完成（T5.1–T5.5 [x]，`c52f80c`）**：① 版本单源——`xstars/__init__.py` 1.0.0→1.1.1 + 防漂移单测（tomllib，CI 3.10 回归用 tomli 条件导入）；② pyproject 显式声明 `Pillow>=10.0`（直呼导入点 main.py:1053/export.py:328）；③ `docs/macos-installer.md` 补全（含 M2 实测的 CurrentUserHomeDirectory 落位语义、Sequoia 三途放行、无右键打开过时话术）；④ 双语 README 安装包模式为推荐路径、开发者模式降级 fallback；⑤ 三 docs 同步（manual-acceptance 增安装器验收组；strategy 路线表「独立 `.pkg` 安装器交付中」）；⑥ ribbon/README ship 制品澄清。安装器单测 32/32；全量回归 391 passed/13 skipped；过时话术 grep 零命中；ribbon 门禁空 diff。**新事实**：CI 既有测试 job 跑 Python 3.10，新测试已兼容（tomli 条件导入）；tests/ 存量 ruff 21 error（M4 HEAD 同，非本次引入，不在范围） | worker 报告 + 编排者独立复验（含策略/过时话术 grep 与 T5.1 逐行 diff） |
 | rev 12 | 2026-09-08 | **T6.1 完成（`10cab2d`）**：`.github/workflows/macos-support.yml` 新增 `macos-pkg-build` job（macos-latest 已为 arm64，经 runner-images 元数据核实；Python 3.12 构建宿主；**两步构建** `--prepare-runtime` → `--build-pkg`——编排者任务规格曾误写单命令，worker 预检拦下并裁决修正；installer 测试 + compileall + upload-artifact retention 7d；permissions contents: read，无 secrets）；既有三 job 未动；YAML 有效（psych）。M6 标记进行中：T6.2（真机 V-01~V-05）待用户，随 PR 首次 CI 运行验证 job 本身 | worker 报告 + 编排者复验（YAML psych + diff 全文审读） |
 | rev 13 | 2026-09-08 | **Review 第 1 轮（三路 fresh-context）完成 + F1–F10 修复批落地**：coverage lane 产 14 findings（1 Blocker + 4 值得修复 + 6 可选 + 3 延期）；correctness lane 产 1 Blocker + 2 值得修复（fallback 模型续跑成功）；quality lane 产 3 值得修复（fallback 模型续跑成功）；另两 lane 首跑因 provider 500 中断后恢复。修复批（fix worker，全验收绿：安装器单测 43/43、全量 402 passed/13 skipped、pkg 重出 ≈137MiB、三层 AppleDouble 零）详见文末「Review 记录」；可选改进 9 项记入残余清单不在本轮实施；RK-01 处置：staging 实测 Tcl/Tk 资源在位 + F1 的 CI 冒烟 import ttkbootstrap 间接覆盖 Tk 链路，sitecustomize 缓解推迟至 V-01 实测需要时 | 三路 reviewer 报告 + fix worker 报告 + 编排者复验（43/43、402/13、ruff、YAML、bash -n、门禁） |
-| rev 14 | 2026-09-08 | **R9 修正（用户访谈裁定）+ 第 2 轮 A–D 修复闭合**：真实 `--prepare-runtime` 解析出 numpy 2.5.3 / scipy 1.18.1（wheel 标签 `macosx_14_0_arm64`，要求 macOS 14+），原 R9=12.0 成为假承诺 → **最低 macOS 修正为 14.0（Sonoma），不钉版本**；落地：distribution.xml `min="14.0"`、测试断言、双语 README、docs 同步（grep 无残留）。第 2 轮复审 A–D 全闭合：A 冒烟显式导入全部 11 项运行时依赖 + `sys.prefix` 来源断言 + `pip check`；B 卸载三态（备份→恢复 / marker→删除 / 皆无→警告保持）；C manifest 绑定 staging 内容（三文件 SHA256 + staging 解释器实跑版本 + 工作簿内嵌 xlwings 版本比对，篡改即 fail-closed）；D 卸载文档三路径语义。验证：安装器单测 45 passed/1 skipped；全量 404 passed/14 skipped | 用户访谈裁定（R9 修正）；第 2 轮 reviewer 报告 + fix worker 报告 + 编排者复验 |
+| rev 14 | 2026-09-08 | **R9 修正（用户访谈裁定）+ 第 2 轮 A–D 修复闭合**：真实 `--prepare-runtime` 解析出 numpy 2.5.3 / scipy 1.18.1（wheel 标签 `macosx_14_0_arm64`，要求 macOS 14+），原 R9=12.0 成为假承诺 → **最低 macOS 修正为 14.0（Sonoma），不钉版本**；落地：distribution.xml `min="14.0"`、测试断言、双语 README、docs 同步——**发行物（README/docs/distribution/测试）grep 零残留；Plan 内 §4/§5/§7 的历史研究叙述保留原样并加修订指针（rev 15）**。第 2 轮复审 A–D 全闭合：A 冒烟显式导入全部 11 项运行时依赖 + `sys.prefix` 来源断言 + `pip check`；B 卸载三态（备份→恢复 / marker→删除 / 皆无→警告保持）；C manifest 绑定 staging 内容（三文件 SHA256 + staging 解释器实跑版本 + 工作簿内嵌 xlwings 版本比对，篡改即 fail-closed）；D 卸载文档三路径语义。验证：安装器单测 45 passed/1 skipped；全量 404 passed/14 skipped | 用户访谈裁定（R9 修正）；第 2 轮 reviewer 报告 + fix worker 报告 + 编排者复验 |
+| rev 15 | 2026-09-08 | **第 3 轮（最终）复审判 OK（Blocker 0）后的 Plan 一致性收尾**：§9.5 PR 草稿 min 12.0→14.0（防错误承诺写入 PR #6）；§8.3 冒烟契约对齐 workflow 实态（11 项导入 + `sys.prefix` 断言 + `pip check`，封堵第 2 轮 P0 复发路径）；§9.1/§7 同步 14.0；§4/§5 历史叙述加修订指针。另：第 3 轮建议的 `--smoke-staging` 依赖派生冒烟记入残余清单（防未来新增依赖漏导） | 第 3 轮 reviewer 报告（Blocker 0，3 条 P2 纯 Plan 文本）+ 编排者落地 |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -160,7 +161,7 @@
 | Sequoia 未签名 pkg 行为 | **Sequoia 已移除右键「打开」绕过**（Apple 官方发行说明确认）；双击被拦后唯一 GUI 路径 =「系统设置 → 隐私与安全性 → 仍要打开」+ 输密码；或 `xattr -d com.apple.quarantine <pkg>` 后双击；或 `sudo installer -pkg <pkg> -target /` 完全免 GUI；本机构建/局域网传 scp/USB 无 quarantine 不受影响；`pkgbuild`/`productbuild` 无证书构建无任何系统阻断 | [Ars Technica](https://arstechnica.com/gadgets/2024/08/macos-15-sequoia-makes-you-jump-through-more-hoops-to-disable-gatekeeper-app-checks/)（2024-08-07，高）；[Michael Tsai](https://mjtsai.com/blog/2024/07/05/sequoia-removes-gatekeeper-contextual-menu-override/)（2024-07-05，高）；[Scripting OS X packaging](https://scriptingosx.com/2025/08/installing-packages/)（2025-08，高） | **分发文档必须按此三途书写**（R7 文档 / V-04） |
 | TCC / 权限边界 | 写 `Group Containers/UBF8T346G9.Office`、`Application Scripts/com.microsoft.Excel`、`Containers/com.microsoft.Excel/Data` **均不触发 TCC 弹窗**；但 postinstall 以 root 运行时新文件属主为 root:wheel → 必须探测 Console User（`stat -f '%Su' /dev/console` + `dscl` 查 Home）并 `chown` 归还 | [HackTricks TCC](https://hacktricks.wiki/en/macos-hardening/macos-security-and-privilege-escalation/macos-security-protections/macos-tcc.html)（2025，高）；[Scripting OS X](https://scriptingosx.com/2020/08/running-a-command-as-another-user/)（2020-08，高） | **采用**（postinstall 属主修正逻辑，T3.1）；注：R3 用户域安装下 postinstall 以安装用户身份运行，属主逻辑保留作双保险 |
 | Excel for Mac 加载项机制 | Startup 目录 `.xlam` 全自动加载免勾选；`UBF8T346G9.Office` 为受信任组容器；`AppleScriptTask` 硬性限定脚本位于 `~/Library/Application Scripts/<bundle id>/`；Excel for Mac 无 `VBProject`（无法脚本化注入 VBA） | [MacAdmins docs](https://macadminsdoc.readthedocs.io/en/master/Applications/Microsoft-Office-2016.html)（高）；[Microsoft Learn AppleScriptTask](https://learn.microsoft.com/en-us/office/vba/office-mac/applescripttask)（2023-06，高）；[xlwings #2616](https://github.com/xlwings/xlwings/issues/2616)（2024，高） | 印证 R16②③ 与 Non-goal 6 |
-| wheel 可用性 | 全部依赖在 arm64 有预编译 wheel（numpy/pandas/matplotlib/Pillow/xlwings = `macosx_11_0_arm64`；scipy = **`macosx_12_0_arm64`**）或纯 Python wheel（seaborn/scikit-posthocs/ttkbootstrap/statannotations）；终端用户机无需 Xcode CLT、无需联网编译 | researcher §A wheel 清单（PyPI，2026，高） | **支撑 R9**（最低 12.0 由 scipy wheel 标签决定） |
+| wheel 可用性 | 全部依赖在 arm64 有预编译 wheel（numpy/pandas/matplotlib/Pillow/xlwings = `macosx_11_0_arm64`；scipy = **`macosx_12_0_arm64`**）或纯 Python wheel（seaborn/scikit-posthocs/ttkbootstrap/statannotations）；终端用户机无需 Xcode CLT、无需联网编译 | researcher §A wheel 清单（PyPI，2026，高） | **支撑 R9**（最低 12.0 由 scipy wheel 标签决定；**rev 14 修订为 14.0**——真实构建解析出 macosx_14_0_arm64 的 numpy 2.5.3/scipy 1.18.1，见 R9 行） |
 
 ### 4.4 推荐方案与替代方案
 
@@ -270,7 +271,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 - [x] T2.1 **已完成（rev 8，`f352a05`）**：`distribution.xml` 四项改造落地（arm64/min 12.0/currentUserHome/**移除 rootVolumeOnly**——与用户域 home 安装互斥）；构建期 Python 渲染替代 sed
   - 文件：新建 `installer/mac/distribution.xml`
-  - 修改：以旧版为基（引用时实施前二次核对旧文件行号）：`hostArchitectures="arm64"`（R15/G17）；`<domains enable_currentUserHome="true"/>`（R3/G12，替换 `enable_localSystem`）；`<os-version min="12.0"/>`（R9/G16）；保留 `__VERSION__` 占位符与 `customize="never" require-scripts="true"` 结构
+  - 修改：以旧版为基（引用时实施前二次核对旧文件行号）：`hostArchitectures="arm64"`（R15/G17）；`<domains enable_currentUserHome="true"/>`（R3/G12，替换 `enable_localSystem`）；`<os-version min="12.0"/>`（R9/G16；**rev 14 修订为 14.0**，随 numpy/scipy wheel 标签上浮）；保留 `__VERSION__` 占位符与 `customize="never" require-scripts="true"` 结构
   - 验收：pytest 断言生成后的 XML 三项参数正确、`__VERSION__` 替换无残留
   - 依赖：T1.1（版本注入）
 - [x] T2.2 **已完成（rev 8）**：payload 相对布局（`Library/Application Support/XSTARS/`）+ tarball 直通防护；uninstall.sh 容忍缺失（M4）；扫描无 `._*`/`.DS_Store`/制品 absPath
@@ -392,7 +393,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | 检查项 | 方式 | 通过标准 |
 | --- | --- | --- |
 | SHA256 fail-closed | 单测注入篡改 tarball | 非零退出 + 明确错误信息 |
-| 运行时可执行 | staging 内 `python/bin/python3 -c "import xstars, xlwings, ttkbootstrap, PIL; print('OK')"` | 输出 OK；`xstars` 来自 staging site-packages |
+| 运行时可执行（rev 15 对齐 workflow 实态，封堵第 2 轮 P0 复发路径） | staging 内 `python/bin/python3 -c "import xstars, xlwings, ttkbootstrap, matplotlib, PIL, pandas, numpy, scipy, scikit_posthocs, statannotations, seaborn; import sys; assert sys.prefix in xstars.__file__"` + `python -m pip check` | 输出 OK；`xstars` 位于 `sys.prefix` 下（强于子串匹配）；依赖一致性零破损 |
 | 单向流水线 | 全文审计 build_pkg.py 无对自身/其他脚本的递归调用；`XSTARS_SIGN` 被忽略 | 无回跑路径（G15 防复发） |
 
 ### 8.4 卸载验证（真机，用户）
@@ -431,7 +432,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | --- | --- | --- |
 | `installer/mac/build_pkg.py` | 源码（纯函数 + CLI） | 构建入口：版本读取/运行时下载校验/staging/payload/pkgbuild/productbuild（T1.1–T2.3） |
 | `installer/mac/runtime.lock.json` | 配置（新） | python-build-standalone URL + SHA256 钉值 + 版本/架构/变体（T1.2） |
-| `installer/mac/distribution.xml` | 模板 | arm64-only / min 12.0 / `enable_currentUserHome` / `__VERSION__`（T2.1） |
+| `installer/mac/distribution.xml` | 模板 | arm64-only / min 14.0（R9 rev 14 修订） / `enable_currentUserHome` / `__VERSION__`（T2.1） |
 | `installer/mac/postinstall.sh` | 脚本（薄 bash） | 四件事投递 + 属主修正（T3.1/T3.2） |
 | `installer/mac/uninstall.sh` | 脚本（薄 bash） | 卸载 + OPENn 清理 + 备份 + integrity_check（T4.1） |
 | `installer/mac/assets/XSTARS.xlam` | **二进制制品**（用户制作交付） | 2006-format ribbon 加载项（T0.1） |
@@ -527,7 +528,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 > ## Approach（依据 plans/20260906-macos-installer.md，rev 1）
 >
   > - 构建期下载 python-build-standalone **cpython-3.12 aarch64-apple-darwin install_only_stripped**（固定 SHA256，fail-closed），依赖与 xstars 本体（非 editable）装入其 site-packages，整体入 pkg Payload → `~/Library/Application Support/XSTARS/`。
-  > - `installer/mac/build_pkg.py`：装配逻辑 100% 可测 Python，`distribution.xml` 为 arm64-only / min macOS 12.0 / `enable_currentUserHome`（用户级免提权）。
+  > - `installer/mac/build_pkg.py`：装配逻辑 100% 可测 Python，`distribution.xml` 为 arm64-only / min macOS 14.0 / `enable_currentUserHome`（用户级免提权）。
   > - postinstall 四件事：投递 `XSTARS.xlam` → Excel Startup 目录；`xlwings.applescript` → Application Scripts；写 `"INTERPRETER_MAC"` → `~/Library/Containers/com.microsoft.Excel/Data/xlwings.conf`；运行时断言 + 属主修正。
   > - 保留 xlwings `RunPython` 同进程模型：**`ribbon/*.bas` 零修改**（既有 vba-immutability CI 门禁续跑）；不使用 PyInstaller、不产出 `.app`。
   > - 未签名、不公证：文档提供 Sequoia 三途放行指引（「系统设置 → 隐私与安全性 → 仍要打开」/ `xattr -d com.apple.quarantine` / `sudo installer`）。
