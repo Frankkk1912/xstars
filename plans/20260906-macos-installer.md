@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：4**
+- **rev：5**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -12,6 +12,7 @@
 | rev 2 | 2026-09-06 | 父 Agent 独立审计后的事实校正（不涉及任何产品/范围决策）：① 补入「旧仓锚点 ground-truth 校正表」，消除正文声明的 ±5 行漂移；② To-do 任务实测为 **23** 个（rev 1 摘要误记 20），四要素齐备、与 17 个缺口双向映射无孤立；③ 校正 `application/export.py` 的 Pillow 证据行号 | `grep -n` 实测 xstars-dev 与当前仓库；Plan 结构审计脚本输出 |
 | rev 3 | 2026-09-06 | **用户批准 Plan（rev 2）并裁定三项**：① 行尾修正采用方案 A（`.gitattributes` 追加 `*.bas text eol=lf`，否决方案 B）；② 推送 `feat/macos-installer` 分支供 Windows 侧 M0 制作；③ 进入实施。新增 R24 与待决 D11（VBE CRLF 残余风险的预登记回退路径）；修正 R21 与 §9 中 `.gitattributes` 的处置描述 | 2026-09-06 用户明确批准 + 三项裁定；`git ls-files --eol` 实证 |
 | rev 4 | 2026-09-08 | **T0.1 完成 + 待决 D2 裁定**：① D2 裁定为「内置兜底」——xlam 内置隐藏 `xlwings.conf` sheet，`Interpreter` 留空（researcher 双保险方案）；② `XSTARS.xlam` 在 Windows 侧由 Agent 全自动制作并入库（`installer/mac/assets/XSTARS.xlam`，commit `20ba6c8`）：customUI14→2006 转换（去 1 处 `insertAfterMso`）、真 Excel 16.0 COM 导入 `RibbonCallbacks`、OOXML 注入 customUI part；验收断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、真机打开无修复、模块与 `.bas` 逐行一致〔仅行尾归一化，D11 范围〕、`xlwings.conf` VeryHidden）。③ **实施环境事实**：本机 WPS Office 在 HKCU 劫持 Excel CLSID（`{00024500-...}` → `et.exe`），COM 自动化需启动 Office16 `EXCEL.EXE /automation` 后经 ROT 绑定真实例；Excel COM `VBProject` 为 null 时优先排查此劫持 | 2026-09-08 用户访谈裁定 D2 + Agent 实施记录（commit `20ba6c8`） |
+| rev 5 | 2026-09-08 | **D11 裁定落盘**：T0.1 逐字节断言改为「行尾归一化（`\r\n`→`\n`）后逐字节一致」。实测证据：oletools 提取制品内 RibbonCallbacks 源码 5452B 全 CRLF（163 行）vs 仓库 `.bas` 5289B 全 LF，差值恰为行数→纯 VBE 存储行为；归一化后逐字节一致，两侧均含 `Attribute VB_Name` 头，**制品无需重做**。另补入 F 项验证：customUI rel 包根挂载（2006 type）与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致；8.1 安装器单测覆盖面同步扩充 | 2026-09-08 用户确认 D11 回退；父 Agent 独立复验（oletools 提取 + `git ls-files --eol`） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -220,7 +221,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 - [x] T0.1 ~~用户手工制作 `XSTARS.xlam` 并交付~~ **已完成（rev 4，2026-09-08）**：Agent 在 Windows 侧全自动制作（customUI 转换 + 真 Excel 16 COM + OOXML 注入，绕过 WPS CLSID 劫持经 ROT 绑定），入库至 `installer/mac/assets/XSTARS.xlam`（commit `20ba6c8`），验收断言全 PASS；含 D2 裁定的隐藏 `xlwings.conf` 兜底 sheet（`Interpreter` 留空）
   - 文件：新建 `installer/mac/assets/XSTARS.xlam`（二进制制品，常规 blob，R21）
   - 修改：无源码修改；由用户按 `ribbon/README.md:44-51` 在 Windows/RibbonX Editor 侧制作：以 2006-format customUI part（`customUI/customUI.xml`，命名空间 `http://schemas.microsoft.com/office/2006/01/customui`，去除全部 `insertAfterMso`）+ 未修改的 `ribbon_callbacks.bas` 副本，另存为 Excel Add-In（`.xlam`）后拷回
-  - 验收：pytest 打开 xlam（zip 容器）断言：存在 `customUI/customUI.xml` 且命名空间为 2006 URI、无 `customUI14` part、无 `insertAfterMso` 属性；VBA 模块源文本与 `ribbon/ribbon_callbacks.bas` 逐字节一致（防漂移，RK-04；行尾已由 R24 钉 LF，若仍因 VBE 内部存储失败则按 D11 回退，制品无需重做）
+  - 验收：pytest 打开 xlam（zip 容器）断言：存在 `customUI/customUI.xml` 且命名空间为 2006 URI、无 `customUI14` part、无 `insertAfterMso` 属性；VBA 模块源文本与 `ribbon/ribbon_callbacks.bas` **行尾归一化（`\r\n`→`\n`）后逐字节一致**（D11 已裁定，rev 5；实测制品 163 行全 CRLF、仓库全 LF，差值恰为行数）；customUI relationship 挂载于包根 `_rels/.rels` 且 type 为 2006 `ui/extensibility`（与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致）
   - 依赖：无（用户动作，**阻塞 M1–M6 全部**）
 - [ ] T0.2 用户手工制作 `XSTARS_mac.xlsm` 预置模板并交付，Agent 入库至 `installer/mac/assets/XSTARS_mac.xlsm`
   - 文件：新建 `installer/mac/assets/XSTARS_mac.xlsm`（命名必须 `.xlsm`，`.gitignore:10` 会忽略 `.xlsx`，R21）
@@ -362,7 +363,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | 全量 pytest 回归 | `python -m pytest` | 基线量级：main 上 353 passed / 13 skipped（**以实际运行为准**，本 Plan 未实测基线） | 无新增 failed；新增测试全绿 |
 | ruff | `ruff check .` | 0 error（含 `installer/mac/build_pkg.py` 与新测试文件） | 0 error |
 | compileall | `python -m compileall -q xstars tests installer/mac` | 静默成功 | 退出码 0 |
-| 安装器单测 | `python -m pytest tests/test_macos_installer.py -v` | 覆盖：版本单源、SHA256 fail-closed、staging/payload 布局、AppleDouble 扫描、distribution.xml 三参数、postinstall/uninstall 静态断言、xlam 2006 命名空间、xlsm 宏项目、`render_xlwings_conf()` | 全绿 |
+| 安装器单测 | `python -m pytest tests/test_macos_installer.py -v` | 覆盖：版本单源、SHA256 fail-closed、staging/payload 布局、AppleDouble 扫描、distribution.xml 三参数、postinstall/uninstall 静态断言、xlam 2006 命名空间、xlam customUI rel 包根挂载（2006 type，对照 `xlwings/addin/xlwings.xlam` 已验证模式）、VBA 源行尾归一化比对（D11，VBA 提取用 oletools，已验证可行；T1.4 决定是否入 `[dev]`）、xlsm 宏项目、`render_xlwings_conf()` | 全绿 |
 | **VBA 零修改门禁** | `git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` | **必须为空**（`macos-support.yml:73` 既有 job） | diff 为空，job 绿 |
 | 版本单源 | 新增单测断言 `xstars.__version__` == pyproject 版本 | 1.1.1 == 1.1.1 | 断言通过 |
 
@@ -471,7 +472,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | RK-01 | Tk 在 standalone 运行时找不到 `init.tcl`（python-build-standalone 已知 Quirk） | 中 | 特定安装路径/嵌套环境组合 | ttkbootstrap/matplotlib TkAgg 弹窗崩溃，功能区按钮报错 | build 期生成 sitecustomize 预设 `TCL_LIBRARY`/`TK_LIBRARY` 相对路径（§4.3 quirks 行）；V-01 真机首验 |
 | RK-02 | 用户级安装后 Excel 沙盒读 `Containers` 配置被覆盖/重建 | 中 | Excel 首启晚于 postinstall（V-02 灰区） | `INTERPRETER_MAC` 丢失 → RunPython 失效 | T3.2 仅更新键不整文件覆盖；可选兜底 = xlam 内置 xlwings.conf sheet（待决 D2）；V-02/V-03 真机验证 |
 | RK-03 | 未签名 pkg 跨机分发被 Gatekeeper 拦（Sequoia 无右键打开） | 高（跨机分发时） | 经网络途径传输（带 quarantine） | 终端用户双击被拦 | 文档三途放行指引（T5.2）；`sudo installer` 一键路径；V-04 真机验证；本机构建/scp/USB 不受影响 |
-| RK-04 | 制品（xlam/xlsm）与 `ribbon/*.bas` 版本漂移 | 中 | `.bas` 后续演进而制品未重做 | 功能区回调与代码不匹配、静默失效 | T0.1 验收含「模块源文本与 .bas 逐字节一致」pytest 断言（制品入库后每次 CI 自动比对）；T0.3 README 警示重做义务；rev 3：R24 已钉 `*.bas eol=lf` 消除 Windows 检出 CRLF 源，残余 VBE 内部存储风险入 D11 |
+| RK-04 | 制品（xlam/xlsm）与 `ribbon/*.bas` 版本漂移 | 中 | `.bas` 后续演进而制品未重做 | 功能区回调与代码不匹配、静默失效 | T0.1 验收含「模块源文本与 .bas 逐字节一致」pytest 断言（制品入库后每次 CI 自动比对）；T0.3 README 警示重做义务；rev 3：R24 已钉 `*.bas eol=lf` 消除 Windows 检出 CRLF 源；rev 5：D11 已裁定——断言采用行尾归一化（VBE 在 vbaProject.bin 内固定 CRLF 存储，实测归一化后逐字节一致） |
 | RK-05 | 运行时体积导致 CI artifact 过大 | 中 | runtime + scipy/pandas/matplotlib 等 site-packages 解压后数百 MB | CI 慢、artifact 超限 | install_only_stripped 变体（R1）；CI 仅上传最终 .pkg（压缩态）；retention-days 待决 D6；必要时 `pip install --no-cache-dir` + 剔除 `__pycache__`/tests |
 | RK-06 | 多用户机器每人一份 | 低 | 同机多 GUI 用户 | 其他用户无功能区（仅安装者可见） | 与 R3 用户级免提权裁定一致的既知取舍；文档写明「每个需要的用户各装一次」；不试图做系统级（违背裁定） |
 | RK-07 | 覆盖安装/升级时 `~/.xstars` 用户数据 | 中 | 重装或升级 pkg | 若误删则用户设置/工件丢失 | uninstall.sh/postinstall 均不触碰 `~/.xstars`（T3.3/T4.2 否定断言）；保留策略见待决 D4 |
@@ -501,7 +502,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | D8 | 构建脚本是否在 CI 使用 uv（而非 pip）加速依赖安装 | 纯实现选择，默认 pip（少一依赖）；不阻塞 |
 | D9 | pkg identifier 是否沿用 `com.frank-sysu.xstars`（与旧 xstars-dev 收据同名） | RK-11；需用户确认是否换新 id（如 `com.frank-sysu.xstars.mac`） |
 | D10 | 未签名 pkg 是否提供 SHA256 checksum 文件随 Release 分发（完整性自证，非签名） | 文档层面小项，可后补 |
-| D11 | T0.1 逐字节断言若因 Excel VBE 在 `vbaProject.bin` 内以 CRLF 存储模块源码而失败（与输入 `.bas` 行尾无关），是否回退为「行尾规范化后逐字节一致」断言（原方案 B） | 实施期 T0.1 首跑即见分晓；失败时制品无需重做，仅断言语义调整，届时凭实测证据请用户确认 |
+| D11 | T0.1 逐字节断言若因 Excel VBE 在 `vbaProject.bin` 内以 CRLF 存储模块源码而失败（与输入 `.bas` 行尾无关），是否回退为「行尾规范化后逐字节一致」断言（原方案 B） | 实施期 T0.1 首跑即见分晓；失败时制品无需重做，仅断言语义调整，届时凭实测证据请用户确认 → **已裁定（rev 5）：回退为行尾归一化断言**；实测证据：制品提取源 5452B 全 CRLF vs 仓库 5289B 全 LF（差值恰 = 163 = 行数），归一化后逐字节一致，两侧均含 `Attribute VB_Name` 头 |
 
 ### 9.5 Git 策略
 
@@ -552,5 +553,5 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 5. **每个任务四项齐备**：全部 20 个 To-do（T0.1–T6.2）均含文件/修改/验收/依赖。✅
 6. **Validation contract 可判定**：每项含命令/方式 + 预期 + 通过标准；无法执行项（8.4–8.6 真机）已注明原因与责任人（=用户）。✅
 7. **Git 策略齐备**：分支 `feat/macos-installer`、Draft PR 标题、可直接使用的 PR 描述草稿、单 PR 拆分决策与依据、串行合并顺序。✅
-8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
+8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D2（rev 4，内置兜底 sheet）、D11（rev 5，断言行尾归一化）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
 9. **只写入 Plan 文件**：本文件为唯一写入目标（`plans/20260906-macos-installer.md`）；未修改任何源码、测试、配置、脚本或生成物。✅
