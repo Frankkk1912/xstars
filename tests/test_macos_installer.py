@@ -24,6 +24,7 @@ ASSETS_DIR = MAC_INSTALLER_DIR / "assets"
 BUILD_SCRIPT = MAC_INSTALLER_DIR / "build_pkg.py"
 RUNTIME_LOCK = MAC_INSTALLER_DIR / "runtime.lock.json"
 DISTRIBUTION_TEMPLATE = MAC_INSTALLER_DIR / "distribution.xml"
+POSTINSTALL_SCRIPT = MAC_INSTALLER_DIR / "postinstall.sh"
 BUILT_PACKAGE = REPO_ROOT / "installer" / "output" / "XSTARS-1.1.1.pkg"
 
 _spec = importlib.util.spec_from_file_location("xstars_macos_build_pkg", BUILD_SCRIPT)
@@ -550,6 +551,119 @@ def test_package_commands_are_unsigned_user_domain_and_one_way(tmp_path):
     assert "notar" not in combined
 
 
+def test_render_xlwings_conf_creates_canonical_interpreter_entry():
+    assert build_pkg.render_xlwings_conf() == (
+        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
+        'XSTARS/python/bin/python3"\n'
+    )
+
+
+def test_render_xlwings_conf_preserves_unknown_keys_and_replaces_only_interpreter():
+    existing = (
+        '"LOG_FILE","$HOME/xlwings.log"\n'
+        '"INTERPRETER_MAC","/old/python"\n'
+        '"USE_UDF_SERVER","False"\n'
+    )
+
+    rendered = build_pkg.render_xlwings_conf(existing)
+
+    assert rendered == (
+        '"LOG_FILE","$HOME/xlwings.log"\n'
+        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
+        'XSTARS/python/bin/python3"\n'
+        '"USE_UDF_SERVER","False"\n'
+    )
+    assert build_pkg.render_xlwings_conf(rendered) == rendered
+
+
+def test_postinstall_has_user_domain_deployment_and_fail_closed_runtime_contract():
+    script = POSTINSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert script.startswith("#!/bin/bash\n")
+    assert "\nset -e\n" in script
+    assert 'INSTALL_ROOT="$USER_HOME/Library/Application Support/XSTARS"' in script
+    assert (
+        'EXCEL_STARTUP="$USER_HOME/Library/Group Containers/'
+        'UBF8T346G9.Office/User Content.localized/Startup.localized/Excel"'
+    ) in script
+    assert (
+        'APP_SCRIPTS_DIR="$USER_HOME/Library/Application Scripts/com.microsoft.Excel"'
+    ) in script
+    assert (
+        'XLWINGS_CONF_DIR="$USER_HOME/Library/Containers/com.microsoft.Excel/Data"'
+    ) in script
+    assert (
+        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
+        'XSTARS/python/bin/python3"'
+    ) in script
+    assert "COPYFILE_DISABLE=1 /usr/bin/tar -xzf" in script
+    assert 'elif [ ! -x "$PYTHON_EXECUTABLE" ]; then' in script
+    assert script.count("exit 1") >= 2
+    assert script.rstrip().endswith("exit 0")
+
+    assert "/usr/bin/stat -f '%Su' /dev/console" in script
+    assert "show State:/Users/ConsoleUser" in script
+    assert "/usr/bin/dscl . -read" in script
+    assert "/usr/sbin/chown -R" in script
+    assert "copy_user_file" in script and "|| true" in script
+    assert "merge_xlwings_conf || true" in script
+    assert "rm -rf" not in script
+    assert "~/.xstars" not in script
+
+
+def test_stage_package_scripts_includes_executable_postinstall_and_conf(tmp_path):
+    source = tmp_path / "postinstall.sh"
+    source.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+
+    scripts_dir = build_pkg.stage_package_scripts(tmp_path / "work", source)
+
+    assert scripts_dir == tmp_path / "work" / "scripts"
+    postinstall = scripts_dir / "postinstall"
+    assert postinstall.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+    assert postinstall.stat().st_mode & 0o111
+    assert (scripts_dir / "xlwings.conf").read_text(encoding="utf-8") == (
+        build_pkg.render_xlwings_conf()
+    )
+
+
+def test_component_package_cleanup_removes_generated_appledouble(tmp_path):
+    component = tmp_path / "XSTARS-component.pkg"
+    component.write_bytes(b"original")
+    commands = []
+    expansion_count = 0
+
+    def fake_runner(command):
+        nonlocal expansion_count
+        commands.append(tuple(command))
+        if command[1] == "--expand":
+            expansion_count += 1
+            destination = Path(command[-1])
+            scripts = destination / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "postinstall").write_text("script", encoding="utf-8")
+            if expansion_count == 1:
+                (scripts / "._postinstall").write_bytes(b"appledouble")
+        elif command[1] == "--flatten":
+            assert not build_pkg.find_macos_metadata(Path(command[2]))
+            Path(command[-1]).write_bytes(b"cleaned")
+        return subprocess.CompletedProcess(command, 0)
+
+    build_pkg.sanitize_component_package(
+        component,
+        tmp_path,
+        runner=fake_runner,
+    )
+
+    assert component.read_bytes() == b"cleaned"
+    assert [command[1] for command in commands] == [
+        "--expand",
+        "--flatten",
+        "--expand",
+    ]
+    assert not (tmp_path / "component-expanded").exists()
+    assert not (tmp_path / "component-verification").exists()
+
+
 def test_assemble_package_uses_injected_commands(tmp_path):
     staging = _fake_m2_staging(tmp_path)
     work = tmp_path / "work"
@@ -594,7 +708,7 @@ def test_assemble_package_uses_injected_commands(tmp_path):
     sys.platform != "darwin" or not BUILT_PACKAGE.is_file(),
     reason="requires the locally built macOS package",
 )
-def test_built_pkg_is_unsigned_product_archive():
+def test_built_pkg_is_unsigned_product_archive(tmp_path):
     listing = subprocess.run(
         ["xar", "-tf", str(BUILT_PACKAGE)],
         check=True,
@@ -603,6 +717,21 @@ def test_built_pkg_is_unsigned_product_archive():
     ).stdout.splitlines()
     assert "Distribution" in listing
     assert "XSTARS-component.pkg" in listing
+
+    expanded = tmp_path / "expanded-package"
+    subprocess.run(
+        ["pkgutil", "--expand", str(BUILT_PACKAGE), str(expanded)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert not build_pkg.find_macos_metadata(expanded)
+    scripts_dir = expanded / "XSTARS-component.pkg" / "Scripts"
+    assert (scripts_dir / "postinstall").is_file()
+    assert (scripts_dir / "postinstall").stat().st_mode & 0o111
+    assert (scripts_dir / "xlwings.conf").read_text(encoding="utf-8") == (
+        build_pkg.render_xlwings_conf()
+    )
 
     signature = subprocess.run(
         ["pkgutil", "--check-signature", str(BUILT_PACKAGE)],

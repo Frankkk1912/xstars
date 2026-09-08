@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,10 +34,19 @@ LOCK_FILE = SCRIPT_DIR / "runtime.lock.json"
 ASSETS_DIR = SCRIPT_DIR / "assets"
 DEFAULT_STAGING_DIR = SCRIPT_DIR / "staging"
 DISTRIBUTION_TEMPLATE = SCRIPT_DIR / "distribution.xml"
+POSTINSTALL_SCRIPT = SCRIPT_DIR / "postinstall.sh"
 OUTPUT_DIR = REPO_ROOT / "installer" / "output"
 PACKAGE_IDENTIFIER = "com.frank-sysu.xstars"
 COMPONENT_PACKAGE_NAME = "XSTARS-component.pkg"
 PAYLOAD_ARCHIVE_NAME = "XSTARS-payload.tar.gz"
+XLWINGS_CONF_NAME = "xlwings.conf"
+XLWINGS_INTERPRETER_LINE = (
+    '"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"'
+)
+INTERPRETER_MAC_PATTERN = re.compile(
+    r'^\s*"?INTERPRETER_MAC"?\s*,',
+    flags=re.IGNORECASE,
+)
 USER_INSTALL_LOCATION = "/"
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
@@ -449,15 +459,20 @@ def scan_office_metadata(artifact: Path) -> None:
         raise BuildError(f"cannot inspect Office artifact {artifact}: {exc}") from exc
 
 
-def scan_payload_tree(root: Path) -> None:
-    """Reject AppleDouble/Finder debris and leaked Office path metadata."""
-    if not root.is_dir():
-        raise BuildError(f"payload tree is missing: {root}")
-    forbidden = [
+def find_macos_metadata(root: Path) -> list[Path]:
+    """Return AppleDouble and Finder metadata paths below a tree."""
+    return [
         path
         for path in root.rglob("*")
         if path.name == ".DS_Store" or path.name.startswith("._")
     ]
+
+
+def scan_payload_tree(root: Path) -> None:
+    """Reject AppleDouble/Finder debris and leaked Office path metadata."""
+    if not root.is_dir():
+        raise BuildError(f"payload tree is missing: {root}")
+    forbidden = find_macos_metadata(root)
     if forbidden:
         raise BuildError(
             "payload contains forbidden macOS metadata: "
@@ -670,16 +685,96 @@ def productbuild_command(
     ]
 
 
+def render_xlwings_conf(existing_conf: str = "") -> str:
+    """Update only INTERPRETER_MAC while preserving all unknown config lines."""
+    rendered_lines = []
+    interpreter_written = False
+    for line in existing_conf.splitlines():
+        if INTERPRETER_MAC_PATTERN.match(line):
+            if not interpreter_written:
+                rendered_lines.append(XLWINGS_INTERPRETER_LINE)
+                interpreter_written = True
+            continue
+        rendered_lines.append(line)
+    if not interpreter_written:
+        rendered_lines.append(XLWINGS_INTERPRETER_LINE)
+    return "\n".join(rendered_lines) + "\n"
+
+
 def stage_package_scripts(work_dir: Path, source: Path | None) -> Path | None:
-    """Stage postinstall when M3 has provided it; otherwise omit scripts."""
+    """Stage postinstall and its generated xlwings configuration input."""
     if source is None or not source.is_file():
         return None
     scripts_dir = work_dir / "scripts"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
     destination = scripts_dir / "postinstall"
-    shutil.copy2(source, destination)
-    destination.chmod(destination.stat().st_mode | 0o111)
+    try:
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        destination.chmod(destination.stat().st_mode | 0o111)
+        (scripts_dir / XLWINGS_CONF_NAME).write_text(
+            render_xlwings_conf(),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise BuildError(f"cannot stage package scripts from {source}: {exc}") from exc
     return scripts_dir
+
+
+def sanitize_component_package(
+    component_package: Path,
+    work_dir: Path,
+    *,
+    runner: CommandRunner = default_command_runner,
+) -> None:
+    """Remove AppleDouble generated from immutable Sequoia provenance xattrs."""
+    expanded = work_dir / "component-expanded"
+    verification = work_dir / "component-verification"
+    cleaned_package = work_dir / "XSTARS-component-clean.pkg"
+    for path in (expanded, verification):
+        if path.exists():
+            shutil.rmtree(path)
+    cleaned_package.unlink(missing_ok=True)
+
+    _run_checked(
+        ["pkgutil", "--expand", str(component_package), str(expanded)],
+        runner,
+        "component package expansion",
+    )
+    if not expanded.is_dir():
+        raise BuildError(f"pkgutil did not expand component package to {expanded}")
+    for metadata in find_macos_metadata(expanded):
+        if metadata.is_dir() and not metadata.is_symlink():
+            shutil.rmtree(metadata)
+        else:
+            metadata.unlink()
+
+    _run_checked(
+        ["pkgutil", "--flatten", str(expanded), str(cleaned_package)],
+        runner,
+        "component package metadata cleanup",
+    )
+    if not cleaned_package.is_file():
+        raise BuildError(f"pkgutil did not create cleaned package {cleaned_package}")
+    try:
+        cleaned_package.replace(component_package)
+    except OSError as exc:
+        raise BuildError(
+            f"cannot replace component package with metadata-free package: {exc}"
+        ) from exc
+
+    _run_checked(
+        ["pkgutil", "--expand", str(component_package), str(verification)],
+        runner,
+        "cleaned component package verification",
+    )
+    forbidden = find_macos_metadata(verification)
+    if forbidden:
+        raise BuildError(
+            "component package contains forbidden macOS metadata after cleanup: "
+            + ", ".join(str(path) for path in forbidden[:5])
+        )
+    shutil.rmtree(expanded)
+    shutil.rmtree(verification)
 
 
 def assemble_package(
@@ -714,6 +809,12 @@ def assemble_package(
     )
     if not component_package.is_file():
         raise BuildError(f"pkgbuild did not create {component_package}")
+    if scripts_dir is not None:
+        sanitize_component_package(
+            component_package,
+            work_dir,
+            runner=runner,
+        )
 
     distribution = render_distribution(
         distribution_template,
@@ -753,7 +854,7 @@ def build_package(
             Path(temporary),
             output_dir,
             version,
-            postinstall_script=SCRIPT_DIR / "postinstall.sh",
+            postinstall_script=POSTINSTALL_SCRIPT,
             uninstall_script=SCRIPT_DIR / "uninstall.sh",
             runner=runner,
         )
