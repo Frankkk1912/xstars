@@ -20,6 +20,13 @@ import pytest
 import xlwings
 from oletools.olevba import VBA_Parser
 
+import xstars
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 CI; pytest depends on tomli there.
+    import tomli as tomllib  # type: ignore[import-not-found]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAC_INSTALLER_DIR = REPO_ROOT / "installer" / "mac"
 ASSETS_DIR = MAC_INSTALLER_DIR / "assets"
@@ -43,6 +50,12 @@ CUSTOM_UI_2006_NS = "http://schemas.microsoft.com/office/2006/01/customui"
 CUSTOM_UI_2006_REL = (
     "http://schemas.microsoft.com/office/2006/relationships/ui/extensibility"
 )
+
+
+def test_package_version_matches_pyproject() -> None:
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+
+    assert xstars.__version__ == project["project"]["version"]
 
 
 def _write_odc_payload(path: Path, names: list[str]) -> None:

@@ -1,17 +1,19 @@
 # Excel for Mac Manual Acceptance Checklist
 
-This checklist is the real-Excel acceptance gate for XSTARS macOS developer
-mode. Automated CI does not start Excel, execute VBA, display tkinter dialogs,
-or exercise macOS Automation permission prompts.
+This checklist is the real-Excel acceptance gate for both the standalone XSTARS
+macOS installer and the source-based Developer Mode fallback. Automated CI does
+not start Excel, execute VBA, display tkinter dialogs, or exercise macOS
+Automation permission prompts.
 
 **Owner:** the user performing the test on a real Excel for Mac installation.
 Do not mark the Draft PR ready until every blocker item passes or the user has
 explicitly approved a documented exception. Record the completed checklist and
 evidence in the Draft PR description or a PR comment.
 
-Complete the [macOS developer-mode setup](macos-developer-setup.md) before
-starting this checklist. That guide also explains supported versions, artifact
-privacy, cleanup, and troubleshooting.
+For the standalone package group, first read the [macOS Installer Guide](macos-installer.md).
+For the Developer Mode group, complete the [macOS developer-mode setup](macos-developer-setup.md).
+The two guides also explain supported versions, artifact privacy, cleanup, and
+troubleshooting.
 
 ## Result legend
 
@@ -38,11 +40,11 @@ risk table and explicitly accepted by the user.
 | Processor / chip (`Intel` or Apple Silicon model) | |
 | macOS version and build | |
 | Microsoft Excel for Mac version and build | |
-| Python version (`python --version`) | |
-| xlwings version (`python -m pip show xlwings`) | |
+| Python version (`python --version`; Developer Mode only, otherwise N/A) | |
+| xlwings version (`python -m pip show xlwings`; Developer Mode only, otherwise bundled) | |
 | XSTARS commit SHA | |
 | Workbook name and location | |
-| Virtual-environment Python path configured in xlwings | |
+| Virtual-environment Python path configured in xlwings (Developer Mode only, otherwise N/A) | |
 | Evidence folder or PR link | |
 
 If both Intel and Apple Silicon devices are available, create a separate copy
@@ -52,12 +54,31 @@ verified by this project.
 
 ## 2. Installation and permission checks
 
+### 2.1 Standalone `.pkg` installer acceptance
+
+These checks mirror [Plan §8.6](../plans/20260906-macos-installer.md#86-真机验证-v-01v-05外部调研灰区项责任人--用户r23) and the [uninstall checks in Plan §8.4](../plans/20260906-macos-installer.md#84-卸载验证真机用户). Run them with the final `.pkg` artifact on an Apple Silicon Mac; record screenshots or Terminal output for every row.
+
 | ID | Gate | Check | Expected result | Result | Evidence / notes |
 | --- | --- | --- | --- | --- | --- |
-| I-01 | **Blocker** | Create/activate the Python 3.10+ environment and run `python -m pip install -e ".[dev]"`. | Installation completes and `python -c "import xstars"` succeeds. | | |
-| I-02 | **Blocker** | Run `xlwings addin install`. | Command succeeds and the xlwings add-in is available after Excel restarts. | | |
-| I-03 | **Blocker** | Run `xlwings runpython install`. | Command succeeds and xlwings `RunPython` support is installed. | | |
-| I-04 | **Blocker** | Import the existing `ribbon/ribbon_callbacks.bas` in the Excel VBA editor; do not edit it. | Module `RibbonCallbacks` is present and the macro-enabled workbook saves/reopens. | | |
+| V-01 | **Blocker** | Run the bundled Python Tk smoke command: `"$HOME/Library/Application Support/XSTARS/python/bin/python3" -c "import ttkbootstrap as tb; root=tb.Window(); root.destroy(); print('TK_OK')"`. | Command prints `TK_OK`; no `init.tcl` error occurs. | | |
+| V-02 | **Blocker** | With Excel not previously run for this account, install the `.pkg`, then start Excel. | Required directories were pre-created, deployed files remain present, and the XSTARS Ribbon appears. | | |
+| V-03 | **Blocker** | Trigger a Ribbon action and inspect the Python process path. | xlwings uses `~/Library/Application Support/XSTARS/python/bin/python3` without a sandbox-permission error. | | |
+| V-04 | **Blocker** | Transfer the unsigned package through a network path, launch it, and use **System Settings → Privacy & Security → Open Anyway**. | The release path opens Installer; record each macOS prompt and step. | | |
+| V-05 | **Blocker** | Trigger a test Ribbon action five consecutive times and inspect process lifecycles. | No zombie Python process and no Office hang occurs. | | |
+| U-01 | **Blocker** | Quit Excel/WPS, review the default dry run, run `"$HOME/Library/Application Support/XSTARS/uninstall.sh" --apply`, then start Excel three times. | No missing-add-in prompt; Startup contains no `XSTARS.xlam`; a RegistrationDB backup exists and `PRAGMA integrity_check` reported `ok`. | | |
+| U-02 | **Blocker** | After U-01, inspect `~/.xstars/`. | Existing `settings.json` and chart artifacts are preserved. | | |
+
+### 2.2 Developer Mode installation and permission checks
+
+I-01 through I-04 apply only to **Developer Mode**, not to the standalone
+`.pkg` installer.
+
+| ID | Gate | Check | Expected result | Result | Evidence / notes |
+| --- | --- | --- | --- | --- | --- |
+| I-01 | **Blocker** | **Developer Mode only:** Create/activate the Python 3.10+ environment and run `python -m pip install -e ".[dev]"`. | Installation completes and `python -c "import xstars"` succeeds. | | |
+| I-02 | **Blocker** | **Developer Mode only:** Run `xlwings addin install`. | Command succeeds and the xlwings add-in is available after Excel restarts. | | |
+| I-03 | **Blocker** | **Developer Mode only:** Run `xlwings runpython install`. | Command succeeds and xlwings `RunPython` support is installed. | | |
+| I-04 | **Blocker** | **Developer Mode only:** Import the existing `ribbon/ribbon_callbacks.bas` in the Excel VBA editor; do not edit it. | Module `RibbonCallbacks` is present and the macro-enabled workbook saves/reopens. | | |
 | I-05 | **Blocker** | Open the workbook with macros enabled and inspect the Ribbon. | Both xlwings and XSTARS Ribbon tabs are available. | | |
 | I-06 | **Blocker** | Trigger the first XSTARS/xlwings action and handle any macOS Automation prompt. | The relevant Python/Terminal/Excel process can control Microsoft Excel after permission is granted. Record whether a prompt appeared. | | |
 | I-07 | Non-blocking | Reopen Excel after bridge and permission setup. | No repeated unexpected permission prompt; otherwise document the behavior. | | |

@@ -176,9 +176,13 @@ XSTARS 现已提供面向 **WPS 电子表格** 的独立发行版本：
 - **完全离线运行**：仅监听本地回环端口（`127.0.0.1`），无任何云端依赖或外网连接。
 - 完整安装与配置流程参见 [WPS 版安装与使用指南](docs/wps-installation.md)（使用 `XSTARS_WPS_Setup.exe`）。
 
-### macOS：🛠️ 开发者模式（需要 Python）
+### macOS：📦 安装包（推荐 —— 无需 Python）
 
-macOS 仅支持开发者模式：在 Python 3.10+ 虚拟环境中安装 XSTARS 与 xlwings 桥接，并复用现有 RunPython VBA 回调。本项目不提供独立 `.app`，也不支持 WPS for Mac。完整安装、权限与已验证的 Ribbon 打包步骤见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)。
+在 Apple Silicon Mac 上下载 `XSTARS-1.1.1.pkg`，双击后按安装向导操作。用户级安装包已内置 Python 3.12、全部依赖、Excel 启动加载项和 xlwings 桥接，无需准备 Python 环境或手工导入 VBA。系统要求、未签名包放行方式和卸载说明见 [macOS 安装器指南](docs/macos-installer.md)。不支持 WPS for Mac。
+
+#### macOS 开发者模式（源码调试备选）
+
+源码开发或调试仍可使用原有的 Python 3.10+ 虚拟环境与 RunPython 流程。完整环境配置、权限和 Ribbon 重建步骤见 [macOS 开发者模式指南](docs/macos-developer-setup.md)。
 
 ### 方式 C：🛠️ 开发者安装（需要 Python）
 
@@ -234,7 +238,8 @@ xlwings addin install
 ## 📌 系统要求
 
 - 🪟 **Windows**：Microsoft Excel；安装包模式无其他要求（`.exe` 已打包所有依赖），开发者模式需 Python ≥ 3.10
-- 🍎 **macOS**：Microsoft Excel for Mac 2016+ 并按开发者模式安装 —— Python ≥ 3.10 虚拟环境 + xlwings 桥接与 Ribbon 加载项，详见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)（无独立 `.app`，不支持 WPS for Mac）
+- 🍎 **macOS 安装包模式**：Apple Silicon（`arm64`）、macOS 12+、Microsoft Excel for Mac 2016+；`.pkg` 已内置 Python 与全部运行时依赖，详见 [docs/macos-installer.md](docs/macos-installer.md)
+- 🍎 **macOS 开发者模式**：源码调试需 Microsoft Excel for Mac 2016+ 和 Python ≥ 3.10，详见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)（不支持 WPS for Mac）
 
 ---
 

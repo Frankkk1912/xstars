@@ -177,9 +177,13 @@ XSTARS provides a standalone distribution for **Kingsoft WPS Spreadsheet**:
 - **Offline & Secure**: Runs entirely on local loopback (`127.0.0.1`) without external network dependencies.
 - See the [WPS Installation & User Guide](docs/wps-installation.md) for full setup instructions (`XSTARS_WPS_Setup.exe`).
 
-### macOS: 🛠️ Developer Mode (Python required)
+### macOS: 📦 Installer (Recommended — no Python needed)
 
-macOS support is developer mode only: install XSTARS and the xlwings bridge in a Python 3.10+ virtual environment, then reuse the existing RunPython VBA callbacks. It does not provide a standalone `.app` and does not support WPS for Mac. Full setup, permissions, and verified Ribbon packaging steps: [docs/macos-developer-setup.md](docs/macos-developer-setup.md).
+On an Apple Silicon Mac, download `XSTARS-1.1.1.pkg`, double-click it, and follow Installer. The per-user package includes Python 3.12, all dependencies, the Excel startup add-in, and the xlwings bridge—there is no Python environment or manual VBA import to prepare. See the [macOS Installer Guide](docs/macos-installer.md) for requirements, unsigned-package release options, and uninstall instructions. WPS for Mac is not supported.
+
+#### macOS Developer Mode (source-debugging fallback)
+
+For source development or debugging, the existing Python 3.10+ virtual-environment and RunPython workflow remains available. Follow the complete setup, permissions, and Ribbon reconstruction steps in the [macOS Developer-Mode Guide](docs/macos-developer-setup.md).
 
 ### Option C: 🛠️ Developer Setup (Python required)
 
@@ -235,7 +239,8 @@ Settings persist across sessions in `~/.xstars/settings.json`. 💾
 ## 📌 Requirements
 
 - 🪟 **Windows**: Microsoft Excel; Installer mode needs nothing else (the `.exe` bundles everything), Dev mode needs Python ≥ 3.10
-- 🍎 **macOS**: Microsoft Excel for Mac 2016+ with the developer-mode setup — Python ≥ 3.10 virtual environment plus the xlwings bridge and ribbon add-in; see [docs/macos-developer-setup.md](docs/macos-developer-setup.md) (no standalone `.app`, no WPS for Mac)
+- 🍎 **macOS installer mode**: Apple Silicon (`arm64`), macOS 12+, and Microsoft Excel for Mac 2016+; the `.pkg` includes Python and all runtime dependencies—see [docs/macos-installer.md](docs/macos-installer.md)
+- 🍎 **macOS developer mode**: Microsoft Excel for Mac 2016+ and Python ≥ 3.10 for source debugging; see [docs/macos-developer-setup.md](docs/macos-developer-setup.md) (WPS for Mac is not supported)
 
 ---
 

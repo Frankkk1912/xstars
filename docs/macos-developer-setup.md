@@ -1,8 +1,10 @@
 # macOS Developer-Mode Setup
 
-XSTARS supports Microsoft Excel for Mac through **developer mode**: Excel uses the existing xlwings `RunPython` callbacks, and a local Python environment runs XSTARS. This is not a standalone macOS application.
+Apple Silicon end users should install the standalone, per-user `.pkg` described in the [macOS Installer Guide](macos-installer.md); it includes Python and does not require the source setup below.
 
-This guide does not provide a `.app`, DMG, signing, or notarization workflow. WPS for Mac is not supported.
+This document is only for source development and debugging. In **developer mode**, Excel uses the existing xlwings `RunPython` callbacks and a local Python environment runs XSTARS. Keep this workflow as a fallback when inspecting or changing the source.
+
+The developer workflow does not produce a `.app`, DMG, signed package, or notarized package. WPS for Mac is not supported.
 
 ## Support matrix
 

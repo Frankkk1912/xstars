@@ -5,7 +5,7 @@ The XSTARS Ribbon has two hosts:
 - **Windows:** a macro-enabled workbook (`.xlsm`) that embeds the Ribbon XML from `customUI14.xml` together with the existing RunPython callbacks from `ribbon_callbacks.bas`.
 - **macOS (verified):** an `.xlam` add-in in the Excel startup folder whose custom UI part uses the **2006-format custom UI** (see the macOS section below), while the data workbook imports the unchanged `ribbon_callbacks.bas` plus the xlwings support modules. Do not create or modify a separate Mac `.bas` file.
 
-This repository does **not** ship a prebuilt `.xlsm` or `.xlam`. See the platform sections below for the verified preparation steps.
+Release-ready macOS artifacts are shipped in `installer/mac/assets/`: `XSTARS.xlam` and `XSTARS_mac.xlsm` are bundled by the standalone `.pkg`. The platform sections below retain the verified manual preparation steps as a developer reference for rebuilding or debugging those artifacts.
 
 ## Windows
 
@@ -48,7 +48,7 @@ See the full [macOS developer-mode setup guide](../docs/macos-developer-setup.md
 
 To install the ribbon and callbacks in Excel for Mac:
 
-1. Build the XSTARS `.xlam` on Windows or another host with the Office RibbonX Editor: start from a macro-enabled workbook, insert the converted 2006-format custom UI part, import the unchanged [`ribbon_callbacks.bas`](ribbon_callbacks.bas), save as **Excel Add-In (`.xlam`)**, and copy it to the Mac. (The repository does not ship a prebuilt `.xlam`; on the verification machine the `.xlam` was assembled by direct OOXML packaging of the converted custom UI part plus a copy of the callback module.)
+1. For a developer rebuild, create the XSTARS `.xlam` on Windows or another host with the Office RibbonX Editor: start from a macro-enabled workbook, insert the converted 2006-format custom UI part, import the unchanged [`ribbon_callbacks.bas`](ribbon_callbacks.bas), save as **Excel Add-In (`.xlam`)**, and copy it to the Mac. The release artifact under `installer/mac/assets/` was assembled by direct OOXML packaging of the converted custom UI part plus a copy of the callback module; normal users receive it through the `.pkg` and do not perform this step.
 2. Copy the `.xlam` into the Excel for Mac startup folder:
 
    ```text
@@ -66,7 +66,7 @@ To install the ribbon and callbacks in Excel for Mac:
 
 Callback resolution note: with a ribbon hosted by the add-in, Excel resolves `RibbonCallbacks.*` in the **active workbook**, so the workbook's imported modules are what execute. Keeping an unchanged copy of `ribbon_callbacks.bas` inside the `.xlam` (as in the verified configuration) is harmless.
 
-No standalone macOS `.app` is provided, and no separate Mac callback module is required. This workflow supports Microsoft Excel for Mac only; WPS for Mac is not supported.
+No standalone macOS `.app` is provided; the supported standalone distribution is the per-user `.pkg` documented in the [macOS Installer Guide](../docs/macos-installer.md). No separate Mac callback module is required. This manual workflow remains a source-development reference for Microsoft Excel for Mac only; WPS for Mac is not supported.
 
 ## Troubleshooting
 
