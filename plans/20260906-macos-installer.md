@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：5**
+- **rev：6**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -13,6 +13,7 @@
 | rev 3 | 2026-09-06 | **用户批准 Plan（rev 2）并裁定三项**：① 行尾修正采用方案 A（`.gitattributes` 追加 `*.bas text eol=lf`，否决方案 B）；② 推送 `feat/macos-installer` 分支供 Windows 侧 M0 制作；③ 进入实施。新增 R24 与待决 D11（VBE CRLF 残余风险的预登记回退路径）；修正 R21 与 §9 中 `.gitattributes` 的处置描述 | 2026-09-06 用户明确批准 + 三项裁定；`git ls-files --eol` 实证 |
 | rev 4 | 2026-09-08 | **T0.1 完成 + 待决 D2 裁定**：① D2 裁定为「内置兜底」——xlam 内置隐藏 `xlwings.conf` sheet，`Interpreter` 留空（researcher 双保险方案）；② `XSTARS.xlam` 在 Windows 侧由 Agent 全自动制作并入库（`installer/mac/assets/XSTARS.xlam`，commit `20ba6c8`）：customUI14→2006 转换（去 1 处 `insertAfterMso`）、真 Excel 16.0 COM 导入 `RibbonCallbacks`、OOXML 注入 customUI part；验收断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、真机打开无修复、模块与 `.bas` 逐行一致〔仅行尾归一化，D11 范围〕、`xlwings.conf` VeryHidden）。③ **实施环境事实**：本机 WPS Office 在 HKCU 劫持 Excel CLSID（`{00024500-...}` → `et.exe`），COM 自动化需启动 Office16 `EXCEL.EXE /automation` 后经 ROT 绑定真实例；Excel COM `VBProject` 为 null 时优先排查此劫持 | 2026-09-08 用户访谈裁定 D2 + Agent 实施记录（commit `20ba6c8`） |
 | rev 5 | 2026-09-08 | **D11 裁定落盘**：T0.1 逐字节断言改为「行尾归一化（`\r\n`→`\n`）后逐字节一致」。实测证据：oletools 提取制品内 RibbonCallbacks 源码 5452B 全 CRLF（163 行）vs 仓库 `.bas` 5289B 全 LF，差值恰为行数→纯 VBE 存储行为；归一化后逐字节一致，两侧均含 `Attribute VB_Name` 头，**制品无需重做**。另补入 F 项验证：customUI rel 包根挂载（2006 type）与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致；8.1 安装器单测覆盖面同步扩充 | 2026-09-08 用户确认 D11 回退；父 Agent 独立复验（oletools 提取 + `git ls-files --eol`） |
+| rev 6 | 2026-09-08 | **M0 闭合**：① T0.2 完成——`XSTARS_mac.xlsm` 源自 DC2 验收工作簿（无需 Windows 折返），三模块归一化后与仓库 `.bas`/0.37.0 wheel 逐字节一致、`Dictionary` 在位、`xlwings.conf!Interpreter` 已清空，入库（`b9fac14`）；② **新增隐私发现与清洗**：Excel 2010+ 保存时在 `xl/workbook.xml` 写入 `x15ac:absPath`（泄露构建机用户路径 `/Users/frank`、`C:\Users\<user>`），两制品均外科手术移除（xlam 为 `9b92364`），`vbaProject.bin` 逐字节不变，T2.2 复扫范围增补 absPath；③ T0.3 完成（assets/README.md：用途矩阵 + 5 条硬不变量 + 双主机再制作步骤 + WPS CLSID 劫持/Mac VBE 拒 `.cls` 绕行）；④ D3/D5 随交付物裁定闭合。**M0 三任务全部完成，M1 解锁** | 用户交付另存文件 + 父 Agent zipfile/oletools 独立复验与清洗 |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -202,7 +203,7 @@
 
 | Milestone | Status | Dependencies | Validation | Notes |
 | --- | --- | --- | --- | --- |
-| **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [~] **进行中**（rev 4：T0.1 ✅，T0.2/T0.3 待 xlsm） | 无（**阻塞前置**：T0.2 xlsm 需用户在 Mac 侧手工制作，R5；T0.1 已由 Agent 自动完成） | `installer/mac/assets/` 下存在 `XSTARS.xlam`（✅ 已入库）与 `XSTARS_mac.xlsm`（待交付）；pytest 断言 xlam 内 customUI 为 2006 命名空间、无 `customUI14` 残留（静态断言已人工预验 PASS，pytest 文件待 T1.4 落地）；assets/README.md 记录来源、版本与再制作步骤（待 T0.3） | 用户动作 + Agent 入库；不完成则 M1 起全部阻塞 |
+| **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [x] **已完成（rev 6）**：T0.1 ✅（`20ba6c8`+`9b92364` 隐私清洗）、T0.2 ✅（`b9fac14`）、T0.3 ✅（README.md） | 无 | 两制品均在 `installer/mac/assets/`；静态断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、rel 包根挂载、三模块归一化一致、Interpreter 空、无 absPath）；pytest 文件随 T1.4 落地 | **M0 闭合，M1 解锁** |
 | **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [ ] | M0 | `installer/mac/build_pkg.py --prepare-runtime` 干跑产出可执行 staging（`staging/python/bin/python3 -c "import xstars, xlwings, ttkbootstrap"` 通过）；SHA256 不匹配样本 → 非零退出；T1.4 单测全绿 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages（venv 搬迁不可行，§4.3） |
 | **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [ ] | M1 | `xar -t -f XSTARS-<ver>.pkg` 列出预期 Payload/Scripts；`pkgutil --expandpkg` 后 payload 无 `._*` AppleDouble 文件；distribution.xml 断言 `hostArchitectures="arm64"`、`min="12.0"`、`enable_currentUserHome="true"`；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3） |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [ ] | M2 | postinstall 结构测试通过（路径常数、四件事齐备、Console User/chown 逻辑、幂等、退出码策略）；`xlwings.conf` 写入内容断言（`"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"`） | 用户域安装下 postinstall 以安装用户运行，属主逻辑保留双保险（§4.3 TCC 行） |
@@ -223,12 +224,12 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
   - 修改：无源码修改；由用户按 `ribbon/README.md:44-51` 在 Windows/RibbonX Editor 侧制作：以 2006-format customUI part（`customUI/customUI.xml`，命名空间 `http://schemas.microsoft.com/office/2006/01/customui`，去除全部 `insertAfterMso`）+ 未修改的 `ribbon_callbacks.bas` 副本，另存为 Excel Add-In（`.xlam`）后拷回
   - 验收：pytest 打开 xlam（zip 容器）断言：存在 `customUI/customUI.xml` 且命名空间为 2006 URI、无 `customUI14` part、无 `insertAfterMso` 属性；VBA 模块源文本与 `ribbon/ribbon_callbacks.bas` **行尾归一化（`\r\n`→`\n`）后逐字节一致**（D11 已裁定，rev 5；实测制品 163 行全 CRLF、仓库全 LF，差值恰为行数）；customUI relationship 挂载于包根 `_rels/.rels` 且 type 为 2006 `ui/extensibility`（与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致）
   - 依赖：无（用户动作，**阻塞 M1–M6 全部**）
-- [ ] T0.2 用户手工制作 `XSTARS_mac.xlsm` 预置模板并交付，Agent 入库至 `installer/mac/assets/XSTARS_mac.xlsm`
+- [x] T0.2 ~~用户手工制作~~ **已完成（rev 6，2026-09-08）**：无需 Windows 折返——用户在 Mac 侧从 DC2 验收工作簿另存净化，Agent 复验后入库（`b9fac14`）。复验：三模块归一化后与仓库 `.bas`/0.37.0 wheel 逐字节一致、`Dictionary.cls` 在位、`xlwings.conf!Interpreter` 空、`vbaProject.bin` 230,400B、全包无 `/Users/frank`/`venv` 泄漏（absPath 已清洗）
   - 文件：新建 `installer/mac/assets/XSTARS_mac.xlsm`（命名必须 `.xlsm`，`.gitignore:10` 会忽略 `.xlsx`，R21）
   - 修改：无源码修改；由用户按 `docs/macos-developer-setup.md:88-99` 制作：宏工作簿内嵌 `RibbonCallbacks`（导入未修改 `ribbon_callbacks.bas`）+ `xlwings` 模块（`xlwings.bas`，版本与内置运行时一致）+ `Dictionary` 类模块；保存为 `.xlsm`
   - 验收：pytest 断言 vbaProject.bin 存在；若工作簿含 `xlwings.conf` sheet 则其 `Interpreter` 项与 R16④ 路径一致或为空（兜底见待决 D2）；文件可被 `zipfile` 打开且宏项目非空
   - 依赖：T0.1（同一批用户交付物；内置运行时确定后核对 `xlwings.bas` 版本一致）
-- [ ] T0.3 新建 `installer/mac/assets/README.md`：记录两制品的制作人、制作日期、依据的 `.bas`/customUI 版本、再制作步骤引用
+- [x] T0.3 **已完成（rev 6，2026-09-08）**：`installer/mac/assets/README.md` 落盘——制品用途矩阵、5 条硬不变量（2006 格式/归一化比对/xlwings 版本匹配/Interpreter 空/absPath 清洗）、Windows 与 Mac 双主机再制作步骤（含 WPS CLSID 劫持与 Mac VBE 拒 `.cls` 绕行）、再制作触发条件（RK-04）
   - 文件：新建 `installer/mac/assets/README.md`
   - 修改：纯新增文档
   - 验收：内容含 `ribbon/README.md:44-51` 与 `docs/macos-developer-setup.md:88-99` 的再制作引用，及「制品与 `.bas` 漂移时须重新制作」警示
@@ -266,7 +267,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
   - 依赖：T1.1（版本注入）
 - [ ] T2.2 staging/payload 装配（AppleDouble 防护 + 制品汇集）
   - 文件：`installer/mac/build_pkg.py`（新增 payload 装配函数）
-  - 修改：payload 布局 `~/Library/Application Support/XSTARS/` → `python/`、`bin/XSTARS.xlam`、`bin/xlwings.applescript`、`bin/XSTARS_mac.xlsm`、`uninstall.sh`、`Templates/XSTARS_mac.xlsm`（模板投放位置见待决 D7）；staging 阶段沿用 `COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata` 手法打包需经 tar 的内容（R19/G3，源自旧 `build_pkg.sh:47-48`〔C〕）；装配完成后扫描 payload 断言无 `._*` / `.DS_Store` 文件
+  - 修改：payload 布局 `~/Library/Application Support/XSTARS/` → `python/`、`bin/XSTARS.xlam`、`bin/xlwings.applescript`、`bin/XSTARS_mac.xlsm`、`uninstall.sh`、`Templates/XSTARS_mac.xlsm`（模板投放位置见待决 D7）；staging 阶段沿用 `COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata` 手法打包需经 tar 的内容（R19/G3，源自旧 `build_pkg.sh:47-48`〔C〕）；装配完成后扫描 payload 断言无 `._*` / `.DS_Store` 文件，且两二进制制品复扫无 `x15ac:absPath` 泄漏（rev 6 新增：M0 制品曾含 `/Users/frank`/`C:\Users\<user>` 构建路径元数据，入库前已外科手术清洗）
   - 验收：单测断言 payload 树结构与禁入文件扫描；干跑产出目录含全部四类内容物
   - 依赖：T1.3, T2.1
 - [ ] T2.3 pkgbuild/productbuild 调用（单向流水线）
@@ -494,9 +495,9 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | --- | --- | --- |
 | D1 | python-build-standalone **SHA256 具体钉值**与 cpython **3.12.x 具体小版本** | 实施时从 astral-sh/python-build-standalone Releases 取（T1.2） |
 | D2 | `XSTARS.xlam` 是否内置隐藏 `xlwings.conf` sheet 作兜底（researcher 建议双保险，与 V-02/RK-02 相关） | **已裁定（rev 4，2026-09-08）**：内置兜底，`Interpreter` 留空；已落地于已入库的 `XSTARS.xlam` 制品（T0.1） |
-| D3 | `XSTARS_mac.xlsm` 是否含示例数据及其内容范围 | 影响 T0.2 制作要求，需用户裁定 |
+| D3 | `XSTARS_mac.xlsm` 是否含示例数据及其内容范围 | **已裁定（rev 6，随交付物）**：用户另存版本保留模板表头与精简示例（Data 32 值、各 Template 45–92 值），已清除 DC2 验收原数据；pytest 仅断言结构不锁定具体值 |
 | D4 | 覆盖安装/升级/卸载时是否保留用户 `~/.xstars` 配置与 artifacts | 本 Plan 默认「全程保留」（RK-07 缓解）；如需「卸载时可选清理」需用户确认后加 `--purge-data` 开关 |
-| D5 | 制品在仓库的确切路径命名最终确认（本 Plan 采用 `installer/mac/assets/`，已核实不被 ignore） | 如用户偏好其他目录（如 `installer/excel-mac/`）需在 M0 前提出 |
+| D5 | 制品在仓库的确切路径命名最终确认 | **已裁定（rev 6，随交付物）**：采用 `installer/mac/assets/`，M0 已按此闭合 |
 | D6 | CI artifact 保留天数（retention-days） | 默认 GitHub action 上限（90 天），需用户确认 |
 | D7 | `XSTARS_mac.xlsm` 投放位置：仅留安装目录（`Templates/`）还是同时复制到 `~/Documents` 等用户可见处 | 影响 T2.2 布局与文档话术 |
 | D8 | 构建脚本是否在 CI 使用 uv（而非 pip）加速依赖安装 | 纯实现选择，默认 pip（少一依赖）；不阻塞 |
@@ -550,8 +551,8 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 2. **新建路径选择正确**：`plans/20260906-macos-installer.md`，含 Changelog 表格首行 rev 1 / 2026-09-06 / 初稿 / 依据。✅
 3. **Milestone 数量**：7 个（M0–M6），≤10 上限、满足 ≤7 目标，无需合并说明。✅
 4. **无孤立缺口**：G1→T1.2/T1.3；G2→T2.1/T2.2/T2.3（T1.1 入口）；G3→T2.2/T2.4；G4→T3.1/T3.2；G5→T3.2；G6→T0.1/T0.2/T0.3；G7→T4.1/T4.2；G8→T1.1/T5.1；G9→T5.1；G10→T5.2/T5.3/T5.4/T5.5；G11→T6.1；G12→T2.1/T2.3/T3.1；G13→T1.4/T2.4/T3.3/T4.2（横切，已注明支撑缺口）；G14→T6.2（横切，已注明）；G15→T2.3；G16→T2.1；G17→T2.1。**17 个缺口全部映射到至少一个任务 ID，无孤立任务（每个任务均可回溯缺口或横切约束）。** ✅
-5. **每个任务四项齐备**：全部 20 个 To-do（T0.1–T6.2）均含文件/修改/验收/依赖。✅
+5. **每个任务四项齐备**：全部 23 个 To-do（T0.1–T6.2；rev 2 审计计数）均含文件/修改/验收/依赖。✅
 6. **Validation contract 可判定**：每项含命令/方式 + 预期 + 通过标准；无法执行项（8.4–8.6 真机）已注明原因与责任人（=用户）。✅
 7. **Git 策略齐备**：分支 `feat/macos-installer`、Draft PR 标题、可直接使用的 PR 描述草稿、单 PR 拆分决策与依据、串行合并顺序。✅
-8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D2（rev 4，内置兜底 sheet）、D11（rev 5，断言行尾归一化）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
+8. **歧义全部入待决**：D1–D11 共 11 项（rev 3 增 D11 行尾回退裁决项；含任务指定的 6 项 + RK 相关 4 项）；**已裁定：D2（rev 4）、D11（rev 5）、D3/D5（rev 6，随交付物）**；11 项用户裁定全部可追溯到 Requirements R1–R11；未替用户作任何产品决策（保留 `~/.xstars` 仅为 Plan 默认缓解方案，已标 D4 待确认）。✅
 9. **只写入 Plan 文件**：本文件为唯一写入目标（`plans/20260906-macos-installer.md`）；未修改任何源码、测试、配置、脚本或生成物。✅
