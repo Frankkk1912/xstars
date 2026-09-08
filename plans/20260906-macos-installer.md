@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：7**
+- **rev：8**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -15,6 +15,7 @@
 | rev 5 | 2026-09-08 | **D11 裁定落盘**：T0.1 逐字节断言改为「行尾归一化（`\r\n`→`\n`）后逐字节一致」。实测证据：oletools 提取制品内 RibbonCallbacks 源码 5452B 全 CRLF（163 行）vs 仓库 `.bas` 5289B 全 LF，差值恰为行数→纯 VBE 存储行为；归一化后逐字节一致，两侧均含 `Attribute VB_Name` 头，**制品无需重做**。另补入 F 项验证：customUI rel 包根挂载（2006 type）与用户 Mac 实测渲染中的 `xlwings/addin/xlwings.xlam` 逐模式一致；8.1 安装器单测覆盖面同步扩充 | 2026-09-08 用户确认 D11 回退；父 Agent 独立复验（oletools 提取 + `git ls-files --eol`） |
 | rev 6 | 2026-09-08 | **M0 闭合**：① T0.2 完成——`XSTARS_mac.xlsm` 源自 DC2 验收工作簿（无需 Windows 折返），三模块归一化后与仓库 `.bas`/0.37.0 wheel 逐字节一致、`Dictionary` 在位、`xlwings.conf!Interpreter` 已清空，入库（`b9fac14`）；② **新增隐私发现与清洗**：Excel 2010+ 保存时在 `xl/workbook.xml` 写入 `x15ac:absPath`（泄露构建机用户路径 `/Users/frank`、`C:\Users\<user>`），两制品均外科手术移除（xlam 为 `9b92364`），`vbaProject.bin` 逐字节不变，T2.2 复扫范围增补 absPath；③ T0.3 完成（assets/README.md：用途矩阵 + 5 条硬不变量 + 双主机再制作步骤 + WPS CLSID 劫持/Mac VBE 拒 `.cls` 绕行）；④ D3/D5 随交付物裁定闭合。**M0 三任务全部完成，M1 解锁** | 用户交付另存文件 + 父 Agent zipfile/oletools 独立复验与清洗 |
 | rev 7 | 2026-09-08 | **M1 完成（T1.1–T1.4 [x]，`aef6a32`）**：① D1 落定——pin `20260901`/`cpython-3.12.14` aarch64 `install_only_stripped`，SHA256 `81a359f1…e4b2b`、size 24,981,445（官方 SHA256SUMS 双源核对）；② `build_pkg.py`（纯函数+注入式下载/命令执行器）+ `runtime.lock.json` + 15 项无网络单测全绿；③ 真实干跑通过：staging import（脱离仓库根）`xstars.__file__` 位于 staging site-packages、依赖装齐、无 dev 项、`xlwings.applescript` 已汇集；④ 新增仓库级事实与处置：ruff 全仓存量 117 error（`xstars/main.py` 34 等，main 从未 ruff-clean 且相关文件在「明确不修改」清单）→ ruff 验收范围明确为**新文件 0 error**；staging 构建产物目录入 `.gitignore`（与 `installer/output/` 同类）并在 compileall/ruff 中排除；⑤ VBA 占位符澄清：断言用 `/Users/(?!<User>)`——上游 `xlwings.bas` 规范占位 `/Users/<User>` 不是泄漏（worker 裁决，D11 语义补充）；⑥ 实施记录：worker 45min 超时一次（pip 装栈耗时），编排者接手完成验证与收尾；oletools 入 `[dev]`（T1.4 授权决定）。全量回归 374 passed/13 skipped 零新增失败；ribbon 门禁空 diff | pytest/ruff/compileall/真实干跑实测；worker 报告 + 编排者复验 |
+| rev 8 | 2026-09-08 | **M2 完成（T2.1–T2.4 [x]，`f352a05`）**：真实出包 `XSTARS-1.1.1.pkg`（189,756,535 B，unsigned 预期，SHA256 `7b8d128d…`）；**RK-08 实测解除**——`install-location /` + payload 相对布局 + `installer -target CurrentUserHomeDirectory` 实际落位 `~/Library/Application Support/XSTARS/`（测试安装+receipt 已完整清理）；`distribution.xml` 四项改造落地（arm64/min12.0/currentUserHome/**移除 rootVolumeOnly**）；安装器单测 23/23；全量回归 382 passed/13 skipped。**新增残余风险（已裁决接受）**：xlwings wheel 内置 `quickstart.xlsm` 含上游 `x15ac:absPath`（`C:\Users\felix\…`），系第三方文件且用户不会打开，不做包级清洗以维持“运行时=纯净 wheel 安装”可复现性；T2.2 扫描范围维持两件 XSTARS 制品 | worker 报告 + 编排者独立复验（pytest/ruff/compileall/门禁/单测重跑于 pi-lens 重排后） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -206,7 +207,7 @@
 | --- | --- | --- | --- | --- |
 | **M0 制品与前置就绪**（用户交付 xlam/xlsm 入库） | [x] **已完成（rev 6）**：T0.1 ✅（`20ba6c8`+`9b92364` 隐私清洗）、T0.2 ✅（`b9fac14`）、T0.3 ✅（README.md） | 无 | 两制品均在 `installer/mac/assets/`；静态断言全 PASS（2006 命名空间、无 customUI14/insertAfterMso、rel 包根挂载、三模块归一化一致、Interpreter 空、无 absPath）；pytest 文件随 T1.4 落地 | **M0 闭合，M1 解锁** |
 | **M1 运行时组装**（下载 + 校验 + 装依赖 + 装 xstars） | [x] **已完成（rev 7，`aef6a32`）**：T1.1–T1.4 ✅ | M0 | staging 干跑：脱离仓库根 `import xstars, xlwings, ttkbootstrap, matplotlib, PIL` OK 且 `xstars.__file__` 在 staging site-packages；SHA256 篡改样本 → 非零退出；T1.4 单测 15/15 | 运行时 tarball 不入库（R1）；依赖装进主 site-packages；staging 目录已 gitignore（rev 7） |
-| **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [ ] | M1 | `xar -t -f XSTARS-<ver>.pkg` 列出预期 Payload/Scripts；`pkgutil --expandpkg` 后 payload 无 `._*` AppleDouble 文件；distribution.xml 断言 `hostArchitectures="arm64"`、`min="12.0"`、`enable_currentUserHome="true"`；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3） |
+| **M2 pkg 构建**（staging/pkgbuild/productbuild/distribution.xml） | [x] **已完成（rev 8，`f352a05`）** | M0, M1 | ✅ 真实出包 `XSTARS-1.1.1.pkg`；`xar`/`expandpkg` 结构验证；无 `._*`；unsigned 预期值；distribution 三参数断言；T2.4 单测全绿 | 单向流水线（无签名、无回跑，R14/G15）；AppleDouble 防护（R19/G3）；RK-08 实测解除 |
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [ ] | M2 | postinstall 结构测试通过（路径常数、四件事齐备、Console User/chown 逻辑、幂等、退出码策略）；`xlwings.conf` 写入内容断言（`"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"`） | 用户域安装下 postinstall 以安装用户运行，属主逻辑保留双保险（§4.3 TCC 行） |
 | **M4 卸载与残留清理** | [ ] | M3 | T4.2 静态/单元断言通过；`uninstall.sh --help` 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7） |
 | **M5 文档同步 + 版本单源 + Pillow 声明** | [ ] | M0（可与 M2–M4 并行推进，合并前完成） | `xstars/__init__.py:3` == pyproject 版本（单测断言）；pyproject 含 `Pillow`；ruff + pytest + compileall 全绿；文档全文不再有「macOS 仅开发者模式/无安装器」表述（grep 为空） | G8 后半、G9、G10 |
@@ -261,22 +262,22 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M2 pkg 构建
 
-- [ ] T2.1 新建 `installer/mac/distribution.xml` 模板（改造旧版三处）
+- [x] T2.1 **已完成（rev 8，`f352a05`）**：`distribution.xml` 四项改造落地（arm64/min 12.0/currentUserHome/**移除 rootVolumeOnly**——与用户域 home 安装互斥）；构建期 Python 渲染替代 sed
   - 文件：新建 `installer/mac/distribution.xml`
   - 修改：以旧版为基（引用时实施前二次核对旧文件行号）：`hostArchitectures="arm64"`（R15/G17）；`<domains enable_currentUserHome="true"/>`（R3/G12，替换 `enable_localSystem`）；`<os-version min="12.0"/>`（R9/G16）；保留 `__VERSION__` 占位符与 `customize="never" require-scripts="true"` 结构
   - 验收：pytest 断言生成后的 XML 三项参数正确、`__VERSION__` 替换无残留
   - 依赖：T1.1（版本注入）
-- [ ] T2.2 staging/payload 装配（AppleDouble 防护 + 制品汇集）
+- [x] T2.2 **已完成（rev 8）**：payload 相对布局（`Library/Application Support/XSTARS/`）+ tarball 直通防护；uninstall.sh 容忍缺失（M4）；扫描无 `._*`/`.DS_Store`/制品 absPath
   - 文件：`installer/mac/build_pkg.py`（新增 payload 装配函数）
   - 修改：payload 布局 `~/Library/Application Support/XSTARS/` → `python/`、`bin/XSTARS.xlam`、`bin/xlwings.applescript`、`bin/XSTARS_mac.xlsm`、`uninstall.sh`、`Templates/XSTARS_mac.xlsm`（模板投放位置见待决 D7）；staging 阶段沿用 `COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata` 手法打包需经 tar 的内容（R19/G3，源自旧 `build_pkg.sh:47-48`〔C〕）；装配完成后扫描 payload 断言无 `._*` / `.DS_Store` 文件，且两二进制制品复扫无 `x15ac:absPath` 泄漏（rev 6 新增：M0 制品曾含 `/Users/frank`/`C:\Users\<user>` 构建路径元数据，入库前已外科手术清洗）
   - 验收：单测断言 payload 树结构与禁入文件扫描；干跑产出目录含全部四类内容物
   - 依赖：T1.3, T2.1
-- [ ] T2.3 pkgbuild/productbuild 调用（单向流水线）
+- [x] T2.3 **已完成（rev 8）**：pkgbuild/productbuild 单向流水线；真实出包 189,756,535 B unsigned；`XSTARS_SIGN` 显式忽略；RK-08 实测落位正确
   - 文件：`installer/mac/build_pkg.py`（新增打包函数与 CLI 主流程）
   - 修改：`pkgbuild --root <staging> --identifier com.frank-sysu.xstars --version <pyproject 版本> --install-location <用户域映射，见 §4.5 缺口 2，实施期干跑确定> --scripts <scripts>`；`productbuild --distribution <渲染后 XML> --package-path <work> installer/output/XSTARS-<version>.pkg`（`installer/output/` 已被 `.gitignore:39` 忽略，不污染仓库）；**无任何签名步骤、无任何脚本回跑**（R14/G15：不移植 `sign_and_notarize.sh`；`XSTARS_SIGN` 环境变量即使误设也被显式忽略并在日志注明）
   - 验收：`--build-pkg` 产出 `installer/output/XSTARS-1.1.1.pkg`；`xar -t -f` 列出预期条目；产物不含签名段（`pkgutil --check-signature` 报 unsigned，预期值）
   - 依赖：T2.2（支撑 G2、G12、G15）
-- [ ] T2.4 `tests/test_macos_installer.py` 补 M2 断言
+- [x] T2.4 **已完成（rev 8）**：+8 项 M2 断言（23/23）；macOS 本机 pkg 结构断言落地
   - 文件：`tests/test_macos_installer.py`
   - 修改：新增：distribution.xml 三参数断言（T2.1 落点）；payload 树/AppleDouble 扫描断言（T2.2 落点）；打包命令行参数构造断言（纯函数，命令可注入，Linux runner 可跑）；（macOS 本机）pkg 结构断言
   - 验收：pytest 全绿；CI 非 macOS runner 亦可跑装配断言（命令注入替身，R20）
@@ -478,7 +479,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 | RK-05 | 运行时体积导致 CI artifact 过大 | 中 | runtime + scipy/pandas/matplotlib 等 site-packages 解压后数百 MB | CI 慢、artifact 超限 | install_only_stripped 变体（R1）；CI 仅上传最终 .pkg（压缩态）；retention-days 待决 D6；必要时 `pip install --no-cache-dir` + 剔除 `__pycache__`/tests |
 | RK-06 | 多用户机器每人一份 | 低 | 同机多 GUI 用户 | 其他用户无功能区（仅安装者可见） | 与 R3 用户级免提权裁定一致的既知取舍；文档写明「每个需要的用户各装一次」；不试图做系统级（违背裁定） |
 | RK-07 | 覆盖安装/升级时 `~/.xstars` 用户数据 | 中 | 重装或升级 pkg | 若误删则用户设置/工件丢失 | uninstall.sh/postinstall 均不触碰 `~/.xstars`（T3.3/T4.2 否定断言）；保留策略见待决 D4 |
-| RK-08 | pkgbuild 用户域 `--install-location` 语义实现细节不符预期 | 中 | productbuild 对用户域相对路径映射与预期不符 | 安装位置错误或要求提权 | §4.5 缺口 2：M2 实现期先干跑 `installer -pkg ... -target` 到测试机验证；distribution `domains enable_currentUserHome` 按裁定为契约 |
+| RK-08 | pkgbuild 用户域 `--install-location` 语义实现细节不符预期 | 中 → **已消除（rev 8 实测）** | productbuild 对用户域相对路径映射与预期不符 | 安装位置错误或要求提权 | **实测解除**：`--install-location /` + payload 相对布局 + `-target CurrentUserHomeDirectory` → 实际落位 `~/Library/Application Support/XSTARS/`（测试安装 + receipt 已清理） |
 | RK-09 | SHA256 钉值对应的 3.12.x 构建过时（安全更新滞后） | 低 | 长期不更新 lock | 内置 Python 含已知 CVE | lock 文件集中管理、升级仅需改一处 + 重跑校验；文档注明运行时版本；不在本轮范围（签名/更新通道属后续） |
 | RK-10 | postinstall 在无 GUI 登录场景（SSH/远程安装）探测不到 Console User | 低 | 远程静默安装 | 用户目录投递被跳过 | 沿用旧版「跳过 + 指引输出、exit 0」非致命策略（§4.1 postinstall 段）；文档写明需登录图形会话安装 |
 | RK-11 | `com.frank-sysu.xstars` 收据与旧 xstars-dev 安装残留冲突 | 低 | 机器曾装旧 pkg | `pkgutil --forget`/升级行为混乱 | 待决 D9（identifier 是否换新）；uninstall 文档含旧收据检查步骤 |
