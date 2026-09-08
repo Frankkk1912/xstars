@@ -58,3 +58,6 @@ wps-addon/deploy/
 # Local review snapshots and lint caches
 .review-tmp/
 .ruff_cache/
+
+# Local build staging for the macOS installer (runtime + payload)
+installer/mac/staging/
