@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：13**
+- **rev：14**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -21,6 +21,7 @@
 | rev 11 | 2026-09-08 | **M5 完成（T5.1–T5.5 [x]，`c52f80c`）**：① 版本单源——`xstars/__init__.py` 1.0.0→1.1.1 + 防漂移单测（tomllib，CI 3.10 回归用 tomli 条件导入）；② pyproject 显式声明 `Pillow>=10.0`（直呼导入点 main.py:1053/export.py:328）；③ `docs/macos-installer.md` 补全（含 M2 实测的 CurrentUserHomeDirectory 落位语义、Sequoia 三途放行、无右键打开过时话术）；④ 双语 README 安装包模式为推荐路径、开发者模式降级 fallback；⑤ 三 docs 同步（manual-acceptance 增安装器验收组；strategy 路线表「独立 `.pkg` 安装器交付中」）；⑥ ribbon/README ship 制品澄清。安装器单测 32/32；全量回归 391 passed/13 skipped；过时话术 grep 零命中；ribbon 门禁空 diff。**新事实**：CI 既有测试 job 跑 Python 3.10，新测试已兼容（tomli 条件导入）；tests/ 存量 ruff 21 error（M4 HEAD 同，非本次引入，不在范围） | worker 报告 + 编排者独立复验（含策略/过时话术 grep 与 T5.1 逐行 diff） |
 | rev 12 | 2026-09-08 | **T6.1 完成（`10cab2d`）**：`.github/workflows/macos-support.yml` 新增 `macos-pkg-build` job（macos-latest 已为 arm64，经 runner-images 元数据核实；Python 3.12 构建宿主；**两步构建** `--prepare-runtime` → `--build-pkg`——编排者任务规格曾误写单命令，worker 预检拦下并裁决修正；installer 测试 + compileall + upload-artifact retention 7d；permissions contents: read，无 secrets）；既有三 job 未动；YAML 有效（psych）。M6 标记进行中：T6.2（真机 V-01~V-05）待用户，随 PR 首次 CI 运行验证 job 本身 | worker 报告 + 编排者复验（YAML psych + diff 全文审读） |
 | rev 13 | 2026-09-08 | **Review 第 1 轮（三路 fresh-context）完成 + F1–F10 修复批落地**：coverage lane 产 14 findings（1 Blocker + 4 值得修复 + 6 可选 + 3 延期）；correctness lane 产 1 Blocker + 2 值得修复（fallback 模型续跑成功）；quality lane 产 3 值得修复（fallback 模型续跑成功）；另两 lane 首跑因 provider 500 中断后恢复。修复批（fix worker，全验收绿：安装器单测 43/43、全量 402 passed/13 skipped、pkg 重出 ≈137MiB、三层 AppleDouble 零）详见文末「Review 记录」；可选改进 9 项记入残余清单不在本轮实施；RK-01 处置：staging 实测 Tcl/Tk 资源在位 + F1 的 CI 冒烟 import ttkbootstrap 间接覆盖 Tk 链路，sitecustomize 缓解推迟至 V-01 实测需要时 | 三路 reviewer 报告 + fix worker 报告 + 编排者复验（43/43、402/13、ruff、YAML、bash -n、门禁） |
+| rev 14 | 2026-09-08 | **R9 修正（用户访谈裁定）+ 第 2 轮 A–D 修复闭合**：真实 `--prepare-runtime` 解析出 numpy 2.5.3 / scipy 1.18.1（wheel 标签 `macosx_14_0_arm64`，要求 macOS 14+），原 R9=12.0 成为假承诺 → **最低 macOS 修正为 14.0（Sonoma），不钉版本**；落地：distribution.xml `min="14.0"`、测试断言、双语 README、docs 同步（grep 无残留）。第 2 轮复审 A–D 全闭合：A 冒烟显式导入全部 11 项运行时依赖 + `sys.prefix` 来源断言 + `pip check`；B 卸载三态（备份→恢复 / marker→删除 / 皆无→警告保持）；C manifest 绑定 staging 内容（三文件 SHA256 + staging 解释器实跑版本 + 工作簿内嵌 xlwings 版本比对，篡改即 fail-closed）；D 卸载文档三路径语义。验证：安装器单测 45 passed/1 skipped；全量 404 passed/14 skipped | 用户访谈裁定（R9 修正）；第 2 轮 reviewer 报告 + fix worker 报告 + 编排者复验 |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -83,7 +84,7 @@
 | R6 | **版本单一来源**：以 `pyproject.toml:7`（已核实 `version = "1.1.1"`）为唯一来源，构建脚本读 pyproject（`tomllib`，**不再**像旧 `build_installer.py:49-55`〔C〕那样正则抓 `__init__.py`）；并把 `xstars/__init__.py:3`（已核实 `"1.0.0"`）对齐到 `"1.1.1"`。 | 访谈裁定 6 | 〔硬〕 |
 | R7 | **卸载**：交付 `uninstall.sh` + 文档；必须覆盖 Excel 启动项清理与 `~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/*.reg` 中 `OPENn` 残留清理（依据 `docs/macos-developer-setup.md:191-193`「cannot find add-in」故障段，已核对）；必须含**备份步骤**与 `PRAGMA integrity_check`。 | 访谈裁定 7 | 〔硬〕 |
 | R8 | **CI**：新增 `macos-latest` build job，产出 `.pkg` 并上传为 workflow artifact（可参照既有 `.github/workflows/macos-support.yml:16` 的 macOS job，已核对）。 | 访谈裁定 8 | 硬 |
-| R9 | **最低 macOS 12.0（Monterey）**：依据 scipy arm64 wheel 标签 `macosx_12_0_arm64`（researcher §A 依赖 wheel 清单）；`distribution.xml` 的 `<os-version min>` 从旧版 11.0 改为 12.0。 | 访谈裁定 9 | 〔硬〕 |
+| R9 | **最低 macOS 14.0（Sonoma）**（rev 14 修订：真实构建解析出 numpy 2.5.3 / scipy 1.18.1 的 `macosx_14_0_arm64` wheel，原 12.0 承诺不成立；用户裁定不钉版本、随栈上浮）；`distribution.xml` 的 `<os-version min>` 为 14.0。 | 访谈裁定 9；rev 14 用户访谈修订 | 〔硬〕 |
 | R10 | **顺手修（仅此一项纳入）**：`pyproject.toml` 显式声明 `Pillow`（现靠 matplotlib 间接引入，但 `xstars/main.py:1053`、`xstars/application/export.py:328,340` 直接使用 `from PIL import ImageGrab` / `Image`——两处均已实读核对）。 | 访谈裁定 10 | 硬 |
 | R11 | **PR 边界**：单分支 `feat/macos-installer` + **单个 Draft PR**，所有 Milestone 串行进入同一 PR。 | 访谈裁定 11 | 〔硬〕 |
 | R12 | **`ribbon/*.bas` 零修改**：CI 硬门禁 `.github/workflows/macos-support.yml:65-73` job「Existing VBA files are unchanged」→ `git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'`（已实读核对 `:73`）。任何触碰即红。 | 方案骨架；explore §3.7 | 〔硬〕 |

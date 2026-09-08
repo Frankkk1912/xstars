@@ -12,7 +12,7 @@
              hostArchitectures="arm64"/>
     <volume-check>
         <allowed-os-versions>
-            <os-version min="12.0"/>
+            <os-version min="14.0"/>
         </allowed-os-versions>
     </volume-check>
     <choices-outline>

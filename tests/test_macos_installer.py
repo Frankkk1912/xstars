@@ -515,6 +515,46 @@ def test_staging_manifest_rejects_stale_project_version(tmp_path):
         build_pkg.build_package(staging, "1.1.1", output_dir=tmp_path / "output")
 
 
+def test_staging_manifest_rejects_tampered_staged_artifact(tmp_path):
+    staging = _fake_m2_staging(tmp_path)
+    lock = build_pkg.load_runtime_lock(RUNTIME_LOCK)
+    manifest_path = build_pkg.write_staging_manifest(
+        staging,
+        xstars_version="1.1.1",
+        xlwings_version="0.37.0",
+        runtime_lock_sha256=lock.sha256,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["xstars_version"] == "1.1.1"
+    assert set(manifest["file_hashes"]) == set(build_pkg.STAGING_HASH_PATHS)
+
+    (staging / "bin/XSTARS.xlam").write_bytes(b"tampered")
+
+    with pytest.raises(
+        build_pkg.BuildError,
+        match=r"staging file hash mismatch.*bin/XSTARS.xlam",
+    ):
+        build_pkg.build_package(staging, "1.1.1", output_dir=tmp_path / "output")
+
+
+def test_staging_manifest_rejects_staged_xstars_version_mismatch(monkeypatch, tmp_path):
+    staging = _fake_m2_staging(tmp_path)
+    lock = build_pkg.load_runtime_lock(RUNTIME_LOCK)
+    build_pkg.write_staging_manifest(
+        staging,
+        xstars_version="1.1.1",
+        xlwings_version="0.37.0",
+        runtime_lock_sha256=lock.sha256,
+    )
+    monkeypatch.setattr(build_pkg, "read_staged_xstars_version", lambda _path: "9.9.9")
+
+    with pytest.raises(
+        build_pkg.BuildError,
+        match=r"xstars_version expected=1.1.1 actual=9.9.9",
+    ):
+        build_pkg.build_package(staging, "1.1.1", output_dir=tmp_path / "output")
+
+
 def test_distribution_template_and_rendering(tmp_path):
     raw = _xml_root(DISTRIBUTION_TEMPLATE.read_bytes())
     domains = raw.find("domains")
@@ -532,7 +572,7 @@ def test_distribution_template_and_rendering(tmp_path):
     assert options.attrib["customize"] == "never"
     assert options.attrib["require-scripts"] == "true"
     assert "rootVolumeOnly" not in options.attrib
-    assert os_version is not None and os_version.attrib["min"] == "12.0"
+    assert os_version is not None and os_version.attrib["min"] == "14.0"
 
     rendered = build_pkg.render_distribution(
         DISTRIBUTION_TEMPLATE, tmp_path / "distribution.xml", "9.8.7"
@@ -713,6 +753,8 @@ def test_postinstall_has_user_domain_deployment_and_fail_closed_runtime_contract
     assert "/usr/sbin/chown -R" in script
     assert "copy_user_file" in script and "|| true" in script
     assert "backup_user_file_once" in script
+    assert '.xlwings.applescript.absent"' in script
+    assert '.xlwings.conf.absent"' in script
     assert script.index('"$APPLESCRIPT_BACKUP"') < script.rindex(
         '"xlwings AppleScript" || true'
     )
@@ -857,6 +899,10 @@ def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
     assert "restore_registration_backup" in script
     assert "restore_xlwings_applescript" in script
     assert "restore_xlwings_conf" in script
+    assert 'elif [ -f "$APPLESCRIPT_ABSENT_MARKER" ]; then' in script
+    assert 'elif [ -f "$CONF_ABSENT_MARKER" ]; then' in script
+    assert "pre-install xlwings AppleScript state is unknown" in script
+    assert "pre-install xlwings configuration state is unknown" in script
     assert "/usr/sbin/pkgutil --forget" in script
     assert 'PACKAGE_IDENTIFIER="com.frank-sysu.xstars"' in script
     assert "~/.xstars" not in script.casefold()
@@ -943,7 +989,10 @@ def test_uninstall_apply_cleans_registration_and_preserves_user_data(tmp_path):
     (settings / "settings.json").write_text("{}", encoding="utf-8")
 
     install_root = tmp_path / "Library/Application Support/XSTARS"
-    install_root.mkdir(parents=True)
+    backup_state = install_root / "preinstall-backup"
+    backup_state.mkdir(parents=True)
+    (backup_state / ".xlwings.applescript.absent").touch()
+    (backup_state / ".xlwings.conf.absent").touch()
     app_scripts = tmp_path / "Library/Application Scripts/com.microsoft.Excel"
     app_scripts.mkdir(parents=True)
     applescript = app_scripts / "xlwings.applescript"
@@ -1028,6 +1077,36 @@ def test_uninstall_apply_restores_preinstall_xlwings_files(tmp_path):
     assert conf.read_text(encoding="utf-8") == (
         '"INTERPRETER_MAC","/original/python"\n"OTHER","value"\n'
     )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")
+def test_uninstall_apply_preserves_xlwings_files_when_preinstall_state_is_unknown(
+    tmp_path,
+):
+    install_root = tmp_path / "Library/Application Support/XSTARS"
+    install_root.mkdir(parents=True)
+    app_scripts = tmp_path / "Library/Application Scripts/com.microsoft.Excel"
+    app_scripts.mkdir(parents=True)
+    applescript = app_scripts / "xlwings.applescript"
+    applescript.write_text("developer bridge", encoding="utf-8")
+    conf = tmp_path / "Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
+    conf.parent.mkdir(parents=True)
+    original_conf = '"INTERPRETER_MAC","/developer/python"\n"OTHER","developer value"\n'
+    conf.write_text(original_conf, encoding="utf-8")
+
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--apply"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_uninstall_environment(tmp_path, pgrep_exit=1),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert applescript.read_text(encoding="utf-8") == "developer bridge"
+    assert conf.read_text(encoding="utf-8") == original_conf
+    assert "pre-install xlwings AppleScript state is unknown" in result.stderr
+    assert "pre-install xlwings configuration state is unknown" in result.stderr
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")

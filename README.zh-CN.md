@@ -238,7 +238,7 @@ xlwings addin install
 ## 📌 系统要求
 
 - 🪟 **Windows**：Microsoft Excel；安装包模式无其他要求（`.exe` 已打包所有依赖），开发者模式需 Python ≥ 3.10
-- 🍎 **macOS 安装包模式**：Apple Silicon（`arm64`）、macOS 12+、Microsoft Excel for Mac 2016+；`.pkg` 已内置 Python 与全部运行时依赖，详见 [docs/macos-installer.md](docs/macos-installer.md)
+- 🍎 **macOS 安装包模式**：Apple Silicon（`arm64`）、macOS 14+、Microsoft Excel for Mac 2016+；`.pkg` 已内置 Python 与全部运行时依赖，详见 [docs/macos-installer.md](docs/macos-installer.md)
 - 🍎 **macOS 开发者模式**：源码调试需 Microsoft Excel for Mac 2016+ 和 Python ≥ 3.10，详见 [docs/macos-developer-setup.md](docs/macos-developer-setup.md)（不支持 WPS for Mac）
 
 ---

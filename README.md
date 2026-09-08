@@ -239,7 +239,7 @@ Settings persist across sessions in `~/.xstars/settings.json`. 💾
 ## 📌 Requirements
 
 - 🪟 **Windows**: Microsoft Excel; Installer mode needs nothing else (the `.exe` bundles everything), Dev mode needs Python ≥ 3.10
-- 🍎 **macOS installer mode**: Apple Silicon (`arm64`), macOS 12+, and Microsoft Excel for Mac 2016+; the `.pkg` includes Python and all runtime dependencies—see [docs/macos-installer.md](docs/macos-installer.md)
+- 🍎 **macOS installer mode**: Apple Silicon (`arm64`), macOS 14+, and Microsoft Excel for Mac 2016+; the `.pkg` includes Python and all runtime dependencies—see [docs/macos-installer.md](docs/macos-installer.md)
 - 🍎 **macOS developer mode**: Microsoft Excel for Mac 2016+ and Python ≥ 3.10 for source debugging; see [docs/macos-developer-setup.md](docs/macos-developer-setup.md) (WPS for Mac is not supported)
 
 ---

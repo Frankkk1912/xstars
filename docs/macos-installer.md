@@ -8,7 +8,7 @@ environment, or import VBA modules manually.
 ## System requirements
 
 - Apple Silicon Mac (`arm64`); Intel Macs are not supported by this package.
-- macOS 12 Monterey or later.
+- macOS 14 Sonoma or later.
 - Microsoft Excel for Mac 2016 or later.
 - A logged-in graphical user session. Each macOS account that needs XSTARS
   installs its own copy.
@@ -101,11 +101,20 @@ installed script with `--apply` to perform the uninstall:
 Use `--help` for the complete command summary. The applied uninstall removes:
 
 - `XSTARS.xlam` from Excel's per-user Startup folder;
-- the current `xlwings.applescript` and legacy `xstars_launch.scpt` launchers;
-- only the `INTERPRETER_MAC` row from `xlwings.conf` (other keys are kept);
+- the legacy `xstars_launch.scpt` launcher;
 - stale Excel `OPEN`/`OPEN1`/… registration values that point to
   `XSTARS.xlam`;
 - `~/Library/Application Support/XSTARS/` and the package receipt.
+
+The shared xlwings files use the pre-install state recorded by the installer:
+
+- when a backup exists, uninstall restores the original
+  `xlwings.applescript` or `xlwings.conf` exactly;
+- when an absent marker records that the file did not exist before XSTARS,
+  uninstall removes `xlwings.applescript` or filters only the
+  `INTERPRETER_MAC` row from `xlwings.conf` (preserving other keys);
+- when neither a backup nor an absent marker exists, the pre-install state is
+  unknown, so uninstall prints a warning and leaves that shared file unchanged.
 
 ### Registration database backup and recovery
 
