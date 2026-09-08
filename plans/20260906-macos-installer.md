@@ -2,7 +2,7 @@
 
 - **状态：实施中（M0 进行中：T0.1 已完成入库，T0.2/T0.3 待用户交付 xlsm 后收尾）**
 - **日期：2026-09-06**（rev 4 更新：2026-09-08）
-- **rev：11**
+- **rev：12**
 - **基准：main @ `ab30702`**（锚点核对于 2026-09-06）
 - **输入**：`plans/explore-20260906-macos-installer.md`（explore 报告）、researcher 外部调研（运行时方案对比 / xlwings 配置机制 / Sequoia 未签名 pkg 行为 / TCC 边界 / V-01~V-05）、codebase-cartographer 本地上下文报告、2026-09-06 用户访谈（11 项裁定）
 
@@ -19,6 +19,7 @@
 | rev 9 | 2026-09-08 | **M3 完成（T3.1–T3.3 [x]，`15536c1`）**：postinstall.sh（201 行，幂等：payload 解包 fail-closed + xlam→Startup 预创建 + applescript→Application Scripts + INTERPRETER_MAC 写 Containers conf 保留未知键；无任何 rm -rf、不碰 `~/.xstars`）；`render_xlwings_conf()` 纯函数（合并逻辑单测）；**新发现并处置**：pkgbuild 会把 Sequoia provenance xattr 转为 `Scripts/._postinstall` AppleDouble → fail-closed 清理流程（expand→剥→flatten→重验，最终 pkg 零 AppleDouble，真实重出包 189,759,482 B，Scripts 含 postinstall+xlwings.conf）。真实安装未执行（V-02/V-03 责任人=用户，边界遵守）。安装器单测 28/28；全量回归 387 passed/13 skipped | worker 报告 + 编排者独立复验（含 postinstall 安全审计：无 rm -rf/无 ~/.xstars 触碰/无路径泄漏） |
 | rev 10 | 2026-09-08 | **M4 完成（T4.1–T4.2，详见提交）+ T2.2 验证深度缺陷更正**：① uninstall.sh（250 行，默认 dry-run/`--apply` 真删，六步清理含 RegistrationDB `OPENn` 备份+integrity_check 失败即回滚；Excel 运行中拒绝执行；不碰 `~/.xstars`）；② docs/macos-installer.md 卸载章节先行（安装/放行属 T5.2）；③ **T2.2 验证深度缺陷更正（worker 发现）**：M3 的零 AppleDouble 仅查 pkgutil 外层，内层 component Payload cpio 实有 `._XSTARS-payload.tar.gz` 等 4 条 → build_pkg.py 加内层 cpio 清洗，重出包后内层外层均为 0，嵌套断言入 tests；8.2 表同步扩充。安装器单测 31/31；全量回归 390 passed/13 skipped | worker 报告 + 编排者独立复验（终态重出包 + cpio 实测 + uninstall 安全审计） |
 | rev 11 | 2026-09-08 | **M5 完成（T5.1–T5.5 [x]，`c52f80c`）**：① 版本单源——`xstars/__init__.py` 1.0.0→1.1.1 + 防漂移单测（tomllib，CI 3.10 回归用 tomli 条件导入）；② pyproject 显式声明 `Pillow>=10.0`（直呼导入点 main.py:1053/export.py:328）；③ `docs/macos-installer.md` 补全（含 M2 实测的 CurrentUserHomeDirectory 落位语义、Sequoia 三途放行、无右键打开过时话术）；④ 双语 README 安装包模式为推荐路径、开发者模式降级 fallback；⑤ 三 docs 同步（manual-acceptance 增安装器验收组；strategy 路线表「独立 `.pkg` 安装器交付中」）；⑥ ribbon/README ship 制品澄清。安装器单测 32/32；全量回归 391 passed/13 skipped；过时话术 grep 零命中；ribbon 门禁空 diff。**新事实**：CI 既有测试 job 跑 Python 3.10，新测试已兼容（tomli 条件导入）；tests/ 存量 ruff 21 error（M4 HEAD 同，非本次引入，不在范围） | worker 报告 + 编排者独立复验（含策略/过时话术 grep 与 T5.1 逐行 diff） |
+| rev 12 | 2026-09-08 | **T6.1 完成（`10cab2d`）**：`.github/workflows/macos-support.yml` 新增 `macos-pkg-build` job（macos-latest 已为 arm64，经 runner-images 元数据核实；Python 3.12 构建宿主；**两步构建** `--prepare-runtime` → `--build-pkg`——编排者任务规格曾误写单命令，worker 预检拦下并裁决修正；installer 测试 + compileall + upload-artifact retention 7d；permissions contents: read，无 secrets）；既有三 job 未动；YAML 有效（psych）。M6 标记进行中：T6.2（真机 V-01~V-05）待用户，随 PR 首次 CI 运行验证 job 本身 | worker 报告 + 编排者复验（YAML psych + diff 全文审读） |
 
 > 锚点标注约定：本文引用的 **当前仓库（xstars）** 锚点已由 feature-planner 于 2026-09-06 在 main @ `ab30702` 上二次实读核验（含 explore 报告中标〔C〕者）。**旧仓库（xstars-dev）** 锚点来自 explore 报告〔P〕实测与 cartographer 报告〔C〕逐行复核，两份报告对同一锚点存在 ±5 行漂移（如 `build_pkg.sh` 签名触发段：explore 标 `:97-100`〔P〕，cartographer 标 `:87-94`〔C〕），移植时以旧仓库实际文件为准，**凡引用 xstars-dev 行号处实施前需打开原文件二次核对**。
 
@@ -214,7 +215,7 @@
 | **M3 安装期部署**（postinstall 四件事 + 权限/属主） | [x] **已完成（rev 9，`15536c1`）** | M1, M2 | ✅ postinstall 结构测试全绿（路径常数/四件事/幂等/退出码/conf 断言）；真实重出包含 Scripts/postinstall + xlwings.conf、零 AppleDouble；真机四件事由 V-02/V-03 覆盖（责任人=用户） | 用户域下以安装用户运行，属主逻辑保留双保险 |
 | **M4 卸载与残留清理** | [x] **已完成（rev 10）**：uninstall.sh + 文档卸载章节 + payload 收入验证（T2.2 机制验证生效） | M3 | T4.2 静态/单元断言 31/31；`uninstall.sh --help`/默认 dry-run 可跑；文档含备份、`OPENn` 清理与 `PRAGMA integrity_check` 步骤（R7） | 首次一等公民卸载（G7）；真机破坏性验证归 8.4（责任人=用户） |
 | **M5 文档同步 + 版本单源 + Pillow 声明** | [x] **已完成（rev 11，`c52f80c`）** | M0（可与 M2–M4 并行推进，合并前完成） | ✅ `xstars/__init__.py:3` == pyproject 版本（防漂移单测）；pyproject 含 `Pillow`；ruff + pytest + compileall 全绿；文档全文无「macOS 仅开发者模式/无安装器」孤立表述（grep 零命中） | G8 后半、G9、G10 |
-| **M6 CI 出包 job + 真机验收回填** | [ ] | M1–M5 全部 | CI `macos-latest` build job 产出 `.pkg` 并上传 artifact 成功；`git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` 为空；V-01~V-05 由用户回填 Draft PR（R23） | 真机项责任人=用户（G14） |
+| **M6 CI 出包 job + 真机验收回填** | [~] **进行中（rev 12）**：T6.1 ✅（`10cab2d`）；T6.2 ⬜ 待用户真机 V-01~V-05 | M1–M5 全部 | CI `macos-pkg-build` job 真实首跑（PR #6）产出 `.pkg` 并上传 artifact 成功；`git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` 为空；V-01~V-05 由用户回填 Draft PR（R23） | 真机项责任人=用户（G14）；T6.2 完成后 M6 闭合 |
 
 Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说明）。
 
@@ -347,7 +348,7 @@ Milestone 总数 = **7**（≤10 上限，满足 ≤7 目标，无需合并说�
 
 ### M6 CI 出包 job + 真机验收回填
 
-- [ ] T6.1 `.github/workflows/macos-support.yml` 新增 `macos-pkg-build` job
+- [x] T6.1 **已完成（rev 12，`10cab2d`）**：`macos-pkg-build` job（macos-latest arm64 + 3.12 宿主 + 两步构建 + 测试 + compileall + artifact 7d；无 secrets）；本机全步骤预演退出码 0
   - 文件：修改 `.github/workflows/macos-support.yml`
   - 修改：新增 job：`runs-on: macos-latest`；checkout → setup-python 3.12（构建脚本宿主解释器）→ `pip install -e ".[dev]"` → `python installer/mac/build_pkg.py --build-pkg`（含运行时下载 + SHA256 校验 + 依赖安装）→ `python -m pytest tests/test_macos_installer.py` → `python -m compileall -q xstars tests installer/mac`（compileall 范围扩入 installer/mac）→ `actions/upload-artifact@v4` 上传 `installer/output/XSTARS-*.pkg`（retention-days 见待决 D6）；既有 vba-immutability job 不动（R12 门禁续跑）；既有测试 job 不动
   - 验收：PR 上该 job 绿且 artifact 含 `.pkg`；`git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas'` 仍为空
