@@ -26,6 +26,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "oletools>=0.60",
+    "defusedxml>=0.7",
 ]
 
 [tool.pytest.ini_options]

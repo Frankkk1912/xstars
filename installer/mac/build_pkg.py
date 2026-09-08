@@ -26,7 +26,10 @@ from urllib.parse import unquote, urlparse
 from urllib.request import urlopen
 from zipfile import BadZipFile, ZipFile
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: test loader imports this module
+    import tomli as tomllib  # type: ignore[import-not-found]
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
@@ -251,7 +254,7 @@ def extract_runtime(archive: Path, staging_dir: Path) -> Path:
     """Safely replace ``staging/python`` with the archive's runtime tree."""
     python_dir = staging_dir / "python"
     if python_dir.exists():
-        shutil.rmtree(python_dir)
+        shutil.rmtree(python_dir, ignore_errors=True)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -380,7 +383,7 @@ def assemble_staging(
 
     bin_dir = staging_dir / "bin"
     if bin_dir.exists():
-        shutil.rmtree(bin_dir)
+        shutil.rmtree(bin_dir, ignore_errors=True)
     bin_dir.mkdir(parents=True)
     for asset_name in ("XSTARS.xlam", "XSTARS_mac.xlsm"):
         source = assets_dir / asset_name
@@ -494,7 +497,7 @@ def assemble_install_tree(
     """Assemble the final ``Library/Application Support/XSTARS`` tree."""
     staging = staging_layout(staging_dir)
     if install_tree_root.exists():
-        shutil.rmtree(install_tree_root)
+        shutil.rmtree(install_tree_root, ignore_errors=True)
 
     destination = install_tree_root / "Library" / "Application Support" / "XSTARS"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -670,7 +673,7 @@ def assemble_payload(
     )
     component_root = work_dir / "component-root"
     if component_root.exists():
-        shutil.rmtree(component_root)
+        shutil.rmtree(component_root, ignore_errors=True)
     archive = create_payload_archive(
         install_tree,
         component_root,
@@ -796,7 +799,7 @@ def sanitize_component_payload(
     extracted = work_dir / "payload-expanded"
     cleaned = work_dir / "Payload-clean"
     if extracted.exists():
-        shutil.rmtree(extracted)
+        shutil.rmtree(extracted, ignore_errors=True)
     cleaned.unlink(missing_ok=True)
     extracted.mkdir(parents=True)
 
@@ -814,7 +817,7 @@ def sanitize_component_payload(
     _run_checked(extract_command, runner, "component payload expansion")
     for metadata in find_macos_metadata(extracted):
         if metadata.is_dir() and not metadata.is_symlink():
-            shutil.rmtree(metadata)
+            shutil.rmtree(metadata, ignore_errors=True)
         else:
             metadata.unlink()
 
@@ -840,7 +843,7 @@ def sanitize_component_payload(
         cleaned.replace(payload)
     except OSError as exc:
         raise BuildError(f"cannot replace component payload {payload}: {exc}") from exc
-    shutil.rmtree(extracted)
+    shutil.rmtree(extracted, ignore_errors=True)
 
 
 def sanitize_component_package(
@@ -855,7 +858,7 @@ def sanitize_component_package(
     cleaned_package = work_dir / "XSTARS-component-clean.pkg"
     for path in (expanded, verification):
         if path.exists():
-            shutil.rmtree(path)
+            shutil.rmtree(path, ignore_errors=True)
     cleaned_package.unlink(missing_ok=True)
 
     _run_checked(
@@ -867,7 +870,7 @@ def sanitize_component_package(
         raise BuildError(f"pkgutil did not expand component package to {expanded}")
     for metadata in find_macos_metadata(expanded):
         if metadata.is_dir() and not metadata.is_symlink():
-            shutil.rmtree(metadata)
+            shutil.rmtree(metadata, ignore_errors=True)
         else:
             metadata.unlink()
     sanitize_component_payload(expanded / "Payload", work_dir, runner=runner)
@@ -898,8 +901,8 @@ def sanitize_component_package(
             + ", ".join(str(path) for path in forbidden[:5])
         )
     validate_component_payload(verification / "Payload")
-    shutil.rmtree(expanded)
-    shutil.rmtree(verification)
+    shutil.rmtree(expanded, ignore_errors=True)
+    shutil.rmtree(verification, ignore_errors=True)
 
 
 def assemble_package(

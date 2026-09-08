@@ -15,7 +15,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
-import lxml.etree as ET
+import defusedxml.ElementTree as ET
 import pytest
 import xlwings
 from oletools.olevba import VBA_Parser
@@ -156,8 +156,7 @@ def _normalize_vba(source: str) -> str:
 def _xml_root(content: bytes):
     assert b"<!DOCTYPE" not in content
     assert b"<!ENTITY" not in content
-    parser = ET.XMLParser(resolve_entities=False, no_network=True)
-    return ET.fromstring(content, parser=parser)
+    return ET.fromstring(content)
 
 
 def _shared_strings(archive: ZipFile) -> list[str]:
