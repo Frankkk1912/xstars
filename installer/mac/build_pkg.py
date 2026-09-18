@@ -1269,6 +1269,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the version from pyproject.toml and exit",
     )
+    action.add_argument(
+        "--print-xlwings-requirement",
+        action="store_true",
+        dest="print_xlwings_requirement",
+        help="print the xlwings pin derived from the packaged workbook and exit",
+    )
     parser.add_argument(
         "--staging-dir",
         type=Path,
@@ -1288,6 +1294,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     try:
+        if args.print_xlwings_requirement:
+            print(pinned_xlwings_requirement())
+            return 0
         version = read_project_version(PROJECT_FILE)
         if args.version:
             print(version)

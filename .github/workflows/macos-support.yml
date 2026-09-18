@@ -27,6 +27,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Pin xlwings to the packaged workbook bridge version
+        shell: bash
+        run: python -m pip install "$(python installer/mac/build_pkg.py --print-xlwings-requirement)"
       - name: Run macOS support target tests
         run: >-
           python -m pytest tests/test_artifacts.py
@@ -52,6 +55,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Pin xlwings to the packaged workbook bridge version
+        shell: bash
+        run: python -m pip install "$(python installer/mac/build_pkg.py --print-xlwings-requirement)"
       - name: Run macOS support target tests
         run: >-
           python -m pytest tests/test_artifacts.py
@@ -87,6 +93,9 @@ jobs:
           python-version: "3.12"
       - name: Install project and build dependencies
         run: python -m pip install -e ".[dev]"
+      - name: Pin xlwings to the packaged workbook bridge version
+        shell: bash
+        run: python -m pip install "$(python installer/mac/build_pkg.py --print-xlwings-requirement)"
       - name: Prepare bundled runtime
         run: python installer/mac/build_pkg.py --prepare-runtime
       - name: Smoke-test bundled runtime imports

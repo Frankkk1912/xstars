@@ -258,6 +258,29 @@ def test_signing_environment_is_explicitly_ignored(monkeypatch, capsys):
     assert "intentionally unsigned" in output.err
 
 
+def test_print_xlwings_requirement_outputs_pin_and_has_no_side_effects(
+    monkeypatch, capsys
+):
+    """--print-xlwings-requirement prints the derived pin and returns 0.
+
+    It must not invoke any external command (no downloads, no pip calls).
+    """
+    monkeypatch.setattr(
+        build_pkg,
+        "pinned_xlwings_requirement",
+        lambda *_args, **_kwargs: "xlwings==9.8.7",
+    )
+
+    def _no_commands(command):  # pragma: no cover
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(build_pkg, "default_command_runner", _no_commands)
+
+    assert build_pkg.main(["--print-xlwings-requirement"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out == "xlwings==9.8.7"
+
+
 def test_runtime_lock_contains_exact_pinned_release():
     lock = build_pkg.load_runtime_lock(RUNTIME_LOCK)
 
