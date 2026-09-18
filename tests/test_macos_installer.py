@@ -384,17 +384,34 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
     assert (layout.bin / "xlwings.applescript").read_text() == "fake AppleScript"
     assert commands[0] == (str(python_executable), "-m", "pip", "--version")
     install = commands[1]
+    # xlwings must be pinned to the bridge version before the repo root
+    xlwings_pin = f"xlwings=={build_pkg.embedded_xlwings_vba_version(assets / 'XSTARS_mac.xlsm')}"
     assert install == (
         str(python_executable),
         "-m",
         "pip",
         "install",
         "--no-cache-dir",
+        xlwings_pin,
         str(repo),
     )
     assert "-e" not in install
     assert all("dev" not in argument for argument in install)
+    pin_index = list(install).index(xlwings_pin)
+    repo_index = list(install).index(str(repo))
+    assert pin_index < repo_index, "xlwings pin must precede repo_root in pip argv"
     assert commands[2:] == commands[:2]
+
+
+def test_pinned_xlwings_requirement_derives_from_workbook(tmp_path, monkeypatch):
+    """pinned_xlwings_requirement() returns xlwings==<bridge version> from the asset."""
+    fake_assets = tmp_path / "assets"
+    fake_assets.mkdir()
+    (fake_assets / "XSTARS_mac.xlsm").write_bytes(b"stub")
+    monkeypatch.setattr(
+        build_pkg, "embedded_xlwings_vba_version", lambda _workbook: "1.2.3"
+    )
+    assert build_pkg.pinned_xlwings_requirement(fake_assets) == "xlwings==1.2.3"
 
 
 def test_xlwings_bridge_versions_match_packaged_workbook(monkeypatch, tmp_path):

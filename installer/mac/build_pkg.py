@@ -339,22 +339,44 @@ def ensure_runtime_pip(
         raise BuildError(f"pip availability check failed: {exc}") from exc
 
 
+def pinned_xlwings_requirement(assets_dir: Path = ASSETS_DIR) -> str:
+    """Return the exact pip requirement for xlwings derived from the packaged workbook.
+
+    The pin is read from the ``xlwings.bas`` bridge embedded in ``XSTARS_mac.xlsm``
+    so that the staged runtime is guaranteed to carry the same xlwings version as the
+    artifact that will be distributed.  There is no second version source: updating
+    the workbook automatically updates the pin.
+    """
+    version = embedded_xlwings_vba_version(assets_dir / "XSTARS_mac.xlsm")
+    return f"xlwings=={version}"
+
+
 def install_project(
     python_executable: Path,
     repo_root: Path,
     *,
+    xlwings_requirement: str | None = None,
     runner: CommandRunner = default_command_runner,
 ) -> None:
-    """Install XSTARS and runtime dependencies non-editably into the runtime."""
+    """Install XSTARS and runtime dependencies non-editably into the runtime.
+
+    When *xlwings_requirement* is supplied (e.g. ``'xlwings==0.37.0'``) it is
+    passed to pip before *repo_root* so that the exact version is resolved
+    rather than whatever ``>=`` bound the project metadata would otherwise
+    float to.
+    """
+    argv: list[str] = [
+        str(python_executable),
+        "-m",
+        "pip",
+        "install",
+        "--no-cache-dir",
+    ]
+    if xlwings_requirement is not None:
+        argv.append(xlwings_requirement)
+    argv.append(str(repo_root))
     _run_checked(
-        [
-            str(python_executable),
-            "-m",
-            "pip",
-            "install",
-            "--no-cache-dir",
-            str(repo_root),
-        ],
+        argv,
         runner,
         "runtime dependency installation",
     )
@@ -596,7 +618,12 @@ def assemble_staging(
         raise BuildError(f"runtime interpreter is missing: {python_executable}")
 
     ensure_runtime_pip(python_executable, runner=runner)
-    install_project(python_executable, repo_root, runner=runner)
+    install_project(
+        python_executable,
+        repo_root,
+        xlwings_requirement=pinned_xlwings_requirement(assets_dir),
+        runner=runner,
+    )
     applescript = find_xlwings_applescript(python_dir)
     validate_xlwings_versions(applescript, assets_dir / "XSTARS_mac.xlsm")
 
