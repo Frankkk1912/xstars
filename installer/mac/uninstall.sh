@@ -57,7 +57,9 @@ XLWINGS_APPLESCRIPT="$APP_SCRIPTS_DIR/xlwings.applescript"
 XLWINGS_CONF="$USER_HOME/Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
 PREINSTALL_BACKUP_DIR="$INSTALL_ROOT/preinstall-backup"
 APPLESCRIPT_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.applescript"
+APPLESCRIPT_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.applescript.absent"
 CONF_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.conf"
+CONF_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.conf.absent"
 REGISTRATION_DIR="$USER_HOME/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB"
 BACKUP_PARENT="$USER_HOME/Documents/XSTARS-uninstall-backups"
 
@@ -84,8 +86,8 @@ print_dry_run() {
     log "dry-run only; no files will be changed (pass --apply to proceed)"
     log "would remove Excel Startup add-in: $EXCEL_STARTUP_ADDIN"
     log "would remove legacy launch script: $LEGACY_LAUNCH_SCRIPT"
-    log "would restore pre-install xlwings AppleScript when backed up; otherwise remove: $XLWINGS_APPLESCRIPT"
-    log "would restore pre-install xlwings configuration when backed up; otherwise remove only INTERPRETER_MAC from: $XLWINGS_CONF"
+    log "would restore backed-up xlwings AppleScript, remove it when recorded absent, or warn and preserve it when pre-install state is unknown: $XLWINGS_APPLESCRIPT"
+    log "would restore backed-up xlwings configuration, filter INTERPRETER_MAC when recorded absent, or warn and preserve it when pre-install state is unknown: $XLWINGS_CONF"
     log "would back up MicrosoftRegistrationDB .reg files under: $BACKUP_PARENT"
     log "would delete Excel OPEN/OPENn values that point to XSTARS.xlam"
     log "would require PRAGMA integrity_check to return ok; otherwise restore backup"
@@ -128,8 +130,10 @@ restore_xlwings_applescript() {
         /bin/mkdir -p "$APP_SCRIPTS_DIR"
         /bin/cp -p "$APPLESCRIPT_BACKUP" "$XLWINGS_APPLESCRIPT"
         log "restored pre-install xlwings AppleScript"
-    else
+    elif [ -f "$APPLESCRIPT_ABSENT_MARKER" ]; then
         remove_file_if_present "$XLWINGS_APPLESCRIPT" "xlwings AppleScript"
+    else
+        warn "pre-install xlwings AppleScript state is unknown; leaving unchanged: $XLWINGS_APPLESCRIPT"
     fi
 }
 
@@ -166,8 +170,10 @@ restore_xlwings_conf() {
         /bin/mkdir -p "$(/usr/bin/dirname "$XLWINGS_CONF")"
         /bin/cp -p "$CONF_BACKUP" "$XLWINGS_CONF"
         log "restored pre-install xlwings configuration"
-    else
+    elif [ -f "$CONF_ABSENT_MARKER" ]; then
         remove_interpreter_mac
+    else
+        warn "pre-install xlwings configuration state is unknown; leaving unchanged: $XLWINGS_CONF"
     fi
 }
 

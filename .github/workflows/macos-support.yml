@@ -94,8 +94,12 @@ jobs:
           PYTHONSAFEPATH: "1"
         run: >-
           installer/mac/staging/python/bin/python3 -c
-          "import xstars, xlwings, ttkbootstrap, matplotlib, PIL; import sys;
-          assert 'staging' in xstars.__file__; print('OK')"
+          "import xstars, xlwings, ttkbootstrap, matplotlib, PIL, pandas, numpy,
+          scipy, scikit_posthocs, statannotations, seaborn; import sys;
+          assert sys.prefix in xstars.__file__, xstars.__file__;
+          print('OK', xstars.__version__)"
+      - name: Check bundled runtime dependency consistency
+        run: installer/mac/staging/python/bin/python3 -m pip check
       - name: Build unsigned macOS installer
         run: python installer/mac/build_pkg.py --build-pkg
       - name: Run macOS installer tests

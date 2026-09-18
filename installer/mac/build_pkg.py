@@ -45,6 +45,11 @@ COMPONENT_PACKAGE_NAME = "XSTARS-component.pkg"
 PAYLOAD_ARCHIVE_NAME = "XSTARS-payload.tar.gz"
 XLWINGS_CONF_NAME = "xlwings.conf"
 STAGING_MANIFEST_NAME = "manifest.json"
+STAGING_HASH_PATHS = (
+    "bin/XSTARS.xlam",
+    "bin/XSTARS_mac.xlsm",
+    "bin/xlwings.applescript",
+)
 XLWINGS_APPLESCRIPT_VERSION_PATTERN = re.compile(
     r"^xlwings-(?P<version>[^/]+)\.applescript$",
     flags=re.IGNORECASE,
@@ -427,6 +432,26 @@ def validate_xlwings_versions(applescript: Path, workbook: Path) -> str:
     return runtime_version
 
 
+def sha256_file(path: Path, *, chunk_size: int = DOWNLOAD_CHUNK_SIZE) -> str:
+    """Return a file's SHA256, reporting unreadable staging content cleanly."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(chunk_size):
+                digest.update(chunk)
+    except OSError as exc:
+        raise BuildError(f"cannot hash staged file {path}: {exc}") from exc
+    return digest.hexdigest()
+
+
+def staging_file_hashes(staging_dir: Path) -> dict[str, str]:
+    """Hash the installer artifacts whose exact bytes enter the payload."""
+    return {
+        relative_path: sha256_file(staging_dir / relative_path)
+        for relative_path in STAGING_HASH_PATHS
+    }
+
+
 def write_staging_manifest(
     staging_dir: Path,
     *,
@@ -434,9 +459,10 @@ def write_staging_manifest(
     xlwings_version: str,
     runtime_lock_sha256: str,
 ) -> Path:
-    """Write the version identity required to consume a prepared staging tree."""
+    """Write the version and content identity of a prepared staging tree."""
     manifest = staging_dir / STAGING_MANIFEST_NAME
     document = {
+        "file_hashes": staging_file_hashes(staging_dir),
         "xstars_version": xstars_version,
         "xlwings_version": xlwings_version,
         "runtime_lock_sha256": runtime_lock_sha256,
@@ -451,13 +477,50 @@ def write_staging_manifest(
     return manifest
 
 
+def read_staged_xstars_version(staging_dir: Path) -> str:
+    """Import XSTARS with the staged interpreter and return its real version."""
+    staging_dir = staging_dir.resolve()
+    python_executable = staging_dir / "python" / "bin" / "python3"
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment["PYTHONSAFEPATH"] = "1"
+    command = [
+        str(python_executable),
+        "-c",
+        (
+            "import os, sys, xstars; "
+            "prefix = os.path.realpath(sys.prefix); "
+            "source = os.path.realpath(xstars.__file__); "
+            "assert os.path.commonpath([prefix, source]) == prefix, source; "
+            "print(xstars.__version__)"
+        ),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=staging_dir,
+            env=environment,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise BuildError(f"staged XSTARS version check failed: {exc}") from exc
+    version = result.stdout.strip()
+    if not version or "\n" in version:
+        raise BuildError(
+            f"staged XSTARS version check returned invalid output: {version!r}"
+        )
+    return version
+
+
 def validate_staging_manifest(
     staging_dir: Path,
     *,
     xstars_version: str,
     lock_file: Path = LOCK_FILE,
-) -> dict[str, str]:
-    """Fail closed if staging does not match current project and runtime pins."""
+) -> dict[str, Any]:
+    """Fail closed if staging content does not match its manifest and pins."""
     manifest = staging_dir / STAGING_MANIFEST_NAME
     try:
         document = json.loads(manifest.read_text(encoding="utf-8"))
@@ -481,16 +544,40 @@ def validate_staging_manifest(
     if mismatches:
         raise BuildError("staging manifest mismatch: " + "; ".join(mismatches))
 
+    recorded_hashes = document.get("file_hashes")
+    if not isinstance(recorded_hashes, dict):
+        raise BuildError("staging manifest has no file_hashes mapping")
+    actual_hashes = staging_file_hashes(staging_dir)
+    hash_mismatches = [
+        f"{path} expected={recorded_hashes.get(path)} actual={actual_digest}"
+        for path, actual_digest in actual_hashes.items()
+        if recorded_hashes.get(path) != actual_digest
+    ]
+    if hash_mismatches:
+        raise BuildError("staging file hash mismatch: " + "; ".join(hash_mismatches))
+
+    installed_xstars_version = read_staged_xstars_version(staging_dir)
+    if installed_xstars_version != xstars_version:
+        raise BuildError(
+            "staging manifest mismatch: "
+            f"xstars_version expected={xstars_version} "
+            f"actual={installed_xstars_version}"
+        )
+
     xlwings_version = document.get("xlwings_version")
     if not isinstance(xlwings_version, str) or not xlwings_version:
         raise BuildError("staging manifest has no xlwings_version")
     installed_version = xlwings_applescript_version(
         find_xlwings_applescript(staging_dir / "python")
     )
-    if installed_version != xlwings_version:
+    workbook_version = embedded_xlwings_vba_version(
+        staging_dir / "bin" / "XSTARS_mac.xlsm"
+    )
+    if installed_version != xlwings_version or workbook_version != xlwings_version:
         raise BuildError(
-            "staging manifest mismatch: "
-            f"xlwings_version expected={xlwings_version} actual={installed_version}"
+            "staging manifest mismatch: xlwings_version "
+            f"expected={xlwings_version} runtime={installed_version} "
+            f"workbook={workbook_version}"
         )
     return document
 
