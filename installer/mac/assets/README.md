@@ -7,13 +7,15 @@ VBA sources change.
 
 | Artifact | Carries | Consumed by |
 | --- | --- | --- |
-| `XSTARS.xlam` | XSTARS ribbon tab (2006-format customUI) + `RibbonCallbacks` module | Installed to the Excel startup folder by `postinstall` |
-| `XSTARS_mac.xlsm` | Data-workbook template embedding `RibbonCallbacks` + `xlwings.bas` + `Dictionary` | Shipped as the user's starting workbook |
+| `XSTARS.xlam` | XSTARS ribbon tab (2006-format customUI) + `RibbonCallbacks` + the xlwings custom-addin bridge + `Dictionary` | Installed to the Excel startup folder by `postinstall` |
+| `XSTARS_mac.xlsm` | Data-workbook template embedding `RibbonCallbacks` + the standard `xlwings.bas` + `Dictionary` | Shipped as the user's starting workbook |
 
-Why the workbook needs the three modules: ribbon callbacks raised by the
-add-in resolve in the **active workbook** (verified, `ribbon/README.md:67`),
-and VBA unqualified calls such as `RunPython` do not cross project boundaries
-(`docs/macos-developer-setup.md:88-99`).
+Both artifacts need a self-contained three-module VBA project because
+unqualified calls such as `RunPython` do not cross project boundaries
+(`docs/macos-developer-setup.md:88-99`). The add-in must use xlwings'
+`xlwings_custom_addin.bas` variant: its Mac bridge passes the active workbook
+to Python so `Book.caller()` resolves the user's workbook rather than the
+add-in itself.
 
 ## Hard invariants (CI-asserted once `tests/test_macos_installer.py` lands)
 
@@ -25,31 +27,36 @@ and VBA unqualified calls such as `RunPython` do not cross project boundaries
    normalization** (`\r\n` → `\n`, Plan D11). Excel/VBE stores module source
    as CRLF inside `vbaProject.bin` regardless of input, so a raw byte compare
    will always fail by design.
-3. **`xlwings.bas` version must match the xlwings bundled in the runtime**
-   (CI-asserted: staging collects the version-encoded AppleScript filename from the xlwings wheel and the
-   test suite compares it with the `xlwings.bas` version embedded in the shipped `XSTARS_mac.xlsm`;
-   currently 0.37.0).
-4. **`xlwings.conf!Interpreter` must stay empty** in both artifacts. A
-   workbook-level entry would override the installer-written
-   `INTERPRETER_MAC` and point every user at a non-existent interpreter.
+3. **Both embedded xlwings bridges must match the xlwings bundled in the
+   runtime** (currently 0.37.0). `XSTARS_mac.xlsm` embeds the wheel's standard
+   `xlwings.bas`; `XSTARS.xlam` embeds the wheel's
+   `xlwings_custom_addin.bas`. Installer assembly compares the add-in module
+   byte-for-source after line-ending normalization and fails closed on the
+   standard/wrong variant.
+4. **`XSTARS_mac.xlsm`'s `xlwings.conf!Interpreter` must stay empty.** The
+   rebuilt add-in has no workbook-level config sheet and therefore uses the
+   installer-written user config. A workbook-level interpreter value would
+   override `INTERPRETER_MAC` and point users at a non-existent interpreter.
 5. **No `absPath` metadata**: Excel 2010+ writes the save directory
    (`x15ac:absPath`) into `xl/workbook.xml` on every save. It leaks the build
    machine's user path and must be stripped after any re-save (see below).
 
 ## Rebuild procedures
 
-### `XSTARS.xlam` (Windows host)
+### `XSTARS.xlam` (Mac host, manual VBE + OOXML injection)
 
-Either path works; both must end with invariant 5 applied:
+Create a blank workbook and import the unchanged
+`ribbon/ribbon_callbacks.bas` plus the pinned wheel's
+`xlwings_custom_addin.bas`. Mac VBE may reject `Dictionary.cls`; if so, create
+a class module named exactly `Dictionary` and paste the class source after
+removing **all** export-only `Attribute ...` lines, including procedure-level
+attributes interspersed through the file. Compile the VBA project and save it
+as an Excel Add-In.
 
-- **Automated (used for the current artifact, 2026-09-08)**: real Excel 16 COM
-  combined with OOXML injection. On hosts with WPS Office installed, WPS hijacks the Excel
-  CLSID under HKCU (`{00024500-...}` → `et.exe`); launch
-  `EXCEL.EXE /automation` for Office16 and bind through the ROT instead.
-- **Manual**: Office RibbonX Editor — convert `ribbon/customUI14.xml` to the
-  2006 format (swap the namespace, drop every `insertAfterMso`), insert as the
-  custom UI part, import the unchanged `ribbon/ribbon_callbacks.bas`, save as
-  Excel Add-In (`ribbon/README.md:44-51`).
+Use the rebuilt add-in as the OOXML package base, inject the proven 2006-format
+`customUI/customUI.xml` and package-root extensibility relationship, and scrub
+`x15ac:absPath`. Do not transplant only `vbaProject.bin` into an older add-in:
+the workbook sheet/document-module topology may differ.
 
 ### `XSTARS_mac.xlsm` (Mac host, manual VBE)
 

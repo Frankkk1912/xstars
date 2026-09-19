@@ -254,7 +254,7 @@ def test_signing_environment_is_explicitly_ignored(monkeypatch, capsys):
 
     assert build_pkg.main(["--version"]) == 0
     output = capsys.readouterr()
-    assert output.out.strip() == "1.1.1"
+    assert output.out.strip() == "1.2"
     assert "intentionally unsigned" in output.err
 
 
@@ -369,6 +369,9 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
     applescript = site_packages / "xlwings" / "xlwings-0.37.0.applescript"
     applescript.parent.mkdir(parents=True)
     applescript.write_text("fake AppleScript", encoding="utf-8")
+    (applescript.parent / "xlwings_custom_addin.bas").write_text(
+        "fake custom-addin bridge", encoding="utf-8"
+    )
 
     assets = tmp_path / "assets"
     assets.mkdir()
@@ -381,6 +384,11 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
         build_pkg,
         "embedded_xlwings_vba_version",
         lambda _workbook: "0.37.0",
+    )
+    monkeypatch.setattr(
+        build_pkg,
+        "validate_xlam_vba",
+        lambda *_args, **_kwargs: "0.37.0",
     )
 
     def fake_runner(command):
@@ -408,7 +416,9 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
     assert commands[0] == (str(python_executable), "-m", "pip", "--version")
     install = commands[1]
     # xlwings must be pinned to the bridge version before the repo root
-    xlwings_pin = f"xlwings=={build_pkg.embedded_xlwings_vba_version(assets / 'XSTARS_mac.xlsm')}"
+    xlwings_pin = (
+        f"xlwings=={build_pkg.embedded_xlwings_vba_version(assets / 'XSTARS_mac.xlsm')}"
+    )
     assert install == (
         str(python_executable),
         "-m",
@@ -477,6 +487,21 @@ def test_xlam_has_2006_custom_ui_and_root_relationship():
         assert len(custom_relationships) == 1
         assert custom_relationships[0].attrib["Target"] == ("customUI/customUI.xml")
 
+        callbacks = _macro_by_prefix(_macro_sources(artifact), "RibbonCallbacks")
+        actions = {
+            element.attrib["onAction"]
+            for element in custom_ui.iter()
+            if "onAction" in element.attrib
+        }
+        assert actions
+        for action in actions:
+            module_name, procedure_name = action.split(".", maxsplit=1)
+            assert module_name == "RibbonCallbacks"
+            assert re.search(
+                rf"(?im)^(?:Public\s+)?Sub\s+{re.escape(procedure_name)}\s*\(",
+                callbacks,
+            )
+
 
 def test_office_artifacts_embed_expected_normalized_vba_sources():
     repository_callbacks = (REPO_ROOT / "ribbon" / "ribbon_callbacks.bas").read_text(
@@ -495,15 +520,102 @@ def test_office_artifacts_embed_expected_normalized_vba_sources():
     wheel_xlwings_bas = (
         Path(xlwings.__file__).with_name("xlwings.bas").read_text(encoding="utf-8")
     )
+    wheel_custom_addin_bas = (
+        Path(xlwings.__file__)
+        .with_name("xlwings_custom_addin.bas")
+        .read_text(encoding="utf-8")
+    )
     assert _normalize_vba(
         _macro_by_prefix(workbook_macros, "xlwings")
     ) == _normalize_vba(wheel_xlwings_bas)
+    # The add-in ships with PROJECT_NAME = "xlwings" (so it reads xlwings.conf);
+    # the wheel source has "myaddin" as a placeholder.  Normalise before comparing.
+    import re as _re
+
+    wheel_custom_addin_xlwings = _re.sub(
+        r'Public Const PROJECT_NAME As String = "[^"]+"',
+        'Public Const PROJECT_NAME As String = "xlwings"',
+        wheel_custom_addin_bas,
+    )
+    assert _normalize_vba(_macro_by_prefix(xlam_macros, "xlwings")) == _normalize_vba(
+        wheel_custom_addin_xlwings
+    )
+    assert 'Public Const PROJECT_NAME As String = "xlwings"' in _macro_by_prefix(
+        xlam_macros, "xlwings"
+    ), (
+        'xlwings.bas in XSTARS.xlam must have PROJECT_NAME = "xlwings" to read xlwings.conf'
+    )
+    assert {"RibbonCallbacks.bas", "xlwings.bas", "Dictionary.cls"}.issubset(
+        xlam_macros
+    )
+    assert (
+        "#Const UseScriptingDictionaryIfAvailable = True"
+        in xlam_macros["Dictionary.cls"]
+    )
     assert _macro_by_prefix(workbook_macros, "Dictionary").strip()
 
 
-@pytest.mark.parametrize("artifact_name", ["XSTARS.xlam", "XSTARS_mac.xlsm"])
-def test_office_artifact_xlwings_interpreter_is_empty(artifact_name):
-    with ZipFile(ASSETS_DIR / artifact_name) as archive:
+def test_xlam_vba_validation_accepts_only_complete_custom_addin_bridge():
+    assert (
+        build_pkg.validate_xlam_vba(
+            ASSETS_DIR / "XSTARS.xlam",
+            custom_addin_source=Path(xlwings.__file__).with_name(
+                "xlwings_custom_addin.bas"
+            ),
+            callbacks_source=REPO_ROOT / "ribbon" / "ribbon_callbacks.bas",
+        )
+        == "0.37.0"
+    )
+
+
+def test_xlam_vba_validation_rejects_missing_dictionary(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        build_pkg,
+        "embedded_vba_modules",
+        lambda _xlam: {
+            "ribboncallbacks.bas": "callbacks",
+            "xlwings.bas": "bridge",
+        },
+    )
+
+    with pytest.raises(build_pkg.BuildError, match="missing required VBA modules"):
+        build_pkg.validate_xlam_vba(
+            tmp_path / "XSTARS.xlam",
+            custom_addin_source=tmp_path / "xlwings_custom_addin.bas",
+            callbacks_source=tmp_path / "ribbon_callbacks.bas",
+        )
+
+
+def test_xlam_vba_validation_rejects_standard_xlwings_variant(monkeypatch, tmp_path):
+    callbacks = tmp_path / "ribbon_callbacks.bas"
+    custom_addin = tmp_path / "xlwings_custom_addin.bas"
+    callbacks.write_text("callbacks", encoding="utf-8")
+    custom_addin.write_text("'Version: 0.37.0\ncustom bridge", encoding="utf-8")
+    monkeypatch.setattr(
+        build_pkg,
+        "embedded_vba_modules",
+        lambda _xlam: {
+            "ribboncallbacks.bas": "callbacks",
+            "xlwings.bas": "'Version: 0.37.0\nstandard bridge",
+            "dictionary.cls": (
+                "#Const UseScriptingDictionaryIfAvailable = True\n"
+                "Private dict_pKeyValues As Collection\n"
+                "Public Property Let CompareMode\n"
+                "Public Function Exists(Key As Variant) As Boolean"
+            ),
+        },
+    )
+
+    with pytest.raises(build_pkg.BuildError, match="not the installed custom-addin"):
+        build_pkg.validate_xlam_vba(
+            tmp_path / "XSTARS.xlam",
+            custom_addin_source=custom_addin,
+            callbacks_source=callbacks,
+        )
+
+
+def test_workbook_xlwings_interpreter_is_empty():
+    with ZipFile(ASSETS_DIR / "XSTARS_mac.xlsm") as archive:
         assert _worksheet_value(archive, "xlwings.conf", "A1") == "Interpreter"
         assert _worksheet_value(archive, "xlwings.conf", "B1") in (None, "")
 

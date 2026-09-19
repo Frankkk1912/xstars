@@ -179,7 +179,7 @@ XSTARS provides a standalone distribution for **Kingsoft WPS Spreadsheet**:
 
 ### macOS: 📦 Installer (Recommended — no Python needed)
 
-On an Apple Silicon Mac, download `XSTARS-1.1.1.pkg`, double-click it, and follow Installer. The per-user package includes Python 3.12, all dependencies, the Excel startup add-in, and the xlwings bridge—there is no Python environment or manual VBA import to prepare. See the [macOS Installer Guide](docs/macos-installer.md) for requirements, unsigned-package release options, and uninstall instructions. WPS for Mac is not supported.
+On an Apple Silicon Mac, download `XSTARS-1.2.pkg`, double-click it, and follow Installer. The per-user package includes Python 3.12, all dependencies, the Excel startup add-in, and the xlwings bridge—there is no Python environment or manual VBA import to prepare. See the [macOS Installer Guide](docs/macos-installer.md) for requirements, unsigned-package release options, and uninstall instructions. WPS for Mac is not supported.
 
 #### macOS Developer Mode (source-debugging fallback)
 

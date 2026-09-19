@@ -1562,7 +1562,7 @@ def run_about() -> None:
     """Show version info dialog."""
     book = xw.Book.caller()
     try:
-        version = "1.0.0"
+        version = "1.2"
         url = "https://github.com/Frankkk1912/excel-prism"
         msg = (
             f"XSTARS v{version}\n\n"
