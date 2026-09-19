@@ -2,7 +2,7 @@
 ; Produces XSTARS_WPS_Setup.exe for Windows 10/11 x64 (WPS 365/12.x)
 
 #ifndef AppVersion
-#define AppVersion "1.0.4"
+#define AppVersion "1.2.0"
 #endif
 
 [Setup]

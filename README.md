@@ -161,7 +161,7 @@ Save figures as **PNG**, **TIFF**, **SVG**, or **PDF** — with custom DPI up to
 
 ### Option A: 📥 Installer (Recommended — no Python needed)
 
-1. Download `XSTARS_Setup.exe` from [Releases](https://github.com/Frankkk1912/excel-prism/releases)
+1. Download `XSTARS_Setup.exe` from [Releases](https://github.com/Frankkk1912/xstars/releases)
 2. Run the installer — it sets up the Excel add-in automatically
 3. Open Excel → you'll see the **XSTARS** tab in the ribbon
 4. Select your data (with headers) → click **Run** 🎉

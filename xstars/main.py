@@ -1562,21 +1562,23 @@ def run_about() -> None:
     """Show version info dialog."""
     book = xw.Book.caller()
     try:
-        version = "1.0.0"
-        url = "https://github.com/Frankkk1912/excel-prism"
+        from . import __version__
+
+        version = __version__
+        url = "https://github.com/Frankkk1912/xstars"
         msg = (
             f"XSTARS v{version}\n\n"
             "Quick statistical analysis and publication-quality\n"
-            "visualization inside Excel.\n\n"
-            "Author: Frank-SYSU\n"
-            "Powered by scipy, matplotlib, seaborn & xlwings.\n\n"
+            "visualization inside Excel & WPS.\n\n"
+            "Author: Yuxing Dai (Frank) -- SYSU\n"
+            "Powered by scipy, pandas, matplotlib, seaborn & xlwings.\n\n"
             "License: MIT\n\n"
             f"Documentation & source:\n{url}"
         )
         try:
-            book.app.macro("MsgBox")(msg, 64, "About Excel-Prism")
+            book.app.macro("MsgBox")(msg, 64, "About XSTARS")
         except Exception:
-            book.app.status_bar = f"Excel-Prism v{version}"
+            book.app.status_bar = f"XSTARS v{version}"
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 

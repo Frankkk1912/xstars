@@ -214,7 +214,9 @@ def _transform_dialog(
     return chosen, TransformOptions(bool(getattr(chosen, "_include_stats", False)))
 
 
-def _standard_curve_dialog(selection: SelectionPayload, _config: PrismConfig) -> tuple[Any, bool]:
+def _standard_curve_dialog(
+    selection: SelectionPayload, _config: PrismConfig
+) -> tuple[Any, bool]:
     _require_main_thread_dialog()
     from ..tools.standard_curve import wide_to_conc_od
     from ..tools.standard_curve_dialog import StandardCurveDialog
@@ -262,7 +264,11 @@ def _ask_export_path(
     *_dialog_fn* is injected in tests to avoid opening a real window.
     """
     _require_main_thread_dialog()
-    root_dir = (exports_root or Path.home() / ".xstars" / "exports").expanduser().resolve(strict=False)
+    root_dir = (
+        (exports_root or Path.home() / ".xstars" / "exports")
+        .expanduser()
+        .resolve(strict=False)
+    )
     root_dir.mkdir(parents=True, exist_ok=True)
     default_name = f"{default_stem}{_EXPORT_DEFAULT_EXT[image_format]}"
     filetypes = _EXPORT_FILETYPES[image_format]
@@ -301,7 +307,9 @@ def _ask_export_path(
     return Path(chosen)
 
 
-def _elisa_dialog(selection: SelectionPayload, base_config: PrismConfig) -> tuple[PrismConfig, Any, bool]:
+def _elisa_dialog(
+    selection: SelectionPayload, base_config: PrismConfig
+) -> tuple[PrismConfig, Any, bool]:
     _require_main_thread_dialog()
     from ..presets.elisa_dialog import ELISADialog
 
@@ -380,18 +388,31 @@ def _execute_setting(command: Command, config: PrismConfig) -> dict[str, Any]:
         from ..config import DEFAULT_SETTINGS_PATH
 
         DEFAULT_SETTINGS_PATH.unlink(missing_ok=True)
-        return _success(command, WritebackPlan(status_message="XSTARS: Settings reset to defaults"))
+        return _success(
+            command, WritebackPlan(status_message="XSTARS: Settings reset to defaults")
+        )
     if command is Command.ABOUT:
-        return _success(command, WritebackPlan(status_message="XSTARS v1.0.0 — offline WPS support"))
+        from .. import __version__
+
+        return _success(
+            command,
+            WritebackPlan(
+                status_message=f"XSTARS v{__version__} — offline WPS support"
+            ),
+        )
     field_name, value = _SETTING_VALUES[command]
     setattr(config, field_name, value)
     if field_name in {"palette_preset", "journal_palette"}:
         config.palette = get_palette(config.palette_preset, config.journal_palette)
     config.save()
-    return _success(command, WritebackPlan(status_message=f"XSTARS: {command.value} saved"))
+    return _success(
+        command, WritebackPlan(status_message=f"XSTARS: {command.value} saved")
+    )
 
 
-def _configure_preset(command: Command, selection: SelectionPayload, config: PrismConfig) -> None:
+def _configure_preset(
+    command: Command, selection: SelectionPayload, config: PrismConfig
+) -> None:
     preset = _PRESET_COMMANDS.get(command)
     if preset is None:
         return
@@ -483,7 +504,9 @@ def _finalize_analysis(
         if not image_artifact.is_file():
             figure.savefig(image_artifact, format="png", dpi=config.export_dpi)
         image_picture_id = picture_id if index == 1 else export_module.new_picture_id()
-        image_renderer = "standard_curve" if source_key == "standard_curve_figure" else renderer
+        image_renderer = (
+            "standard_curve" if source_key == "standard_curve_figure" else renderer
+        )
         payload_frame = render_data_sources.get(source_key, frame)
         with suppress(Exception):
             export_module.persist_render_payload(
@@ -508,11 +531,15 @@ def execute_request(
     request: Mapping[str, Any],
     job_directory: Path,
     *,
-    dialog_config: Callable[[SelectionPayload, PrismConfig], PrismConfig] = _dialog_config,
+    dialog_config: Callable[
+        [SelectionPayload, PrismConfig], PrismConfig
+    ] = _dialog_config,
     transform_dialog: Callable[
         [SelectionPayload, PrismConfig], tuple[PrismConfig, TransformOptions]
     ] = _transform_dialog,
-    standard_dialog: Callable[[SelectionPayload, PrismConfig], tuple[Any, bool]] = _standard_curve_dialog,
+    standard_dialog: Callable[
+        [SelectionPayload, PrismConfig], tuple[Any, bool]
+    ] = _standard_curve_dialog,
     elisa_dialog: Callable[
         [SelectionPayload, PrismConfig], tuple[PrismConfig, Any, bool]
     ] = _elisa_dialog,
@@ -526,7 +553,9 @@ def execute_request(
     try:
         command = Command(request.get("command"))
     except (TypeError, ValueError) as exc:
-        raise ContractError(ErrorCode.INVALID_COMMAND, "command is not whitelisted") from exc
+        raise ContractError(
+            ErrorCode.INVALID_COMMAND, "command is not whitelisted"
+        ) from exc
     cancel_path = _cancel_path(request, job_directory)
     _check_cancelled(cancel_path)
     config = _apply_config_overrides(PrismConfig.load(), request.get("config"))
@@ -542,6 +571,7 @@ def execute_request(
         dpi_raw = export_request.get("dpi")
         # Validate format/dpi up-front so we know the extension before the dialog.
         from .export import validate_export_request as _vex
+
         image_format_validated, _dpi_validated = _vex(image_format_raw, dpi_raw)
         # Choose a default stem: pictureId (without "XSTARS_" prefix for readability)
         # or timestamp if clipboard path.
@@ -549,6 +579,7 @@ def execute_request(
         picture_id = export_request.get("pictureId")
         if is_clipboard or not isinstance(picture_id, str):
             from datetime import datetime, timezone
+
             default_stem = f"export_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}"
         else:
             default_stem = picture_id
@@ -581,7 +612,9 @@ def execute_request(
             )
         else:
             if not isinstance(picture_id, str):
-                raise ContractError(ErrorCode.PAYLOAD_MISSING, "selected Shape has no XSTARS pictureId")
+                raise ContractError(
+                    ErrorCode.PAYLOAD_MISSING, "selected Shape has no XSTARS pictureId"
+                )
             exported = export_module.render_payload_export(
                 picture_id,
                 image_format_raw,
@@ -597,7 +630,9 @@ def execute_request(
         )
 
     if command not in _SELECTION_COMMANDS:
-        raise ContractError(ErrorCode.INVALID_COMMAND, f"command is not implemented: {command.value}")
+        raise ContractError(
+            ErrorCode.INVALID_COMMAND, f"command is not implemented: {command.value}"
+        )
     selection_data = request.get("selection")
     if not isinstance(selection_data, Mapping):
         raise ContractError(ErrorCode.INVALID_SELECTION, "selection must be an object")
@@ -637,7 +672,9 @@ def execute_request(
         selected_fit, back_calculate_samples = standard_dialog(selection, config)
     elif command is Command.ELISA:
         config, selected_fit, show_fit_curve = elisa_dialog(selection, config)
-    if selected_fit is not None and isinstance(getattr(selected_fit, "method", None), str):
+    if selected_fit is not None and isinstance(
+        getattr(selected_fit, "method", None), str
+    ):
         config.preset_elisa_fit_method = selected_fit.method
     _check_cancelled(cancel_path)
 
@@ -680,11 +717,15 @@ def execute_request(
             fit_result=selected_fit,
             sample_payload=sample,
         )
-        return _finalize_analysis(command, result, config, artifact_path, renderer="standard_curve")
+        return _finalize_analysis(
+            command, result, config, artifact_path, renderer="standard_curve"
+        )
     if command is Command.ELISA:
         sample_data = request.get("sampleSelection")
         if not isinstance(sample_data, Mapping):
-            raise ContractError(ErrorCode.INVALID_SELECTION, "sampleSelection must be an object")
+            raise ContractError(
+                ErrorCode.INVALID_SELECTION, "sampleSelection must be an object"
+            )
         sample = SelectionPayload.from_dict(sample_data)
         result = elisa_selections(
             selection,
