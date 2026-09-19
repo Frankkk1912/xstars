@@ -177,13 +177,13 @@ End Sub
 
 Sub ShowAbout(control As IRibbonControl)
     Dim msg As String
-    msg = "XSTARS v1.0.0" & vbCrLf & vbCrLf & _
+    msg = "XSTARS v1.2.0" & vbCrLf & vbCrLf & _
           "Quick statistical analysis and publication-quality" & vbCrLf & _
-          "visualization inside Excel." & vbCrLf & vbCrLf & _
-          "Author: Frank-SYSU" & vbCrLf & _
-          "Powered by scipy, matplotlib, seaborn & xlwings." & vbCrLf & vbCrLf & _
+          "visualization inside Excel & WPS." & vbCrLf & vbCrLf & _
+          "Author: Yuxing Dai (Frank) -- SYSU" & vbCrLf & _
+          "Powered by scipy, pandas, matplotlib, seaborn & xlwings." & vbCrLf & vbCrLf & _
           "License: MIT" & vbCrLf & vbCrLf & _
           "Documentation & source:" & vbCrLf & _
-          "https://github.com/Frankkk1912/excel-prism"
+          "https://github.com/Frankkk1912/xstars"
     MsgBox msg, vbInformation, "About XSTARS"
 End Sub

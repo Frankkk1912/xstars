@@ -84,7 +84,7 @@ if ($Clean) {
 
 # 1. Read add-in version from wps-addon/package.json
 $PackageJsonPath = Join-Path $WpsAddonDir "package.json"
-$Version = "1.0.4"
+$Version = "1.2.0"
 if (Test-Path $PackageJsonPath) {
     $PackageJson = Get-Content $PackageJsonPath -Raw | ConvertFrom-Json
     if ($PackageJson.version) {

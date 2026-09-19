@@ -160,7 +160,7 @@
 
 ### 方式 A：📥 安装包（推荐 —— 无需 Python）
 
-1. 从 [Releases](https://github.com/Frankkk1912/excel-prism/releases) 下载 `XSTARS_Setup.exe`
+1. 从 [Releases](https://github.com/Frankkk1912/xstars/releases) 下载 `XSTARS_Setup.exe`
 2. 运行安装程序 —— 自动配置 Excel 插件
 3. 打开 Excel → 功能区出现 **XSTARS** 选项卡
 4. 选中数据（含表头）→ 点击 **Run** 🎉
