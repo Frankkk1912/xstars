@@ -575,7 +575,7 @@ def execute_request(
         image_format_validated, _dpi_validated = _vex(image_format_raw, dpi_raw)
         # Choose a default stem: pictureId (without "XSTARS_" prefix for readability)
         # or timestamp if clipboard path.
-        is_clipboard = export_request.get("clipboard") is True
+        is_clipboard = export_request.get("clipboard") == True  # noqa: E712 — must be the literal True flag, not any truthy value
         picture_id = export_request.get("pictureId")
         if is_clipboard or not isinstance(picture_id, str):
             from datetime import datetime, timezone

@@ -96,7 +96,7 @@ XSTARS.xlam（不会双载），共享 xlwings 文件已做安装前备份；**�
   Actions 下载 artifact、AirDrop、微信文件传输助手等。验证隔离属性存在：
 
   ```bash
-  xattr -p com.apple.quarantine /path/to/XSTARS-1.2.pkg
+  xattr -p com.apple.quarantine /path/to/XSTARS-1.2.0.pkg
   ```
 
 - [ ] 双击 pkg → 应被 Gatekeeper 拦 → 走「系统设置 → 隐私与安全性 → 仍要打开」+ 密码。
