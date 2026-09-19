@@ -58,3 +58,7 @@ wps-addon/deploy/
 # Local review snapshots and lint caches
 .review-tmp/
 .ruff_cache/
+
+# Excel installer build output
+installer/excel/XSTARS.xlam
+installer/excel/output/
