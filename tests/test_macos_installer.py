@@ -47,7 +47,7 @@ BUILT_PACKAGE = (
     REPO_ROOT
     / "installer"
     / "output"
-    / f"XSTARS-{build_pkg.read_project_version()}.pkg"
+    / f"XSTARS_MacOS_Setup_v{build_pkg.read_project_version()}.pkg"
 )
 
 # The pkg-structure test only applies in a job that actually builds the package
@@ -839,7 +839,7 @@ def test_package_commands_are_unsigned_user_domain_and_one_way(tmp_path):
     product_command = build_pkg.productbuild_command(
         tmp_path / "distribution.xml",
         tmp_path,
-        tmp_path / "XSTARS-1.1.1.pkg",
+        tmp_path / "XSTARS_MacOS_Setup_v1.1.1.pkg",
     )
 
     assert pkg_command == [
@@ -862,7 +862,7 @@ def test_package_commands_are_unsigned_user_domain_and_one_way(tmp_path):
         str(tmp_path / "distribution.xml"),
         "--package-path",
         str(tmp_path),
-        str(tmp_path / "XSTARS-1.1.1.pkg"),
+        str(tmp_path / "XSTARS_MacOS_Setup_v1.1.1.pkg"),
     ]
     combined = " ".join((*pkg_command, *product_command)).casefold()
     assert "sign" not in combined
@@ -1036,7 +1036,7 @@ def test_assemble_package_uses_injected_commands(tmp_path):
         runner=fake_runner,
     )
 
-    assert layout.final_package == output / "XSTARS-1.1.1.pkg"
+    assert layout.final_package == output / "XSTARS_MacOS_Setup_v1.1.1.pkg"
     assert layout.final_package.read_bytes() == b"fake package"
     assert layout.payload.archive.is_file()
     assert [command[0] for command in commands] == [

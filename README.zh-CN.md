@@ -178,7 +178,7 @@ XSTARS 现已提供面向 **WPS 电子表格** 的独立发行版本：
 
 ### macOS：📦 安装包（推荐 —— 无需 Python）
 
-在 Apple Silicon Mac 上下载 `XSTARS-1.2.0.pkg`，双击后按安装向导操作。用户级安装包已内置 Python 3.12、全部依赖、Excel 启动加载项和 xlwings 桥接，无需准备 Python 环境或手工导入 VBA。系统要求、未签名包放行方式和卸载说明见 [macOS 安装器指南](docs/macos-installer.md)。不支持 WPS for Mac。
+在 Apple Silicon Mac 上下载 `XSTARS_MacOS_Setup_v1.2.0.pkg`，双击后按安装向导操作。用户级安装包已内置 Python 3.12、全部依赖、Excel 启动加载项和 xlwings 桥接，无需准备 Python 环境或手工导入 VBA。系统要求、未签名包放行方式和卸载说明见 [macOS 安装器指南](docs/macos-installer.md)。不支持 WPS for Mac。
 
 #### macOS 开发者模式（源码调试备选）
 

@@ -1353,7 +1353,7 @@ def assemble_package(
         version,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    final_package = output_dir / f"XSTARS-{version}.pkg"
+    final_package = output_dir / f"XSTARS_MacOS_Setup_v{version}.pkg"
     final_package.unlink(missing_ok=True)
     _run_checked(
         productbuild_command(distribution, work_dir, final_package),

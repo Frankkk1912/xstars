@@ -17,7 +17,7 @@ WPS for Mac is not supported.
 
 ## Installation
 
-Download `XSTARS-1.2.0.pkg` from the project release and quit Excel before
+Download `XSTARS_MacOS_Setup_v1.2.0.pkg` from the project release and quit Excel before
 installing. Use one of these methods:
 
 1. Double-click the package and follow Installer. The package selects the
@@ -25,7 +25,7 @@ installing. Use one of these methods:
 2. From Terminal, install explicitly into the current user's home domain:
 
    ```bash
-   sudo installer -pkg "/path/to/XSTARS-1.2.0.pkg" \
+   sudo installer -pkg "/path/to/XSTARS_MacOS_Setup_v1.2.0.pkg" \
      -target CurrentUserHomeDirectory
    ```
 
@@ -54,7 +54,7 @@ including Sequoia, use one of these three release paths:
 2. **Remove quarantine from this package:** inspect the path, then run:
 
    ```bash
-   xattr -d com.apple.quarantine "/path/to/XSTARS-1.2.0.pkg"
+   xattr -d com.apple.quarantine "/path/to/XSTARS_MacOS_Setup_v1.2.0.pkg"
    ```
 
    Double-click the package again after the command succeeds.
@@ -62,7 +62,7 @@ including Sequoia, use one of these three release paths:
    installation section, for example:
 
    ```bash
-   sudo installer -pkg "/path/to/XSTARS-1.2.0.pkg" \
+   sudo installer -pkg "/path/to/XSTARS_MacOS_Setup_v1.2.0.pkg" \
      -target CurrentUserHomeDirectory
    ```
 
