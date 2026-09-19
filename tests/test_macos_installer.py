@@ -161,7 +161,8 @@ def _macro_by_prefix(macros: dict[str, str], prefix: str) -> str:
 
 
 def _normalize_vba(source: str) -> str:
-    return source.replace("\r\n", "\n")
+    """Mirror build_pkg._normalized_vba (CRLF + trailing-newline insensitivity)."""
+    return build_pkg._normalized_vba(source)
 
 
 def _xml_root(content: bytes):
