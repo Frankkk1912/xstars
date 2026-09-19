@@ -32,6 +32,16 @@ except ModuleNotFoundError:  # Python 3.10: test loader imports this module
     import tomli as tomllib  # type: ignore[import-not-found]
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _rmtree(path: Path) -> None:
+    """Best-effort recursive removal (never raises)."""
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        print(f"warning: cleanup of {path} failed: {exc}", file=sys.stderr)
+
+
 REPO_ROOT = SCRIPT_DIR.parent.parent
 PROJECT_FILE = REPO_ROOT / "pyproject.toml"
 LOCK_FILE = SCRIPT_DIR / "runtime.lock.json"
@@ -268,7 +278,7 @@ def extract_runtime(archive: Path, staging_dir: Path) -> Path:
     """Safely replace ``staging/python`` with the archive's runtime tree."""
     python_dir = staging_dir / "python"
     if python_dir.exists():
-        shutil.rmtree(python_dir, ignore_errors=True)
+        _rmtree(python_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -287,10 +297,10 @@ def extract_runtime(archive: Path, staging_dir: Path) -> Path:
                 )
             bundle.extractall(staging_dir, members=members, filter="data")
     except BuildError:
-        shutil.rmtree(python_dir, ignore_errors=True)
+        _rmtree(python_dir)
         raise
     except (OSError, tarfile.TarError) as exc:
-        shutil.rmtree(python_dir, ignore_errors=True)
+        _rmtree(python_dir)
         raise BuildError(f"cannot extract runtime archive {archive}: {exc}") from exc
 
     python_executable = python_dir / "bin" / "python3"
@@ -400,6 +410,25 @@ def find_xlwings_applescript(python_dir: Path) -> Path:
     return candidates.pop()
 
 
+def find_xlwings_custom_addin(python_dir: Path) -> Path:
+    """Locate the custom-addin VBA bridge shipped by the installed xlwings wheel."""
+    candidates = {
+        candidate.resolve()
+        for site_packages in python_dir.glob("lib/python*/site-packages")
+        for candidate in site_packages.rglob("xlwings_custom_addin.bas")
+        if candidate.is_file()
+    }
+    if not candidates:
+        raise BuildError(
+            "installed xlwings did not provide xlwings_custom_addin.bas under "
+            f"{python_dir}"
+        )
+    if len(candidates) != 1:
+        rendered = ", ".join(str(path) for path in sorted(candidates))
+        raise BuildError(f"multiple xlwings custom-addin bridges found: {rendered}")
+    return candidates.pop()
+
+
 def xlwings_applescript_version(applescript: Path) -> str:
     """Read the xlwings version encoded in a wheel AppleScript filename."""
     match = XLWINGS_APPLESCRIPT_VERSION_PATTERN.fullmatch(applescript.name)
@@ -410,28 +439,47 @@ def xlwings_applescript_version(applescript: Path) -> str:
     return match.group("version")
 
 
-def embedded_xlwings_vba_version(workbook: Path) -> str:
-    """Read the Version comment from the workbook's embedded xlwings.bas."""
+def embedded_vba_modules(workbook: Path) -> dict[str, str]:
+    """Return embedded VBA source keyed by its exported module filename."""
     try:
         from oletools.olevba import VBA_Parser
     except ImportError as exc:
-        raise BuildError(
-            "oletools is required to validate embedded xlwings.bas"
-        ) from exc
+        raise BuildError("oletools is required to validate embedded VBA") from exc
 
     parser = VBA_Parser(str(workbook))
+    modules: dict[str, str] = {}
     try:
-        sources = [
-            source
-            for _, _, module_name, source in parser.extract_macros()
-            if isinstance(module_name, str)
-            and module_name.casefold().startswith("xlwings")
-            and isinstance(source, str)
-        ]
+        for _, _, module_name, source in parser.extract_macros():
+            if not isinstance(module_name, str) or not isinstance(source, str):
+                raise BuildError(f"invalid embedded VBA module in {workbook}")
+            key = module_name.casefold()
+            if key in modules:
+                raise BuildError(
+                    f"duplicate embedded VBA module {module_name!r} in {workbook}"
+                )
+            modules[key] = source
+    except BuildError:
+        raise
     except Exception as exc:
-        raise BuildError(f"cannot inspect xlwings.bas in {workbook}: {exc}") from exc
+        raise BuildError(f"cannot inspect embedded VBA in {workbook}: {exc}") from exc
     finally:
         parser.close()
+    return modules
+
+
+def _normalized_vba(source: str) -> str:
+    """Normalize VBE line endings while preserving all source semantics."""
+    return source.replace("\r\n", "\n").rstrip("\n")
+
+
+def embedded_xlwings_vba_version(workbook: Path) -> str:
+    """Read the Version comment from the workbook's embedded xlwings.bas."""
+    modules = embedded_vba_modules(workbook)
+    sources = [
+        source
+        for module_name, source in modules.items()
+        if module_name.startswith("xlwings")
+    ]
     if len(sources) != 1:
         raise BuildError(
             f"expected one embedded xlwings.bas in {workbook}; found {len(sources)}"
@@ -439,6 +487,72 @@ def embedded_xlwings_vba_version(workbook: Path) -> str:
     match = XLWINGS_VBA_VERSION_PATTERN.search(sources[0])
     if match is None:
         raise BuildError(f"embedded xlwings.bas has no Version comment: {workbook}")
+    return match.group("version")
+
+
+def validate_xlam_vba(
+    xlam: Path,
+    *,
+    custom_addin_source: Path,
+    callbacks_source: Path,
+) -> str:
+    """Require the add-in to embed its complete, pinned Mac VBA bridge."""
+    modules = embedded_vba_modules(xlam)
+    required = {
+        "ribboncallbacks.bas",
+        "xlwings.bas",
+        "dictionary.cls",
+    }
+    missing = sorted(required - modules.keys())
+    if missing:
+        raise BuildError(
+            f"XSTARS.xlam is missing required VBA modules: {', '.join(missing)}"
+        )
+
+    try:
+        expected_callbacks = callbacks_source.read_text(encoding="utf-8")
+        expected_xlwings = custom_addin_source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise BuildError(f"cannot read expected XSTARS.xlam VBA source: {exc}") from exc
+
+    # The add-in must use PROJECT_NAME = "xlwings" so it reads xlwings.conf.
+    # xlwings_custom_addin.bas ships with PROJECT_NAME = "myaddin" as a
+    # template placeholder; normalise it before comparing.
+    expected_xlwings = re.sub(
+        r'Public Const PROJECT_NAME As String = "[^"]+"',
+        'Public Const PROJECT_NAME As String = "xlwings"',
+        expected_xlwings,
+    )
+
+    if _normalized_vba(modules["ribboncallbacks.bas"]) != _normalized_vba(
+        expected_callbacks
+    ):
+        raise BuildError("XSTARS.xlam RibbonCallbacks does not match the repo source")
+    if _normalized_vba(modules["xlwings.bas"]) != _normalized_vba(expected_xlwings):
+        raise BuildError(
+            "XSTARS.xlam xlwings.bas is not the installed custom-addin bridge"
+        )
+    if 'Public Const PROJECT_NAME As String = "xlwings"' not in modules["xlwings.bas"]:
+        raise BuildError(
+            'XSTARS.xlam xlwings.bas has wrong PROJECT_NAME: must be "xlwings" '
+            "so the add-in reads xlwings.conf"
+        )
+
+    dictionary = modules["dictionary.cls"]
+    dictionary_markers = (
+        "#Const UseScriptingDictionaryIfAvailable = True",
+        "Private dict_pKeyValues As Collection",
+        "Public Property Let CompareMode",
+        "Public Function Exists(Key As Variant) As Boolean",
+    )
+    if not all(marker in dictionary for marker in dictionary_markers):
+        raise BuildError(
+            "XSTARS.xlam Dictionary.cls is not the expected implementation"
+        )
+
+    match = XLWINGS_VBA_VERSION_PATTERN.search(modules["xlwings.bas"])
+    if match is None:
+        raise BuildError(f"embedded xlwings.bas has no Version comment: {xlam}")
     return match.group("version")
 
 
@@ -595,11 +709,20 @@ def validate_staging_manifest(
     workbook_version = embedded_xlwings_vba_version(
         staging_dir / "bin" / "XSTARS_mac.xlsm"
     )
-    if installed_version != xlwings_version or workbook_version != xlwings_version:
+    xlam_version = validate_xlam_vba(
+        staging_dir / "bin" / "XSTARS.xlam",
+        custom_addin_source=find_xlwings_custom_addin(staging_dir / "python"),
+        callbacks_source=REPO_ROOT / "ribbon" / "ribbon_callbacks.bas",
+    )
+    if (
+        installed_version != xlwings_version
+        or workbook_version != xlwings_version
+        or xlam_version != xlwings_version
+    ):
         raise BuildError(
             "staging manifest mismatch: xlwings_version "
             f"expected={xlwings_version} runtime={installed_version} "
-            f"workbook={workbook_version}"
+            f"workbook={workbook_version} xlam={xlam_version}"
         )
     return document
 
@@ -625,11 +748,23 @@ def assemble_staging(
         runner=runner,
     )
     applescript = find_xlwings_applescript(python_dir)
-    validate_xlwings_versions(applescript, assets_dir / "XSTARS_mac.xlsm")
+    bridge_version = validate_xlwings_versions(
+        applescript, assets_dir / "XSTARS_mac.xlsm"
+    )
+    xlam_version = validate_xlam_vba(
+        assets_dir / "XSTARS.xlam",
+        custom_addin_source=find_xlwings_custom_addin(python_dir),
+        callbacks_source=repo_root / "ribbon" / "ribbon_callbacks.bas",
+    )
+    if xlam_version != bridge_version:
+        raise BuildError(
+            "xlwings bridge version mismatch: "
+            f"runtime/workbook={bridge_version}, XSTARS.xlam={xlam_version}"
+        )
 
     bin_dir = staging_dir / "bin"
     if bin_dir.exists():
-        shutil.rmtree(bin_dir, ignore_errors=True)
+        _rmtree(bin_dir)
     bin_dir.mkdir(parents=True)
     for asset_name in ("XSTARS.xlam", "XSTARS_mac.xlsm"):
         source = assets_dir / asset_name
@@ -752,7 +887,7 @@ def assemble_install_tree(
     """Assemble the final ``Library/Application Support/XSTARS`` tree."""
     staging = staging_layout(staging_dir)
     if install_tree_root.exists():
-        shutil.rmtree(install_tree_root, ignore_errors=True)
+        _rmtree(install_tree_root)
 
     destination = install_tree_root / "Library" / "Application Support" / "XSTARS"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -928,7 +1063,7 @@ def assemble_payload(
     )
     component_root = work_dir / "component-root"
     if component_root.exists():
-        shutil.rmtree(component_root, ignore_errors=True)
+        _rmtree(component_root)
     archive = create_payload_archive(
         install_tree,
         component_root,
@@ -1054,7 +1189,7 @@ def sanitize_component_payload(
     extracted = work_dir / "payload-expanded"
     cleaned = work_dir / "Payload-clean"
     if extracted.exists():
-        shutil.rmtree(extracted, ignore_errors=True)
+        _rmtree(extracted)
     cleaned.unlink(missing_ok=True)
     extracted.mkdir(parents=True)
 
@@ -1072,7 +1207,7 @@ def sanitize_component_payload(
     _run_checked(extract_command, runner, "component payload expansion")
     for metadata in find_macos_metadata(extracted):
         if metadata.is_dir() and not metadata.is_symlink():
-            shutil.rmtree(metadata, ignore_errors=True)
+            _rmtree(metadata)
         else:
             metadata.unlink()
 
@@ -1098,7 +1233,7 @@ def sanitize_component_payload(
         cleaned.replace(payload)
     except OSError as exc:
         raise BuildError(f"cannot replace component payload {payload}: {exc}") from exc
-    shutil.rmtree(extracted, ignore_errors=True)
+    _rmtree(extracted)
 
 
 def sanitize_component_package(
@@ -1113,7 +1248,7 @@ def sanitize_component_package(
     cleaned_package = work_dir / "XSTARS-component-clean.pkg"
     for path in (expanded, verification):
         if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+            _rmtree(path)
     cleaned_package.unlink(missing_ok=True)
 
     _run_checked(
@@ -1125,7 +1260,7 @@ def sanitize_component_package(
         raise BuildError(f"pkgutil did not expand component package to {expanded}")
     for metadata in find_macos_metadata(expanded):
         if metadata.is_dir() and not metadata.is_symlink():
-            shutil.rmtree(metadata, ignore_errors=True)
+            _rmtree(metadata)
         else:
             metadata.unlink()
     sanitize_component_payload(expanded / "Payload", work_dir, runner=runner)
@@ -1156,8 +1291,8 @@ def sanitize_component_package(
             + ", ".join(str(path) for path in forbidden[:5])
         )
     validate_component_payload(verification / "Payload")
-    shutil.rmtree(expanded, ignore_errors=True)
-    shutil.rmtree(verification, ignore_errors=True)
+    _rmtree(expanded)
+    _rmtree(verification)
 
 
 def assemble_package(
