@@ -26,6 +26,8 @@ from urllib.parse import unquote, urlparse
 from urllib.request import urlopen
 from zipfile import BadZipFile, ZipFile
 
+from defusedxml import ElementTree as DefusedElementTree
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10: test loader imports this module
@@ -837,7 +839,7 @@ def staging_layout(staging_dir: Path) -> StagingLayout:
 
 
 def scan_office_metadata(artifact: Path) -> None:
-    """Fail if an Office artifact contains build-machine path metadata."""
+    """Fail if an Office artifact contains metadata or malformed XML parts."""
     try:
         with ZipFile(artifact) as archive:
             for member in archive.infolist():
@@ -849,6 +851,17 @@ def scan_office_metadata(artifact: Path) -> None:
                         f"forbidden x15ac:absPath metadata in "
                         f"{artifact}:{member.filename}"
                     )
+                # OPC XML parts (and .rels) must be well-formed. A namespace
+                # prefix referenced but never declared (e.g. a hand-stripped
+                # x15ac:absPath that also removed xmlns:mc) makes Excel
+                # silently refuse to load the whole artifact.
+                if member.filename.endswith((".xml", ".rels")):
+                    try:
+                        DefusedElementTree.fromstring(content)
+                    except DefusedElementTree.ParseError as exc:
+                        raise BuildError(
+                            f"malformed XML part {member.filename} in {artifact}: {exc}"
+                        ) from exc
     except (OSError, BadZipFile) as exc:
         raise BuildError(f"cannot inspect Office artifact {artifact}: {exc}") from exc
 

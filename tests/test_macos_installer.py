@@ -792,6 +792,25 @@ def test_payload_scan_rejects_appledouble_finder_and_abspath(tmp_path):
         build_pkg.scan_payload_tree(root)
 
 
+def test_office_scan_rejects_malformed_xml_part(tmp_path):
+    """An OPC part referencing an undeclared namespace prefix must fail the build.
+
+    Regression: stripping x15ac:absPath also removed the root xmlns:mc
+    declaration, leaving mc:Ignorable pointing at an unbound prefix. Excel
+    silently refuses to load such an add-in, so the build must fail closed.
+    """
+    artifact = tmp_path / "XSTARS.xlam"
+    with ZipFile(artifact, "w") as archive:
+        archive.writestr("xl/vbaProject.bin", b"clean")
+        archive.writestr(
+            "xl/workbook.xml",
+            b'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            b'mc:Ignorable="x15"/>',
+        )
+    with pytest.raises(build_pkg.BuildError, match="malformed XML part"):
+        build_pkg.scan_office_metadata(artifact)
+
+
 def test_payload_tar_command_strips_macos_metadata(tmp_path):
     install_tree = tmp_path / "install-tree" / "XSTARS"
     archive = tmp_path / "component-root" / "XSTARS-payload.tar.gz"
