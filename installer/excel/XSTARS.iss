@@ -15,7 +15,8 @@
 #define MyAppURL "https://github.com/Frankkk1912/xstars"
 
 ; All Source paths are relative to this root
-#define ProjectRoot ".."
+; NOTE: this .iss lives in installer\excel\, so the project root is two levels up
+#define ProjectRoot "..\.."
 
 [Setup]
 AppId={{E7A3B2C1-4D5F-6789-ABCD-EF0123456789}
