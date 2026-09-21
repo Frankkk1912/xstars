@@ -62,3 +62,6 @@ wps-addon/deploy/
 # Excel installer build output
 installer/excel/XSTARS.xlam
 installer/excel/output/
+
+# Local build staging for the macOS installer (runtime + payload)
+installer/mac/staging/

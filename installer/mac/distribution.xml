@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    productbuild distribution definition for XSTARS.
+    __VERSION__ is replaced by build_pkg.py at build time.
+-->
+<installer-gui-script minSpecVersion="1">
+    <title>XSTARS</title>
+    <organization>com.frank-sysu</organization>
+    <domains enable_currentUserHome="true" enable_localSystem="false"
+             enable_anywhere="false"/>
+    <options customize="never" require-scripts="true"
+             hostArchitectures="arm64"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="14.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.frank-sysu.xstars"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.frank-sysu.xstars" visible="false">
+        <pkg-ref id="com.frank-sysu.xstars"/>
+    </choice>
+    <pkg-ref id="com.frank-sysu.xstars"
+             version="__VERSION__"
+             onConclusion="none">XSTARS-component.pkg</pkg-ref>
+</installer-gui-script>

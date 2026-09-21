@@ -14,7 +14,7 @@ XSTARS 不追求用一种宿主插件技术覆盖所有平台，而采用：
 | 平台 | 推荐技术 | 状态 |
 | --- | --- | --- |
 | Excel Windows | VBA + xlwings | 保留现有实现 |
-| Excel macOS | VBA + xlwings | 后续增加 Mac 适配 |
+| Excel macOS | VBA + xlwings | 独立 `.pkg` 安装器交付中 |
 | WPS Windows | WPS JS 加载项 + 本地 Python 服务 | 当前规划路线 |
 | WPS macOS | 独立 PoC 后决定 | 暂不承诺正式支持 |
 
