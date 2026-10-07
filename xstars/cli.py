@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 from importlib import import_module
 
+import pandas  # noqa: F401  # defensive prewarm: initialize pandas C-API before xlwings lazy-imports pandas
+
 
 def _run_serve_mode(arguments: list[str]) -> int:
     import argparse

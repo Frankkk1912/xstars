@@ -255,7 +255,7 @@ def test_signing_environment_is_explicitly_ignored(monkeypatch, capsys):
 
     assert build_pkg.main(["--version"]) == 0
     output = capsys.readouterr()
-    assert output.out.strip() == "1.2.0"
+    assert output.out.strip() == xstars.__version__
     assert "intentionally unsigned" in output.err
 
 

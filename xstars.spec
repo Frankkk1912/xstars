@@ -15,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all
+
 block_cipher = None
 IS_MAC = sys.platform == "darwin"
 
@@ -47,10 +49,12 @@ else:
         "xlwings._xlwindows",
     ]
 
+pandas_datas, pandas_binaries, pandas_hiddenimports = collect_all("pandas")
+
 a = Analysis(
     ["xstars/cli.py"],
     pathex=[],
-    binaries=[],
+    binaries=[*pandas_binaries],
     datas=[
         # matplotlib needs fonts + style sheets
         (str(mpl_data), "matplotlib/mpl-data"),
@@ -58,6 +62,7 @@ a = Analysis(
         (str(ttkb_root), "ttkbootstrap"),
         # statannotations package data
         (str(sa_root), "statannotations"),
+        *pandas_datas,
     ],
     hiddenimports=[
         *xlwings_backend,
@@ -79,6 +84,7 @@ a = Analysis(
         "pandas._libs.tslibs.timedeltas",
         "pandas._libs.tslibs.np_datetime",
         "pandas._libs.tslibs.nattype",
+        *pandas_hiddenimports,
         # tkinter
         "tkinter",
         "tkinter.ttk",

@@ -65,3 +65,7 @@ installer/excel/output/
 
 # Local build staging for the macOS installer (runtime + payload)
 installer/mac/staging/
+
+# Agent local memory/runtime
+.pi/
+
