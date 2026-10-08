@@ -1,5 +1,5 @@
 ; XSTARS Inno Setup Script
-; Produces: XSTARS_Setup_v1.2.0.exe
+; Produces: XSTARS_Setup_v1.2.1.exe
 ;
 ; Build prerequisites:
 ;   1. PyInstaller output in dist\xstars\
@@ -10,7 +10,7 @@
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\XSTARS.iss
 
 #define MyAppName "XSTARS"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "Frank-SYSU"
 #define MyAppURL "https://github.com/Frankkk1912/xstars"
 
