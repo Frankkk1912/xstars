@@ -167,7 +167,7 @@ End Sub
 
 Sub ShowAbout(control As IRibbonControl)
     Dim msg As String
-    msg = "XSTARS v1.2.0" & vbCrLf & vbCrLf & _
+    msg = "XSTARS v1.2.1" & vbCrLf & vbCrLf & _
           "Quick statistical analysis and publication-quality" & vbCrLf & _
           "visualization inside Excel & WPS." & vbCrLf & vbCrLf & _
           "Author: Yuxing Dai (Frank) -- SYSU" & vbCrLf & _
