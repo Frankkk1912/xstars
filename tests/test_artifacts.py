@@ -30,7 +30,13 @@ from xstars.artifacts import (
     save_artifact,
     standard_curve_renderer_params,
 )
-from xstars.config import ChartType, ErrorBarType, ExperimentPreset, PrismConfig
+from xstars.config import (
+    ChartType,
+    ErrorBarType,
+    ExperimentPreset,
+    PrismConfig,
+    QPCRErrorSpace,
+)
 from xstars.stats_engine import PairResult, StatsResult
 from xstars.tools.standard_curve import fit_standard_curve
 
@@ -125,6 +131,31 @@ def test_round_trip_preserves_dataframe_config_stats_and_checksum(
     assert document["artifact_key"] == identity.key
     assert document["checksum"] == loaded.checksum
     assert "pickle" not in artifact_path.read_text(encoding="utf-8").lower()
+
+
+def test_artifact_round_trip_preserves_qpcr_error_space(tmp_path, identity, frame):
+    config = PrismConfig(
+        experiment_preset=ExperimentPreset.QPCR,
+        preset_qpcr_error_space=QPCRErrorSpace.LINEAR,
+    )
+    save_artifact(build_payload(identity, frame, config), tmp_path)
+    loaded = load_artifact(identity, tmp_path)
+    assert loaded.config.preset_qpcr_error_space is QPCRErrorSpace.LINEAR
+
+
+def test_old_artifact_missing_qpcr_error_space_defaults_to_log(
+    tmp_path, identity, frame
+):
+    save_artifact(build_payload(identity, frame, PrismConfig()), tmp_path)
+    _, document = _saved_document(tmp_path, identity)
+    document["config"].pop("preset_qpcr_error_space")
+    unsigned = dict(document)
+    unsigned.pop("checksum")
+    document["checksum"] = artifacts._document_checksum(unsigned)
+    _rewrite_document(tmp_path, identity, document)
+
+    loaded = load_artifact(identity, tmp_path)
+    assert loaded.config.preset_qpcr_error_space is QPCRErrorSpace.LOG
 
 
 def test_missing_artifact_has_regeneration_message(tmp_path, identity):

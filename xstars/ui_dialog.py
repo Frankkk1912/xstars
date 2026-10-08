@@ -37,6 +37,7 @@ from .config import (
     JournalPreset,
     PalettePreset,
     PrismConfig,
+    QPCRErrorSpace,
 )
 
 
@@ -403,6 +404,33 @@ class SettingsDialog:
         ).pack(anchor="w", padx=8)
         self._on_qpcr_ref_toggle()
 
+        # Error-bar space selector (display only; tests always run in log2 space)
+        space_row = ttk.Frame(self._qpcr_frame)
+        space_row.pack(fill="x", padx=8, pady=(4, 2))
+        ttk.Label(space_row, text="Error-bar space:").pack(side="left")
+        self._qpcr_space_labels = {
+            "Log2 (geometric mean)": "log",
+            "Linear (arithmetic mean)": "linear",
+        }
+        self._qpcr_space_rev = {v: k for k, v in self._qpcr_space_labels.items()}
+        self._qpcr_space_var = tk.StringVar(
+            value=self._qpcr_space_rev.get(
+                self.config.preset_qpcr_error_space.value, "Log2 (geometric mean)"
+            )
+        )
+        ttk.Combobox(
+            space_row,
+            textvariable=self._qpcr_space_var,
+            values=list(self._qpcr_space_labels),
+            state="readonly",
+            width=24,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Label(
+            self._qpcr_frame,
+            text="Log2: asymmetric errors rotated back from log2 space",
+            foreground="gray",
+        ).pack(anchor="w", padx=8)
+
         # -- CCK-8 sub-frame --
         self._cck8_frame = ttk.Frame(exp_frame)
         ttk.Label(self._cck8_frame, text="Control group:").pack(anchor="w", padx=8)
@@ -760,6 +788,7 @@ class SettingsDialog:
         preset_input_fmt = "delta_ct"
         preset_blank = ""
         preset_fit_ic50 = True
+        preset_qpcr_error_space = QPCRErrorSpace.LOG
         if exp_val == "wb":
             preset_control = self._wb_control_var.get()
             preset_has_ref = self._wb_ref_var.get()
@@ -768,6 +797,9 @@ class SettingsDialog:
             preset_has_ref = self._qpcr_ref_var.get()
             if not preset_has_ref:
                 preset_input_fmt = self._qpcr_format_var.get()
+            preset_qpcr_error_space = QPCRErrorSpace(
+                self._qpcr_space_labels.get(self._qpcr_space_var.get(), "log")
+            )
         elif exp_val == "cck8":
             preset_control = self._cck8_control_var.get()
             blank_sel = self._cck8_blank_var.get()
@@ -817,6 +849,7 @@ class SettingsDialog:
             preset_control_group=preset_control,
             preset_has_reference=preset_has_ref,
             preset_input_format=preset_input_fmt,
+            preset_qpcr_error_space=preset_qpcr_error_space,
             preset_blank_group=preset_blank,
             preset_fit_ic50=preset_fit_ic50,
             preset_concentrations=preset_concentrations,

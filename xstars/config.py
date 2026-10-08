@@ -73,6 +73,11 @@ class ErrorBarType(Enum):
     CI95 = "ci95"
 
 
+class QPCRErrorSpace(Enum):
+    LOG = "log"  # geometric mean + asymmetric back-transformed error bars
+    LINEAR = "linear"  # arithmetic mean + symmetric error bars
+
+
 class DoseAxisScale(Enum):
     AUTO = "auto"  # log if range > 100×, linear otherwise
     LOG = "log"
@@ -153,6 +158,7 @@ class PrismConfig:
     preset_reference_protein: str = ""  # WB: which protein is the reference
     preset_input_format: str = "delta_ct"  # qPCR: "delta_ct" or "raw_ct"
     preset_reference_gene: str = ""  # qPCR: which gene is the reference
+    preset_qpcr_error_space: QPCRErrorSpace = QPCRErrorSpace.LOG  # qPCR: err space
     preset_blank_group: str = ""  # CCK-8: blank column name
     preset_fit_ic50: bool = True  # CCK-8: fit 4PL curve
     preset_concentrations: str = ""  # CCK-8: comma-separated concentrations
@@ -195,6 +201,7 @@ class PrismConfig:
             "preset_has_reference",
             "preset_reference_protein",
             "preset_reference_gene",
+            "preset_qpcr_error_space",
             "preset_input_format",
             "preset_blank_group",
             "preset_fit_ic50",

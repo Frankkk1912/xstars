@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-from xstars.config import ChartType, ErrorBarType, AnnotationFormat, PrismConfig
+from xstars.config import (
+    AnnotationFormat,
+    ChartType,
+    ErrorBarType,
+    PrismConfig,
+    QPCRErrorSpace,
+)
 
 
 class TestConfigPersistence:
@@ -37,6 +43,14 @@ class TestConfigPersistence:
         data = json.loads(p.read_text())
         assert "export_path" not in data
         assert "control_group" not in data
+
+    def test_qpcr_error_space_not_persisted(self, tmp_path: Path):
+        p = tmp_path / "settings.json"
+        cfg = PrismConfig(preset_qpcr_error_space=QPCRErrorSpace.LINEAR)
+        cfg.save(p)
+        data = json.loads(p.read_text())
+        assert "preset_qpcr_error_space" not in data
+        assert PrismConfig.load(p).preset_qpcr_error_space is QPCRErrorSpace.LOG
 
     def test_load_missing_file_returns_defaults(self, tmp_path: Path):
         loaded = PrismConfig.load(tmp_path / "nope.json")

@@ -38,6 +38,7 @@ from .config import (
     JournalPreset,
     PalettePreset,
     PrismConfig,
+    QPCRErrorSpace,
 )
 from .plot_engine import PlotEngine
 from .presets.cck8 import CCK8FitInfo
@@ -561,7 +562,10 @@ def _config_from_dict(snapshot: Any) -> PrismConfig:
     if not isinstance(snapshot, dict):
         raise CorruptArtifactError("The artifact plot configuration is invalid.")
     expected_fields = {field.name for field in fields(PrismConfig)}
-    missing = sorted(expected_fields - snapshot.keys())
+    # Fields added after older artifacts were written. Missing keys fall back
+    # to the dataclass default so existing workbooks still rebuild.
+    optional_fields = frozenset({"preset_qpcr_error_space"})
+    missing = sorted(expected_fields - snapshot.keys() - optional_fields)
     if missing:
         raise CorruptArtifactError(
             f"The artifact plot configuration is missing fields: {', '.join(missing)}."
@@ -578,9 +582,12 @@ def _config_from_dict(snapshot: Any) -> PrismConfig:
         "experiment_preset": ExperimentPreset,
         "preset_dose_axis_scale": DoseAxisScale,
         "preset_fit_method": FitMethod,
+        "preset_qpcr_error_space": QPCRErrorSpace,
     }
     kwargs: dict[str, Any] = {}
     for name in expected_fields:
+        if name not in snapshot:
+            continue
         value = _json_restore(snapshot[name])
         if name in enum_fields:
             try:

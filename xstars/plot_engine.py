@@ -20,6 +20,7 @@ from .config import (
     ErrorBarType,
     ExperimentPreset,
     PrismConfig,
+    QPCRErrorSpace,
 )
 from .stats_engine import StatsResult
 from .styles import get_journal_figsize, get_prism_context
@@ -91,7 +92,7 @@ class PlotEngine:
         cfg = self.config
         groups = list(df_wide.columns)
 
-        if self._is_qpcr():
+        if self._qpcr_log_display():
             self._qpcr_bars(ax, df_wide, groups)
         else:
             ci_param = self._seaborn_ci()
@@ -222,7 +223,7 @@ class PlotEngine:
         means = [df_wide[g].mean() for g in groups]
         errors = [self._error_value(df_wide[g].dropna()) for g in groups]
 
-        if self._is_qpcr():
+        if self._qpcr_log_display():
             geo_means, lower_err, upper_err = [], [], []
             for group in groups:
                 geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
@@ -418,6 +419,18 @@ class PlotEngine:
     def _is_qpcr(self) -> bool:
         """Whether the current preset is the qPCR ΔΔCt transform."""
         return self.config.experiment_preset is ExperimentPreset.QPCR
+
+    def _qpcr_log_display(self) -> bool:
+        """Whether qPCR charts use log-space geometric-mean display.
+
+        Linear space falls back to the standard arithmetic-mean chart paths
+        with symmetric error bars; hypothesis tests always run in log2 space
+        regardless of this display choice.
+        """
+        return (
+            self._is_qpcr()
+            and self.config.preset_qpcr_error_space is QPCRErrorSpace.LOG
+        )
 
     def _qpcr_geo_stats(self, series: pd.Series) -> tuple[float, float, float]:
         """Geometric mean plus asymmetric error-bar offsets, in fold-change units.

@@ -16,6 +16,7 @@ from xstars.config import (
     ErrorBarType,
     ExperimentPreset,
     PrismConfig,
+    QPCRErrorSpace,
 )
 from xstars.plot_engine import PlotEngine
 from xstars.presets.qpcr import QPCRPreset, stats_input_frame
@@ -105,6 +106,32 @@ class TestQPCRBars:
         assert fig is not None
         plt.close(fig)
 
+    def test_qpcr_linear_space_uses_arithmetic_means(self, monkeypatch):
+        groups = ["Control", "siRNA"]
+        df_wide = pd.DataFrame(
+            {"Control": [1.0, 0.9, 1.1], "siRNA": [0.4, 0.5, 0.45]}
+        )
+        config = PrismConfig(
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_qpcr_error_space=QPCRErrorSpace.LINEAR,
+            show_points=False,
+        )
+        engine = PlotEngine(config)
+
+        def fail_if_called(*_args, **_kwargs):
+            pytest.fail("linear-space qPCR must not use _qpcr_bars")
+
+        monkeypatch.setattr(engine, "_qpcr_bars", fail_if_called)
+        fig = engine.plot(df_wide)
+        ax = fig.axes[0]
+        from matplotlib.patches import Rectangle
+
+        rectangles = [patch for patch in ax.patches if isinstance(patch, Rectangle)]
+        assert [patch.get_height() for patch in rectangles] == pytest.approx(
+            [df_wide[group].mean() for group in groups]
+        )
+        plt.close(fig)
+
 
 class TestViolin:
     def test_creates_figure(self, two_group_normal):
@@ -154,7 +181,7 @@ class TestLine:
         assert errorbar.lines[0].get_ydata() == pytest.approx(expected_means)
 
         segments = errorbar.lines[2][0].get_segments()
-        for group, mean, segment in zip(groups, expected_means, segments):
+        for group, mean, segment in zip(groups, expected_means, segments, strict=True):
             log_values = np.log2(df_wide[group].to_numpy(dtype=float))
             sem_log = np.std(log_values, ddof=1) / np.sqrt(len(log_values))
             expected_endpoints = [
@@ -166,6 +193,39 @@ class TestLine:
             lower = mean - segment[0, 1]
             upper = segment[1, 1] - mean
             assert lower != pytest.approx(upper)
+
+        plt.close(fig)
+
+    def test_qpcr_line_linear_space_uses_arithmetic_means(self):
+        groups = ["Control", "Treatment"]
+        df_wide = pd.DataFrame(
+            {"Control": [1.0, 2.0, 4.0], "Treatment": [0.5, 1.0, 2.0]}
+        )
+        config = PrismConfig(
+            chart_type=ChartType.LINE,
+            experiment_preset=ExperimentPreset.QPCR,
+            preset_qpcr_error_space=QPCRErrorSpace.LINEAR,
+            show_points=False,
+        )
+        engine = PlotEngine(config)
+        fig = engine.plot(df_wide)
+        ax = fig.axes[0]
+
+        from matplotlib.container import ErrorbarContainer
+
+        errorbar = next(
+            container
+            for container in ax.containers
+            if isinstance(container, ErrorbarContainer)
+        )
+        expected_means = [df_wide[group].mean() for group in groups]
+        assert errorbar.lines[0].get_ydata() == pytest.approx(expected_means)
+
+        segments = errorbar.lines[2][0].get_segments()
+        for mean, segment in zip(expected_means, segments, strict=True):
+            lower = mean - segment[0, 1]
+            upper = segment[1, 1] - mean
+            assert lower == pytest.approx(upper)
 
         plt.close(fig)
 
