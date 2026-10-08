@@ -114,9 +114,9 @@ class SettingsDialog:
             notebook = ttk.Notebook(root)
         notebook.pack(fill="both", expand=True, **pad)
 
-        # ===================== General tab =====================
+        # ===================== Figure tab =====================
+        # Chart content: type, error bars, annotations, title and axis label.
         general_tab, general_frame = self._make_scrollable(notebook)
-        notebook.add(general_tab, text="  General  ")
 
         # -- Chart type --
         chart_frame = ttk.Labelframe(general_frame, text="Chart Type", padding=6)
@@ -147,6 +147,37 @@ class SettingsDialog:
             ttk.Radiobutton(
                 eb_row, text=label, variable=self._eb_var, value=eb.value,
             ).pack(side="left", padx=8)
+
+        space_row = ttk.Frame(eb_frame)
+        space_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(space_row, text="Space:").pack(side="left", padx=(8, 0))
+        self._error_space_labels = {
+            "Arithmetic": "linear",
+            "Geometric (log2)": "log",
+        }
+        self._error_space_rev = {v: k for k, v in self._error_space_labels.items()}
+        initial_space = (
+            self.config.preset_qpcr_error_space.value
+            if self.config.experiment_preset is ExperimentPreset.QPCR
+            else QPCRErrorSpace.LINEAR.value
+        )
+        self._error_space_var = tk.StringVar(
+            value=self._error_space_rev.get(initial_space, "Arithmetic")
+        )
+        self._error_space_combo = ttk.Combobox(
+            space_row,
+            textvariable=self._error_space_var,
+            values=list(self._error_space_labels),
+            state="disabled",
+            width=22,
+        )
+        self._error_space_combo.pack(side="left", padx=(8, 0))
+        self._error_space_hint = ttk.Label(
+            eb_frame,
+            text="SEM, SD and 95% CI are calculated in this space.",
+            foreground="gray",
+        )
+        self._error_space_hint.pack(anchor="w", padx=8, pady=(2, 0))
 
         # -- Options --
         opts_frame = ttk.Labelframe(general_frame, text="Options", padding=6)
@@ -218,7 +249,6 @@ class SettingsDialog:
 
         # ===================== Theme tab =====================
         theme_tab, theme_content = self._make_scrollable(notebook)
-        notebook.add(theme_tab, text="  Theme  ")
 
         # -- Base Theme --
         theme_frame = ttk.Labelframe(theme_content, text="Base Theme", padding=6)
@@ -327,7 +357,6 @@ class SettingsDialog:
 
         # ===================== Preset tab =====================
         preset_tab, preset_content = self._make_scrollable(notebook)
-        notebook.add(preset_tab, text="  Preset  ")
 
         # --- Experiment Preset ---
         exp_frame = ttk.Labelframe(preset_content, text="Experiment Preset", padding=6)
@@ -403,33 +432,6 @@ class SettingsDialog:
             variable=self._qpcr_format_var, value="raw_ct",
         ).pack(anchor="w", padx=8)
         self._on_qpcr_ref_toggle()
-
-        # Error-bar space selector (display only; tests always run in log2 space)
-        space_row = ttk.Frame(self._qpcr_frame)
-        space_row.pack(fill="x", padx=8, pady=(4, 2))
-        ttk.Label(space_row, text="Error-bar space:").pack(side="left")
-        self._qpcr_space_labels = {
-            "Log2 (geometric mean)": "log",
-            "Linear (arithmetic mean)": "linear",
-        }
-        self._qpcr_space_rev = {v: k for k, v in self._qpcr_space_labels.items()}
-        self._qpcr_space_var = tk.StringVar(
-            value=self._qpcr_space_rev.get(
-                self.config.preset_qpcr_error_space.value, "Log2 (geometric mean)"
-            )
-        )
-        ttk.Combobox(
-            space_row,
-            textvariable=self._qpcr_space_var,
-            values=list(self._qpcr_space_labels),
-            state="readonly",
-            width=24,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Label(
-            self._qpcr_frame,
-            text="Log2: asymmetric errors rotated back from log2 space",
-            foreground="gray",
-        ).pack(anchor="w", padx=8)
 
         # -- CCK-8 sub-frame --
         self._cck8_frame = ttk.Frame(exp_frame)
@@ -561,7 +563,6 @@ class SettingsDialog:
 
         # ===================== Export tab =====================
         export_tab, export_content = self._make_scrollable(notebook)
-        notebook.add(export_tab, text="  Export  ")
 
         export_frame = ttk.Labelframe(export_content, text="Export Settings", padding=6)
         export_frame.pack(fill="x", **pad)
@@ -630,6 +631,14 @@ class SettingsDialog:
                 text="WPS：请使用 Ribbon 的 Export 按钮进行高分辨率导出。",
                 foreground="gray",
             ).pack(anchor="w", padx=8, pady=(4, 0))
+
+        # Preset first: this dialog is for a quick figure. Figure and Theme
+        # then decide the chart content and appearance. Export stays last.
+        notebook.add(preset_tab, text="  Preset  ")
+        notebook.add(general_tab, text="  Figure  ")
+        notebook.add(theme_tab, text="  Theme  ")
+        notebook.add(export_tab, text="  Export  ")
+        notebook.select(preset_tab)
 
         # --- OK / Cancel buttons ---
         btn_frame = ttk.Frame(root)
@@ -700,6 +709,28 @@ class SettingsDialog:
             self._cck8_frame.pack(fill="x", pady=4)
         elif val == "elisa":
             self._elisa_frame.pack(fill="x", pady=4)
+        self._sync_error_space(val)
+
+    def _sync_error_space(self, preset_val: str) -> None:
+        """Default to geometric space for qPCR and arithmetic space otherwise.
+
+        The choice only changes qPCR chart display. Other presets stay on the
+        arithmetic scale, so the control is disabled outside qPCR.
+        """
+        seen = getattr(self, "_error_space_seen_preset", None)
+        if seen is not None and seen != preset_val:
+            value = "log" if preset_val == "qpcr" else "linear"
+            self._error_space_var.set(self._error_space_rev[value])
+        self._error_space_seen_preset = preset_val
+        enabled = preset_val == "qpcr"
+        self._error_space_combo.configure(state="readonly" if enabled else "disabled")
+        self._error_space_hint.configure(
+            text=(
+                "SEM, SD and 95% CI are calculated in this space."
+                if enabled
+                else "Arithmetic space. Geometric display is only used for qPCR."
+            )
+        )
 
     def _on_wb_ref_toggle(self) -> None:
         if self._wb_ref_var.get():
@@ -788,7 +819,7 @@ class SettingsDialog:
         preset_input_fmt = "delta_ct"
         preset_blank = ""
         preset_fit_ic50 = True
-        preset_qpcr_error_space = QPCRErrorSpace.LOG
+        preset_qpcr_error_space = QPCRErrorSpace.LINEAR
         if exp_val == "wb":
             preset_control = self._wb_control_var.get()
             preset_has_ref = self._wb_ref_var.get()
@@ -798,7 +829,7 @@ class SettingsDialog:
             if not preset_has_ref:
                 preset_input_fmt = self._qpcr_format_var.get()
             preset_qpcr_error_space = QPCRErrorSpace(
-                self._qpcr_space_labels.get(self._qpcr_space_var.get(), "log")
+                self._error_space_labels.get(self._error_space_var.get(), "log")
             )
         elif exp_val == "cck8":
             preset_control = self._cck8_control_var.get()
