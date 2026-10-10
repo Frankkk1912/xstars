@@ -21,7 +21,21 @@ from ..plot_engine import PlotEngine, export_figure
 from ..presets import BasePreset, get_preset
 from ..presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
 from ..presets.elisa import ELISAOptions
-from ..presets.qpcr import QPCROptions, QPCRPreset
+from ..presets.qpcr import (
+    PROCESSED_DATA_SUFFIX,
+    QPCROptions,
+    QPCRPreset,
+    qpcr_stats_table,
+)
+from ..presets.qpcr import (
+    PVALUE_LABEL as PVALUE_LABEL,  # noqa: PLC0414 — re-exported for API compatibility (DC1)
+)
+from ..presets.qpcr import (
+    stats_input_frame as _preset_stats_input_frame,
+)
+from ..presets.qpcr import (
+    stats_input_frame_for_config as _config_stats_input_frame,
+)
 from ..presets.wb import WBOptions
 from ..stats_engine import StatsEngine, StatsResult
 from ..styles import get_prism_context
@@ -236,44 +250,21 @@ def _stats_input_frame(
 ) -> pd.DataFrame:
     """Return the space in which hypothesis tests should run.
 
-    For qPCR, fold-change values (2^-ΔΔCt) live on a nonlinear ratio scale,
-    so the decision tree is evaluated on the linear log2 fold-change space
-    (identically −ΔΔCt) instead — matching the Prism/ΔΔCt convention of
-    testing on ΔCt and reporting 2^-ΔΔCt.  ``log2(2^-ΔΔCt) = -ΔΔCt`` holds
-    exactly, so the log view can be recovered from the fold-change frame
-    without extra preset state.
+    Thin delegate: the qPCR log-space semantics live in
+    :mod:`xstars.presets.qpcr` (single source of truth, DC1); this wrapper
+    keeps the historical preset-based call shape used inside the pipeline.
     """
-    if isinstance(preset, QPCRPreset):
-        values = np.log2(transformed.to_numpy(dtype=float))
-        return pd.DataFrame(
-            values, index=transformed.index, columns=transformed.columns
-        )
-    return transformed
+    return _preset_stats_input_frame(transformed, preset)
 
 
 def stats_input_frame(df_wide: pd.DataFrame, config: PrismConfig) -> pd.DataFrame:
     """Public config-based variant of :func:`_stats_input_frame`.
 
-    Routes the dataframe through the same log-space gate as the private helper
-    using the preset resolved from *config*.  Safe for non-qPCR configs — the
-    isinstance gate in ``_stats_input_frame`` returns the frame unchanged.
+    Routes the dataframe through the shared qPCR log-space gate in
+    ``xstars.presets.qpcr`` using the preset resolved from *config*.
+    Safe for non-qPCR configs — the gate returns the frame unchanged.
     """
-    return _stats_input_frame(df_wide, get_preset(config.experiment_preset))
-
-
-# qPCR output-label alignment with the Excel line (PR #4): the statistics run
-# on the log2 fold-change (−ΔΔCt) space, so qPCR writeback tables say so.
-PROCESSED_DATA_SUFFIX = " (2^-ΔΔCt)"
-PVALUE_LABEL = "p-value(−ΔΔCt)"
-
-
-def qpcr_stats_table(stats_df: pd.DataFrame) -> pd.DataFrame:
-    """Rename the generic ``p-value`` column for qPCR stats tables.
-
-    Applies the R11 wording agreed for the Excel line; other columns are
-    untouched, and frames without a ``p-value`` column pass through unchanged.
-    """
-    return stats_df.rename(columns={"p-value": PVALUE_LABEL})
+    return _config_stats_input_frame(df_wide, config)
 
 
 def _qpcr_title_suffix(preset: BasePreset | None) -> str:
