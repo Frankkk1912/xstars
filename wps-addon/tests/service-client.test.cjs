@@ -258,3 +258,112 @@ test("cancel aborts an active browser request and asks the broker to stop its wo
   assert.equal(calls.filter((url) => url.endsWith("/cancel")).length, 1);
   assert.equal(client.cancelActiveRequest(), false);
 });
+
+function abortableWait(signal) {
+  return new Promise((_resolve, reject) => {
+    const fail = () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); };
+    if (signal.aborted) { fail(); } else { signal.addEventListener("abort", fail, { once: true }); }
+  });
+}
+
+test("dialog command and interaction GET run concurrently, then POST supplies selection", async () => {
+  let finishCommand;
+  const calls = [];
+  const selected = { version: "1.0", values: [["A", "B"], [1, 2]], address: "$A$1:$B$2", sheet: "Data" };
+  let first = true;
+  const api = loadClient(async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith("/command")) {
+      return new Promise((resolve) => { finishCommand = resolve; });
+    }
+    if (init.method === "POST") {
+      assert.deepEqual(JSON.parse(init.body), { id: "i".repeat(32), selection: selected });
+      finishCommand(jsonResponse({ ok: true, writebackPlan: { tables: [], images: [] } }));
+      return jsonResponse({ ok: true });
+    }
+    if (first) {
+      first = false;
+      assert.equal(typeof finishCommand, "function");
+      return jsonResponse({ ok: true, interaction: { id: "i".repeat(32), prompt: "Choose" } });
+    }
+    return abortableWait(init.signal);
+  });
+  const client = new api.WpsServiceClient({ token, port: 3892 });
+  client.baseUrl = "http://127.0.0.1:3892";
+  let prompted = 0;
+  await client.command("run", null, {}, { interactionEnabled: true }, {
+    onInteraction: () => { prompted++; return selected; },
+  });
+  assert.equal(prompted, 1);
+  assert.equal(calls[0].url.endsWith("/command"), true);
+  assert.equal(calls[1].url.endsWith("/interaction"), true);
+  assert.equal(calls[1].init.headers.Authorization, `Bearer ${token}`);
+  assert.equal(calls[1].init.signal.aborted, true);
+  assert.equal(client.activeController, null);
+});
+
+test("interaction 404 marks unavailable, cancels old job before fallback and aborts fetches", async () => {
+  const calls = [];
+  const api = loadClient(async (url, init) => {
+    calls.push(url);
+    if (url.endsWith("/command")) { return abortableWait(init.signal); }
+    if (url.endsWith("/cancel")) { return jsonResponse({ ok: true, cancelled: true }); }
+    return jsonResponse({ ok: false, error: { code: "NOT_FOUND" } }, false, 404);
+  });
+  const client = new api.WpsServiceClient({ token, port: 3892 });
+  client.baseUrl = "http://127.0.0.1:3892";
+  await assert.rejects(client.command("run", null, {}, {}, { onInteraction: () => null }),
+    (error) => error.code === "INTERACTION_UNAVAILABLE");
+  assert.equal(calls.filter((url) => url.endsWith("/cancel")).length, 1);
+  assert.equal(client.activeController, null);
+});
+
+test("cancelActiveRequest aborts command and outstanding interaction polling", async () => {
+  const signals = [];
+  const api = loadClient(async (url, init) => {
+    if (url.endsWith("/cancel")) { return jsonResponse({ ok: true, cancelled: true }); }
+    signals.push(init.signal);
+    return abortableWait(init.signal);
+  });
+  const client = new api.WpsServiceClient({ token, port: 3892 });
+  client.baseUrl = "http://127.0.0.1:3892";
+  const command = client.command("run", null, {}, {}, { onInteraction: () => null });
+  assert.equal(client.cancelActiveRequest(), true);
+  await assert.rejects(command, (error) => error.code === "CANCELLED");
+  assert.equal(signals.length, 2);
+  assert.equal(signals.every((signal) => signal.aborted), true);
+});
+
+for (const failure of ["GET network", "GET JSON", "POST error", "POST JSON", "picker"]) {
+  test(`any interaction failure cancels the active job and aborts fetches (${failure})`, async () => {
+    const calls = [];
+    const api = loadClient(async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/command")) { return abortableWait(init.signal); }
+      if (url.endsWith("/cancel")) { return jsonResponse({ ok: true, cancelled: true }); }
+      if (init.method === "GET") {
+        if (failure === "GET network") { throw new Error("offline"); }
+        if (failure === "GET JSON") { return { ok: true, status: 200, text: async () => "invalid" }; }
+        return jsonResponse({ ok: true, interaction: { id: "a".repeat(32), prompt: "Choose" } });
+      }
+      if (failure === "POST JSON") { return { ok: true, status: 200, text: async () => "invalid" }; }
+      return jsonResponse({ ok: false, error: { code: "INTERNAL_ERROR" } }, false, 500);
+    });
+    const client = new api.WpsServiceClient({ token, port: 3892 });
+    client.baseUrl = "http://127.0.0.1:3892";
+    await assert.rejects(client.command("run", null, {}, {}, { onInteraction: () => {
+      if (failure === "picker") { throw new Error("picker failed"); }
+      return { workbook: "Book1.xlsx" };
+    } }));
+    assert.equal(calls.filter((call) => call.url.endsWith("/cancel")).length, 1);
+    const activeCalls = calls.filter((call) => !call.url.endsWith("/cancel"));
+    assert.equal(activeCalls.every((call) => call.init.signal.aborted), true);
+    assert.equal(client.activeController, null);
+  });
+}
+
+test("interaction errors have specific user-facing messages", () => {
+  const api = loadClient(() => {});
+  assert.match(api.toUserMessage(new api.ServiceError("INTERACTION_UNAVAILABLE", "")), /不支持弹窗内选择数据/);
+  assert.match(api.toUserMessage(new api.ServiceError("NO_INTERACTION", "")), /选区请求已过期/);
+});

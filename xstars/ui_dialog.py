@@ -12,7 +12,10 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import filedialog
+from collections.abc import Callable
+from dataclasses import dataclass
+from tkinter import filedialog, messagebox
+from typing import Any
 
 try:
     import ttkbootstrap as ttkb
@@ -41,6 +44,24 @@ from .config import (
 )
 
 
+@dataclass
+class SelectionSummary:
+    """Host-independent summary; payload belongs to the selection provider."""
+
+    group_names: list[str]
+    group_sizes: dict[str, int]
+    label: str
+    has_label_column: bool
+    payload: Any
+
+
+def selection_banner(groups: list[str], sizes: dict[str, int], label: str | None) -> str:
+    if not groups:
+        return "No data range detected. Please select data."
+    text = "  |  ".join(f"{g}: n={sizes.get(g, 0)}" for g in groups)
+    return f"{text} · range {label}" if label else text
+
+
 class SettingsDialog:
     """Modal dialog that lets the user tweak analysis settings.
 
@@ -55,9 +76,18 @@ class SettingsDialog:
         group_sizes: dict[str, int],
         base_config: PrismConfig | None = None,
         hide_file_export: bool = False,
+        *,
+        selection_label: str | None = None,
+        request_selection: Callable[[], SelectionSummary | None] | None = None,
     ) -> None:
         self.group_names = group_names
         self.group_sizes = group_sizes
+        self.selection_label = selection_label
+        self.request_selection = request_selection
+        self.selected_payload: Any = None
+        self._closed = False
+        self._data_control_states: dict[Any, str] = {}
+        self._data_selected_tab: str | None = None
         self.hide_file_export = hide_file_export
         # Load persisted settings as defaults, then overlay any explicit base_config
         saved = PrismConfig.load()
@@ -82,6 +112,7 @@ class SettingsDialog:
             self._root.resizable(False, True)
             self._root.minsize(560, 700)
         self._build_ui()
+        self._root.protocol("WM_DELETE_WINDOW", self._on_cancel)
         self._root.grab_set()
         self._root.mainloop()
         return self.result
@@ -102,10 +133,17 @@ class SettingsDialog:
         # --- Data summary banner ---
         summary_frame = ttk.Labelframe(root, text="Detected Data", padding=8)
         summary_frame.pack(fill="x", **pad)
-        summary_text = "  |  ".join(
-            f"{g}: n={self.group_sizes.get(g, 0)}" for g in self.group_names
+        self._summary_label = ttk.Label(
+            summary_frame,
+            text=selection_banner(self.group_names, self.group_sizes, self.selection_label),
+            wraplength=540,
         )
-        ttk.Label(summary_frame, text=summary_text, wraplength=380).pack(anchor="w")
+        self._summary_label.pack(anchor="w")
+        if self.request_selection is not None:
+            self._selection_button = ttk.Button(
+                summary_frame, text="Select Data…", command=self._on_select_data,
+            )
+            self._selection_button.pack(anchor="w", pady=(4, 0))
 
         # --- Notebook (tabs) ---
         if HAS_TTKB:
@@ -172,6 +210,7 @@ class SettingsDialog:
             width=22,
         )
         self._error_space_combo.pack(side="left", padx=(8, 0))
+        self._data_control_states[self._error_space_combo] = "disabled"
         self._error_space_hint = ttk.Label(
             eb_frame,
             text="SEM, SD and 95% CI are calculated in this space.",
@@ -189,15 +228,17 @@ class SettingsDialog:
         ).pack(anchor="w", padx=8)
 
         self._paired_var = tk.BooleanVar(value=self.config.paired)
+        self._paired_check = ttk.Checkbutton(
+            opts_frame, text="Paired comparison", variable=self._paired_var
+        )
         if len(self.group_names) == 2:
-            ttk.Checkbutton(
-                opts_frame, text="Paired comparison", variable=self._paired_var
-            ).pack(anchor="w", padx=8)
+            self._paired_check.pack(anchor="w", padx=8)
 
         self._ns_var = tk.BooleanVar(value=self.config.show_ns)
-        ttk.Checkbutton(
+        self._ns_check = ttk.Checkbutton(
             opts_frame, text='Show "ns" labels', variable=self._ns_var
-        ).pack(anchor="w", padx=8)
+        )
+        self._ns_check.pack(anchor="w", padx=8)
 
 
         # -- Annotation Format --
@@ -384,11 +425,12 @@ class SettingsDialog:
         # -- WB sub-frame --
         self._wb_frame = ttk.Frame(exp_frame)
         ttk.Label(self._wb_frame, text="Control group:").pack(anchor="w", padx=8)
-        self._wb_control_var = tk.StringVar(value=self.config.preset_control_group or self.group_names[0])
-        ttk.Combobox(
+        self._wb_control_var = tk.StringVar(value=self.config.preset_control_group or (self.group_names[0] if self.group_names else ""))
+        self._wb_control_combo = ttk.Combobox(
             self._wb_frame, textvariable=self._wb_control_var,
             values=self.group_names, state="readonly", width=24,
-        ).pack(fill="x", padx=8, pady=2)
+        )
+        self._wb_control_combo.pack(fill="x", padx=8, pady=2)
         self._wb_ref_var = tk.BooleanVar(value=self.config.preset_has_reference)
         ttk.Checkbutton(
             self._wb_frame, text="Has reference protein (e.g. GAPDH)",
@@ -405,11 +447,12 @@ class SettingsDialog:
         # -- qPCR sub-frame --
         self._qpcr_frame = ttk.Frame(exp_frame)
         ttk.Label(self._qpcr_frame, text="Control group:").pack(anchor="w", padx=8)
-        self._qpcr_control_var = tk.StringVar(value=self.config.preset_control_group or self.group_names[0])
-        ttk.Combobox(
+        self._qpcr_control_var = tk.StringVar(value=self.config.preset_control_group or (self.group_names[0] if self.group_names else ""))
+        self._qpcr_control_combo = ttk.Combobox(
             self._qpcr_frame, textvariable=self._qpcr_control_var,
             values=self.group_names, state="readonly", width=24,
-        ).pack(fill="x", padx=8, pady=2)
+        )
+        self._qpcr_control_combo.pack(fill="x", padx=8, pady=2)
         self._qpcr_ref_var = tk.BooleanVar(value=self.config.preset_has_reference)
         ttk.Checkbutton(
             self._qpcr_frame, text="Has reference gene (e.g. GAPDH)",
@@ -438,20 +481,22 @@ class SettingsDialog:
         ttk.Label(self._cck8_frame, text="Control group:").pack(anchor="w", padx=8)
         cck8_ctrl_default = self.config.preset_control_group or self._guess_control()
         self._cck8_control_var = tk.StringVar(value=cck8_ctrl_default)
-        ttk.Combobox(
+        self._cck8_control_combo = ttk.Combobox(
             self._cck8_frame, textvariable=self._cck8_control_var,
             values=self.group_names, state="readonly", width=24,
-        ).pack(fill="x", padx=8, pady=2)
+        )
+        self._cck8_control_combo.pack(fill="x", padx=8, pady=2)
         ttk.Label(self._cck8_frame, text="Blank group:").pack(anchor="w", padx=8)
         blank_choices = ["(none)"] + list(self.group_names)
         cck8_blank_default = self.config.preset_blank_group or self._guess_blank()
         self._cck8_blank_var = tk.StringVar(
             value=cck8_blank_default or "(none)"
         )
-        ttk.Combobox(
+        self._cck8_blank_combo = ttk.Combobox(
             self._cck8_frame, textvariable=self._cck8_blank_var,
             values=blank_choices, state="readonly", width=24,
-        ).pack(fill="x", padx=8, pady=2)
+        )
+        self._cck8_blank_combo.pack(fill="x", padx=8, pady=2)
         self._cck8_ic50_var = tk.BooleanVar(value=self.config.preset_fit_ic50)
         ttk.Checkbutton(
             self._cck8_frame, text="Fit IC50 (4PL curve)",
@@ -628,7 +673,7 @@ class SettingsDialog:
             self._export_check.configure(state="disabled")
             ttk.Label(
                 export_frame,
-                text="WPS：请使用 Ribbon 的 Export 按钮进行高分辨率导出。",
+                text="WPS: please use the Ribbon Export button for high-resolution export.",
                 foreground="gray",
             ).pack(anchor="w", padx=8, pady=(4, 0))
 
@@ -639,26 +684,106 @@ class SettingsDialog:
         notebook.add(theme_tab, text="  Theme  ")
         notebook.add(export_tab, text="  Export  ")
         notebook.select(preset_tab)
+        self._notebook = notebook
+        self._data_tabs = (preset_tab, general_tab, theme_tab, export_tab)
 
         # --- OK / Cancel buttons ---
         btn_frame = ttk.Frame(root)
         btn_frame.pack(fill="x", padx=10, pady=(5, 10))
         if HAS_TTKB:
-            ttkb.Button(
+            self._ok_button = ttkb.Button(
                 btn_frame, text="OK", command=self._on_ok,
                 bootstyle="success", width=10,
-            ).pack(side="right", padx=4)
+            )
+            self._ok_button.pack(side="right", padx=4)
             ttkb.Button(
                 btn_frame, text="Cancel", command=self._on_cancel,
                 bootstyle="secondary", width=10,
             ).pack(side="right", padx=4)
         else:
-            ttk.Button(btn_frame, text="OK", command=self._on_ok).pack(
-                side="right", padx=4
-            )
+            self._ok_button = ttk.Button(btn_frame, text="OK", command=self._on_ok)
+            self._ok_button.pack(side="right", padx=4)
             ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(
                 side="right", padx=4
             )
+
+        self._set_data_enabled()
+
+    def _set_data_enabled(self) -> None:
+        selected = self._notebook.select()
+        if selected and selected in {str(tab) for tab in self._data_tabs}:
+            self._data_selected_tab = selected
+        state = "normal" if self.group_names else "disabled"
+        for tab in self._data_tabs:
+            self._notebook.tab(tab, state=state)
+        # Restore only data-dependent controls, preserving preset/export limits.
+        for control, enabled_state in self._data_control_states.items():
+            control.configure(state=enabled_state if self.group_names else "disabled")
+        self._ok_button.configure(state=state)
+        if self.group_names:
+            # Disabling every tab clears selection; macOS ttk also needs the
+            # visible tab reselected after unlocking to redraw its contents.
+            self._notebook.select(self._data_selected_tab or str(self._data_tabs[0]))
+        self._notebook.update_idletasks()
+
+    def _on_select_data(self) -> None:
+        if self.request_selection is None:
+            return
+        self._selection_button.configure(state="disabled")
+        self._ok_button.configure(state="disabled")
+        try:
+            summary = self.request_selection()
+            if summary is not None:
+                self._apply_data(summary)
+            else:
+                self._summary_label.configure(text=selection_banner(
+                    self.group_names, self.group_sizes, self.selection_label
+                ) + " (selection cancelled or timed out; you can retry)")
+        except Exception as exc:
+            if not self._closed:
+                messagebox.showerror("Invalid Range", str(exc), parent=self._root)
+        finally:
+            if not self._closed:
+                self._selection_button.configure(state="normal")
+                self._set_data_enabled()
+
+    def _apply_data(self, summary: SelectionSummary) -> None:
+        had_data = bool(self.group_names)
+        self.group_names = summary.group_names
+        self.group_sizes = summary.group_sizes
+        self.selection_label = summary.label
+        self.selected_payload = summary.payload
+        self._summary_label.configure(text=selection_banner(
+            self.group_names, self.group_sizes, self.selection_label
+        ))
+        for name in ("wb", "qpcr", "cck8"):
+            getattr(self, f"_{name}_control_combo").configure(values=self.group_names)
+            control_var = getattr(self, f"_{name}_control_var")
+            if control_var.get() not in self.group_names:
+                control_var.set(self._guess_control())
+        blank_choices = ["(none)"] + self.group_names
+        self._cck8_blank_combo.configure(values=blank_choices)
+        if self._cck8_blank_var.get() not in blank_choices:
+            self._cck8_blank_var.set(self._guess_blank() or "(none)")
+        comparison_choices = ["All pairwise"] + self.group_names
+        current_control = self._control_combo.get()
+        self._control_combo.configure(values=comparison_choices)
+        if current_control not in comparison_choices:
+            self._control_combo.set("All pairwise")
+        if not had_data and summary.has_label_column:
+            self._wb_ref_var.set(True)
+            self._qpcr_ref_var.set(True)
+        if summary.has_label_column and self._exp_var.get() == "None":
+            self._exp_var.set(self._exp_label_map["wb"])
+        self._on_wb_ref_toggle()
+        self._on_qpcr_ref_toggle()
+        if len(self.group_names) == 2:
+            self._paired_check.pack(anchor="w", padx=8, before=self._ns_check)
+        else:
+            self._paired_check.pack_forget()
+            self._paired_var.set(False)
+        self._on_preset_change()
+        self._set_data_enabled()
 
     def _make_scrollable(self, parent):
         """Create a scrollable frame inside parent.
@@ -688,7 +813,7 @@ class SettingsDialog:
             "blank", "blk", "bg", "background",
         ):
             return self.group_names[1]
-        return self.group_names[0]
+        return self.group_names[0] if self.group_names else ""
 
     def _guess_blank(self) -> str:
         for g in self.group_names:
@@ -723,7 +848,9 @@ class SettingsDialog:
             self._error_space_var.set(self._error_space_rev[value])
         self._error_space_seen_preset = preset_val
         enabled = preset_val == "qpcr"
-        self._error_space_combo.configure(state="readonly" if enabled else "disabled")
+        state = "readonly" if enabled else "disabled"
+        self._data_control_states[self._error_space_combo] = state
+        self._error_space_combo.configure(state=state if self.group_names else "disabled")
         self._error_space_hint.configure(
             text=(
                 "SEM, SD and 95% CI are calculated in this space."
@@ -805,6 +932,8 @@ class SettingsDialog:
         self._output_data_var.set(defaults.output_data)
 
     def _on_ok(self) -> None:
+        if not self.group_names:
+            return
         control_sel = self._control_combo.get()
         control_group = None if control_sel == "All pairwise" else control_sel
 
@@ -892,6 +1021,7 @@ class SettingsDialog:
         self._root.destroy()
 
     def _on_cancel(self) -> None:
+        self._closed = True
         self.result = None
         self._root.destroy()
 

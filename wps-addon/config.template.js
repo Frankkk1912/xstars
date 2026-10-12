@@ -2,6 +2,8 @@
   root.XSTARS_WPS_CONFIG = Object.freeze({
     port: Number("<port>"),
     token: "<token>",
+    // Provisional safe fallback; final production default awaits Windows/WPS spike.
+    inDialogSelection: false,
     healthRetries: 3,
     retryIntervalMs: 150,
   });

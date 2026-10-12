@@ -21,6 +21,8 @@
     INVALID_REQUEST: "XSTARS 请求格式无效。",
     INVALID_COMMAND: "当前 XSTARS 命令不可用。",
     INVALID_SELECTION: "选区无效，请选择含表头的单个连续数据区域。",
+    INTERACTION_UNAVAILABLE: "当前服务不支持弹窗内选择数据，请升级服务或重试预选模式。",
+    NO_INTERACTION: "选区请求已过期或任务已结束，请重新选择数据。",
     PAYLOAD_TOO_LARGE: "选区过大，请将数据限制在 200 行、200 列以内。",
     INVALID_PATH: "XSTARS 返回了不允许的文件路径。",
     CANCELLED: "操作已取消。",
@@ -183,6 +185,47 @@
       return true;
     }
 
+    async pollInteractions(onInteraction, signal) {
+      const headers = {
+        Authorization: `Bearer ${this.config.token}`,
+        "Content-Type": "application/json",
+      };
+      while (!signal.aborted) {
+        const { response, payload } = await readJsonResponse(
+          this.fetchImpl, `${this.baseUrl}/interaction`,
+          { method: "GET", headers, signal },
+        );
+        if (response.status === 404) {
+          throw new ServiceError("INTERACTION_UNAVAILABLE", "selection interaction unavailable", 404);
+        }
+        if (!response.ok || !payload || payload.ok !== true) {
+          throw responseError(response, payload);
+        }
+        const interaction = payload.interaction;
+        if (!interaction) {
+          continue;
+        }
+        const selection = await onInteraction(interaction);
+        if (signal.aborted) {
+          throw new ServiceError("CANCELLED", "request aborted");
+        }
+        const submitted = await readJsonResponse(
+          this.fetchImpl, `${this.baseUrl}/interaction`,
+          { method: "POST", headers, signal,
+            body: JSON.stringify({ id: interaction.id, selection: selection || null }) },
+        );
+        // Timeout/cancellation may invalidate an interaction while the picker is open.
+        if (!submitted.response.ok && submitted.payload.error &&
+            submitted.payload.error.code === "NO_INTERACTION") {
+          continue;
+        }
+        if (!submitted.response.ok || !submitted.payload || submitted.payload.ok !== true) {
+          throw responseError(submitted.response, submitted.payload);
+        }
+      }
+      throw new ServiceError("CANCELLED", "request aborted");
+    }
+
     async command(command, selection, config, extra, options) {
       if (!this.baseUrl) {
         await this.discoverService();
@@ -198,6 +241,12 @@
         }
       }
       this.activeController = controller;
+      const pollController = new AbortController();
+      const abortPoll = () => pollController.abort();
+      controller.signal.addEventListener("abort", abortPoll, { once: true });
+      if (controller.signal.aborted) { abortPoll(); }
+      let pollPromise;
+      let pollFailed = false;
       try {
         const body = {
           version: SCHEMA_VERSION,
@@ -208,6 +257,9 @@
           body.selection = selection;
         }
         const additional = extra || {};
+        if (typeof additional.interactionEnabled === "boolean") {
+          body.interactionEnabled = additional.interactionEnabled;
+        }
         if (additional.sampleSelection) {
           body.sampleSelection = additional.sampleSelection;
         }
@@ -220,7 +272,7 @@
         if (additional.export) {
           body.export = additional.export;
         }
-        const { response, payload } = await readJsonResponse(
+        const commandPromise = readJsonResponse(
           this.fetchImpl,
           `${this.baseUrl}/command`,
           {
@@ -233,6 +285,14 @@
             signal: controller.signal,
           },
         );
+        if (options && typeof options.onInteraction === "function") {
+          pollPromise = this.pollInteractions(options.onInteraction, pollController.signal).catch((error) => {
+            pollFailed = true;
+            throw error;
+          });
+        }
+        const { response, payload } = await (pollPromise
+          ? Promise.race([commandPromise, pollPromise]) : commandPromise);
         if (!response.ok || !payload || payload.ok !== true) {
           throw responseError(response, payload);
         }
@@ -240,7 +300,20 @@
           throw new ServiceError("INVALID_RESPONSE", "writebackPlan is missing", response.status);
         }
         return payload;
+      } catch (error) {
+        if (pollFailed && !controller.signal.aborted) {
+          // A failed picker/poll must not leave a modal job holding the broker lock.
+          await this.cancelCurrentJob().catch(() => {});
+          controller.abort();
+        }
+        throw error;
       } finally {
+        pollController.abort();
+        if (pollPromise) {
+          // The loop may still be unwinding an aborted fetch; consume its rejection.
+          void pollPromise.catch(() => {});
+        }
+        controller.signal.removeEventListener("abort", abortPoll);
         if (externalSignal) {
           externalSignal.removeEventListener("abort", abortFromExternal);
         }

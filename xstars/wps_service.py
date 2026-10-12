@@ -248,6 +248,9 @@ class SubprocessJobRunner:
         self.jobs_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         _restrict_permissions(self.jobs_root, 0o700)
         cleanup_stale_jobs(self.jobs_root)
+        self._interaction_condition = threading.Condition()
+        self._pending_interaction: tuple[Path, dict[str, Any]] | None = None
+        self.interaction_poll_seconds = 30.0
         self._active_lock = threading.Lock()
         self._job_generation = 0
         self._active_generation: int | None = None
@@ -255,6 +258,55 @@ class SubprocessJobRunner:
         self._active_process: Any | None = None
         self._active_cancel_path: Path | None = None
         self._pending_cancel_generation: int | None = None
+
+    def poll_interaction(self) -> dict[str, Any] | None:
+        deadline = time.monotonic() + min(30.0, self.interaction_poll_seconds)
+        with self._interaction_condition:
+            while self._pending_interaction is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._interaction_condition.wait(remaining)
+            directory, request = self._pending_interaction
+            if (directory / "cancel").exists() or not (directory / "interaction_request.json").exists():
+                self._pending_interaction = None
+                return None
+            return dict(request)
+
+    def submit_interaction(self, interaction_id: str, selection: dict[str, Any] | None) -> bool:
+        with self._interaction_condition:
+            pending = self._pending_interaction
+            if pending is None:
+                return False
+            directory, request = pending
+            if (request["id"] != interaction_id or (directory / "cancel").exists()
+                    or not (directory / "interaction_request.json").exists()):
+                return False
+            _atomic_write_request(directory / "interaction_response.json",
+                                  {"id": interaction_id, "selection": selection})
+            self._pending_interaction = None
+            self._interaction_condition.notify_all()
+            return True
+
+    def _monitor_interaction(self, directory: Path) -> None:
+        request_path = directory / "interaction_request.json"
+        with self._interaction_condition:
+            if not request_path.exists() or (directory / "cancel").exists():
+                self._pending_interaction = None
+                return
+            # A submitted request remains on disk until the worker consumes it.
+            if (directory / "interaction_response.json").exists():
+                return
+            try:
+                request = json.loads(request_path.read_text(encoding="utf-8"))
+                if (set(request) != {"id", "prompt"} or
+                        not isinstance(request["id"], str) or len(request["id"]) != 32 or
+                        not isinstance(request["prompt"], str) or len(request["prompt"]) > 500):
+                    return
+            except (OSError, ValueError, TypeError):
+                return
+            self._pending_interaction = (directory, request)
+            self._interaction_condition.notify_all()
 
     def cancel_current(self, *, grace: float = 3.0) -> bool:
         """Signal and, after a short grace, terminate the sole active worker."""
@@ -347,7 +399,19 @@ class SubprocessJobRunner:
             self._pending_cancel_generation = None
         timed_out = False
         try:
-            return_code = process.wait(timeout=self.timeout)
+            deadline = time.monotonic() + self.timeout
+            while True:
+                self._monitor_interaction(job_directory)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(worker_command, self.timeout)
+                step = min(0.2, remaining)
+                try:
+                    return_code = process.wait(timeout=step)
+                    break
+                except subprocess.TimeoutExpired:
+                    if step == remaining:
+                        raise
         except subprocess.TimeoutExpired:
             timed_out = True
             cancel_path.touch()
@@ -381,6 +445,11 @@ class SubprocessJobRunner:
             result["jobId"] = job_id
             return result
         finally:
+            with self._interaction_condition:
+                self._pending_interaction = None
+                self._interaction_condition.notify_all()
+            (job_directory / "interaction_request.json").unlink(missing_ok=True)
+            (job_directory / "interaction_response.json").unlink(missing_ok=True)
             with self._active_lock:
                 if self._active_generation == generation:
                     self._active_state = "completed"
@@ -483,16 +552,16 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
             return
-        if self.path not in {"/command", "/cancel"}:
+        if self.path not in {"/command", "/cancel", "/interaction"}:
             self._send_error(404, "NOT_FOUND", "endpoint not found")
             return
         requested_method = self.headers.get("Access-Control-Request-Method", "POST")
-        if requested_method != "POST":
+        if requested_method not in ({"GET", "POST"} if self.path == "/interaction" else {"POST"}):
             self._send_error(405, "METHOD_NOT_ALLOWED", "only POST is allowed")
             return
         self.send_response(204)
         self._cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Content-Length", "0")
@@ -500,6 +569,16 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
+            return
+        if self.path == "/interaction":
+            if not self._authenticated():
+                self._send_error(401, "UNAUTHORIZED", "a valid bearer token is required")
+                return
+            poll = getattr(self._wps_server.runner, "poll_interaction", None)
+            if not callable(poll):
+                self._send_error(404, "NOT_FOUND", "interaction is unavailable")
+                return
+            self._send_json(200, {"ok": True, "interaction": poll()})
             return
         if self.path != "/health":
             self._send_error(404, "NOT_FOUND", "endpoint not found")
@@ -553,6 +632,7 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             return None
         allowed_fields = {
             "version",
+            "interactionEnabled",
             "command",
             "selection",
             "sampleSelection",
@@ -577,6 +657,12 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             self._send_error(
                 400, ErrorCode.INVALID_COMMAND, "command is not whitelisted"
             )
+            return None
+        if "interactionEnabled" in payload and (
+            command not in {Command.RUN, Command.WB, Command.QPCR, Command.CCK8}
+            or not isinstance(payload["interactionEnabled"], bool)
+        ):
+            self._send_error(400, ErrorCode.INVALID_REQUEST, "invalid interaction capability")
             return None
         config = payload.get("config", {})
         if not isinstance(config, dict):
@@ -605,7 +691,16 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             "command": command.value,
             "config": config,
         }
-        if command in _SELECTION_COMMANDS:
+        if command in {Command.RUN, Command.WB, Command.QPCR, Command.CCK8}:
+            normalized["interactionEnabled"] = payload.get("interactionEnabled", False)
+            if "selection" not in payload and not normalized["interactionEnabled"]:
+                self._send_error(400, ErrorCode.INVALID_SELECTION,
+                                 "selection is required when interaction is disabled")
+                return None
+        if command in _SELECTION_COMMANDS and not (
+            command in {Command.RUN, Command.WB, Command.QPCR, Command.CCK8}
+            and "selection" not in payload
+        ):
             selection_data = payload.get("selection")
             if not isinstance(selection_data, Mapping):
                 self._send_error(
@@ -691,14 +786,46 @@ class WPSRequestHandler(BaseHTTPRequestHandler):
             normalized["export"] = export_request
         return normalized
 
+    def _read_interaction(self) -> tuple[str, dict[str, Any] | None] | None:
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+            if length < 0 or length > self._wps_server.max_request_bytes:
+                raise ValueError("invalid interaction body length")
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict) or set(payload) != {"id", "selection"}:
+                raise ValueError("interaction requires only id and selection")
+            if not isinstance(payload["id"], str) or len(payload["id"]) != 32:
+                raise ValueError("invalid interaction id")
+            selection = payload["selection"]
+            if selection is not None:
+                if not isinstance(selection, Mapping):
+                    raise ValueError("selection must be an object or null")
+                if not {"values", "address", "sheet"}.issubset(selection):
+                    raise ValueError("selection requires values, address and sheet")
+                selection = SelectionPayload.from_dict(selection).to_dict()
+            return payload["id"], selection
+        except (ValueError, TypeError, UnicodeError, ContractError) as exc:
+            self._send_error(400, ErrorCode.INVALID_SELECTION, str(exc))
+            return None
+
     def do_POST(self) -> None:  # noqa: N802
         if not self._boundary_or_error():
             return
-        if self.path not in {"/command", "/cancel"}:
+        if self.path not in {"/command", "/cancel", "/interaction"}:
             self._send_error(404, "NOT_FOUND", "endpoint not found")
             return
         if not self._authenticated():
             self._send_error(401, "UNAUTHORIZED", "a valid bearer token is required")
+            return
+        if self.path == "/interaction":
+            response = self._read_interaction()
+            if response is None:
+                return
+            submit = getattr(self._wps_server.runner, "submit_interaction", None)
+            if not callable(submit) or not submit(*response):
+                self._send_error(409, "NO_INTERACTION", "interaction expired or job ended")
+                return
+            self._send_json(200, {"ok": True})
             return
         if self.path == "/cancel":
             cancel = getattr(self._wps_server.runner, "cancel_current", None)
