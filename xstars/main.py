@@ -21,7 +21,7 @@ from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
 from .plot_engine import PlotEngine, export_figure
 from .stats_engine import StatsEngine
-from .ui_dialog import SettingsDialog, TransformOnlyDialog
+from .ui_dialog import SettingsDialog, SelectionSummary, TransformOnlyDialog
 
 xw = import_module("xlwings")
 _application_analysis = import_module(".application.analysis", __package__)
@@ -307,7 +307,8 @@ def _friendly_message(message: str) -> str:
     return message
 
 
-def _show_error(book: Any, message: str, *, is_unexpected: bool = False) -> None:
+def _show_error(book: Any, message: str, *, is_unexpected: bool = False,
+                parent_root=None) -> None:
     """Display a user-friendly error message via a Tkinter popup and Excel status bar."""
     friendly = _friendly_message(message)
     if is_unexpected:
@@ -326,13 +327,14 @@ def _show_error(book: Any, message: str, *, is_unexpected: bool = False) -> None
         import tkinter as tk
         from tkinter import messagebox
 
-        root = tk.Tk()
-        root.withdraw()
-        # Bring the message box to the front when the window manager supports it.
-        try:
-            root.attributes("-topmost", True)
-        except Exception as exc:
-            _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
+        root = parent_root if parent_root is not None else tk.Tk()
+        if parent_root is None:
+            root.withdraw()
+            # Only change window hints on the root owned by this helper.
+            try:
+                root.attributes("-topmost", True)
+            except Exception as exc:
+                _ARTIFACT_LOGGER.debug("Tk topmost hint unavailable: %s", exc)
         messagebox.showerror("Excel-Prism", friendly, parent=root)
     except Exception:
         # Last resort: try VBA MsgBox
@@ -345,7 +347,7 @@ def _show_error(book: Any, message: str, *, is_unexpected: bool = False) -> None
         except Exception as exc:
             _ARTIFACT_LOGGER.debug("VBA MsgBox fallback failed: %s", exc)
     finally:
-        if root is not None:
+        if root is not None and parent_root is None:
             try:
                 root.destroy()
             except Exception as exc:
@@ -451,14 +453,21 @@ def _run_elisa_impl(book: Any) -> None:
     matplotlib.use("Agg")
     plt = import_module("matplotlib.pyplot")
 
-    sel = _entry_selection_or_error(book)
+    raw_frames: dict[int, pd.DataFrame] = {}
+    sel = _read_valid_selection(book)
+    if sel is None:
+        sel = _prompt_data_range(book, book.sheets.active, "XSTARS ELISA — Standards",
+                                 "Select standard data (first row concentration headers):",
+                                 raw_frames=raw_frames)
     if sel is None:
         return
     sheet = sel.sheet
     handler = DataHandler()
 
     # 1. Read current selection as standard curve data (columns = concentrations)
-    raw = sel.options(pd.DataFrame, header=1, index=False).value
+    raw = raw_frames.pop(id(sel), None)
+    if raw is None:
+        raw = cast(pd.DataFrame, sel.options(pd.DataFrame, header=1, index=False).value)
     raw.columns = [str(c).strip() for c in raw.columns]
     handler._selection_ref = sel
 
@@ -597,40 +606,166 @@ def _has_label_column(df: pd.DataFrame) -> bool:
     return bool(numeric.isna().sum() > len(first_col) // 2)
 
 
+def _blank_cell(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _range_has_data(selection, raw: pd.DataFrame | None = None) -> bool:
+    row_count = selection.rows.count
+    if isinstance(row_count, int) and row_count <= 1:
+        return False
+    if raw is not None:
+        if raw.empty:
+            return False
+        cells = list(raw.columns) + raw.to_numpy().ravel().tolist()
+        return not all(_blank_cell(cell) or pd.isna(cell) for cell in cells)
+    # A nonblank first cell proves this is not an all-empty matrix, without
+    # a full host read. Blank first cells still require the exact full check.
+    first = selection[0, 0].value
+    if isinstance(first, (str, int, float, bool)) and not _blank_cell(first):
+        return True
+    value = selection.value
+    if isinstance(value, list):
+        cells = [cell for row in value for cell in (row if isinstance(row, list) else [row])]
+        return not all(_blank_cell(cell) for cell in cells)
+    return not _blank_cell(value)
+
+
+def _read_valid_selection(book: Any):
+    """Treat shapes, missing selections and disjoint ranges as no data range."""
+    try:
+        selection = book.selection
+        if selection is None or not callable(getattr(selection, "options", None)):
+            return None
+        if not isinstance(selection.row, int) or not isinstance(selection.column, int):
+            return None
+        if not _range_has_data(selection):
+            return None
+        areas = getattr(getattr(selection, "api", None), "Areas", None)
+        count = getattr(areas, "Count", 1)
+        if isinstance(count, int) and count != 1:
+            return None
+        return selection
+    except (AttributeError, TypeError) as exc:
+        _ARTIFACT_LOGGER.debug("Selection is not a worksheet range: %s", exc)
+        return None
+    except Exception:
+        _ARTIFACT_LOGGER.warning("Failed to read worksheet selection", exc_info=True)
+        raise
+
+
+# B1 remains provisional until Windows spike; B2 can be selected locally.
+_WINDOWS_SELECTION_MODE = "inputbox"
+
+
+def _prompt_range_windows(book: Any, sheet, title: str, message: str, parent_root=None):
+    while True:
+        try:
+            result = book.app.api.InputBox(message, title, Type=8)
+        except Exception:
+            return None
+        if result is None or result is False:
+            return None
+        try:
+            count = getattr(getattr(result, "Areas", None), "Count", 1)
+            parent_name = getattr(getattr(result, "Worksheet", None), "Name", sheet.name)
+            if (isinstance(count, int) and count != 1) or (
+                isinstance(parent_name, str) and parent_name != sheet.name
+            ):
+                raise ValueError("Choose one continuous range on the active worksheet.")
+            address = result.Address
+            if not isinstance(address, str) or not _A1_RANGE_RE.fullmatch(address):
+                raise ValueError("Enter an A1-style range on the active worksheet.")
+            rng = sheet.range(address)
+            if not _range_has_data(rng):
+                raise ValueError("Select more than one row with nonempty data and headers.")
+            return rng
+        except Exception as exc:
+            _show_error(book, f"Invalid Range: {exc} Please try again.", parent_root=parent_root)
+
+
+def _prompt_data_range(book: Any, sheet, title: str, message: str, parent_root=None,
+                       raw_frames: dict[int, pd.DataFrame] | None = None):
+    if sys.platform == "darwin" or _WINDOWS_SELECTION_MODE == "a1":
+        picked = _prompt_range_macos(book, sheet, title, message, parent_root)
+        if picked is not None and raw_frames is not None:
+            raw_frames[id(picked[0])] = picked[1]
+        return picked[0] if picked is not None else None
+    if parent_root is not None:
+        parent_root.grab_release()
+    try:
+        return _prompt_range_windows(book, sheet, title, message, parent_root=parent_root)
+    finally:
+        if parent_root is not None:
+            parent_root.grab_set()
+            parent_root.lift()
+
+
+def _analysis_settings(book: Any, preset_type: ExperimentPreset | None = None):
+    handler = DataHandler()
+    selection = _read_valid_selection(book)
+    base_config = PrismConfig.load()
+    if preset_type is not None:
+        base_config.experiment_preset = preset_type
+
+    raw_frames: dict[int, pd.DataFrame] = {}
+
+    def read_summary(sel):
+        labels, frame = _read_selection_auto(handler, book, selection=sel,
+                                             raw=raw_frames.pop(id(sel), None))
+        handler.validate(frame)
+        groups = handler.group_names(frame)
+        label = f"{sel.sheet.name}!{sel.address}"
+        return SelectionSummary(groups, handler.group_sizes(frame), label,
+                                labels is not None, (labels, frame, sel.sheet, sel))
+
+    initial = read_summary(selection) if selection is not None else None
+    if initial is not None:
+        groups = initial.group_names
+        if not base_config.preset_control_group and groups:
+            base_config.preset_control_group = _guess_control(groups)
+        if preset_type == ExperimentPreset.CCK8 and not base_config.preset_blank_group:
+            base_config.preset_blank_group = _guess_blank(groups)
+        if initial.has_label_column:
+            if preset_type is None:
+                base_config.experiment_preset = ExperimentPreset.WB
+            if base_config.experiment_preset in (ExperimentPreset.WB, ExperimentPreset.QPCR):
+                base_config.preset_has_reference = True
+
+    def provider():
+        while True:
+            sel = _prompt_data_range(
+                book, book.sheets.active, "XSTARS — Select Data",
+                "Select a continuous data range with headers (A1:C6):",
+                parent_root=dialog._root, raw_frames=raw_frames,
+            )
+            if sel is None:
+                return None
+            try:
+                return read_summary(sel)
+            except (ValueError, TypeError) as exc:
+                _show_error(book, str(exc), parent_root=dialog._root)
+
+    dialog = SettingsDialog(
+        initial.group_names if initial else [], initial.group_sizes if initial else {},
+        base_config=base_config, selection_label=initial.label if initial else None,
+        request_selection=provider,
+    )
+    dialog.selected_payload = initial.payload if initial else None
+    config = dialog.show()
+    if config is None or dialog.selected_payload is None:
+        return None
+    labels, frame, sheet, sel = dialog.selected_payload
+    handler._selection_ref = sel
+    return config, handler, labels, frame, sheet, sel
+
+
 def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
     """Like _run_impl but pre-selects the experiment preset."""
-    sel = _entry_selection_or_error(book)
-    if sel is None:
+    chosen = _analysis_settings(book, preset_type)
+    if chosen is None:
         return
-    sheet = sel.sheet
-    handler = DataHandler()
-
-    # Auto-detect label column for all presets (strip non-numeric first column)
-    wb_labels, df_wide = _read_selection_auto(handler, book)
-
-    handler.validate(df_wide)
-
-    groups = handler.group_names(df_wide)
-    sizes = handler.group_sizes(df_wide)
-
-    # Pre-configure the preset
-    base_config = PrismConfig.load()
-    base_config.experiment_preset = preset_type
-    if not base_config.preset_control_group and groups:
-        base_config.preset_control_group = _guess_control(groups)
-    if preset_type == ExperimentPreset.CCK8 and not base_config.preset_blank_group:
-        base_config.preset_blank_group = _guess_blank(groups)
-    # If labels detected, default to has_reference=True for WB and qPCR
-    if wb_labels is not None and preset_type in (
-        ExperimentPreset.WB,
-        ExperimentPreset.QPCR,
-    ):
-        base_config.preset_has_reference = True
-
-    dialog = SettingsDialog(groups, sizes, base_config=base_config)
-    config = dialog.show()
-    if config is None:
-        return
+    config, handler, wb_labels, df_wide, sheet, sel = chosen
 
     # WB labeled reference mode: multi-target branch
     if (
@@ -651,7 +786,6 @@ def _run_preset_impl(book: Any, preset_type: ExperimentPreset) -> None:
         return
 
     result = _application_analysis.analyze_dataframe(df_wide, config)
-    sel = book.selection
     _application_analysis.build_analysis_writeback_plan(
         result,
         config,
@@ -682,7 +816,7 @@ def _run_wb_labeled(
     if config.y_label == "Value":
         config.y_label = preset.default_y_label
 
-    sel = book.selection
+    sel = handler._selection_ref
     insert_cell = handler.get_insertion_cell(sheet)
     base_left = sheet.range(insert_cell).left
     current_top = sheet.range(insert_cell).top
@@ -775,7 +909,7 @@ def _run_qpcr_labeled(
     if config.y_label == "Value":
         config.y_label = preset.default_y_label
 
-    sel = book.selection
+    sel = handler._selection_ref
     insert_cell = handler.get_insertion_cell(sheet)
     base_left = sheet.range(insert_cell).left
     current_top = sheet.range(insert_cell).top
@@ -854,7 +988,8 @@ def _run_qpcr_labeled(
     )
 
 
-def _read_selection_auto(handler: DataHandler, book: Any):
+def _read_selection_auto(handler: DataHandler, book: Any, *, selection=None,
+                         raw: pd.DataFrame | None = None):
     """Read Excel selection, auto-detecting a label column in the first column.
 
     Returns (wb_labels, df_wide) where wb_labels is a Series of string labels
@@ -862,8 +997,9 @@ def _read_selection_auto(handler: DataHandler, book: Any):
     """
     import pandas as pd
 
-    sel = book.selection
-    raw = sel.options(pd.DataFrame, header=1, index=False).value
+    sel = selection if selection is not None else book.selection
+    if raw is None:
+        raw = cast(pd.DataFrame, sel.options(pd.DataFrame, header=1, index=False).value)
     raw.columns = [str(c).strip() for c in raw.columns]
     handler._selection_ref = sel
 
@@ -882,30 +1018,10 @@ def _read_selection_auto(handler: DataHandler, book: Any):
 
 
 def _run_impl(book: Any) -> None:
-    sel = _entry_selection_or_error(book)
-    if sel is None:
+    chosen = _analysis_settings(book)
+    if chosen is None:
         return
-    sheet = sel.sheet
-
-    # 1. Read data (auto-detect label column)
-    handler = DataHandler()
-    wb_labels, df_wide = _read_selection_auto(handler, book)
-    handler.validate(df_wide)
-
-    groups = handler.group_names(df_wide)
-    sizes = handler.group_sizes(df_wide)
-
-    # 2. Settings dialog
-    base_config = PrismConfig.load()
-    if wb_labels is not None:
-        base_config.experiment_preset = ExperimentPreset.WB
-        base_config.preset_has_reference = True
-        if not base_config.preset_control_group and groups:
-            base_config.preset_control_group = _guess_control(groups)
-    dialog = SettingsDialog(groups, sizes, base_config=base_config)
-    config = dialog.show()
-    if config is None:
-        return  # user cancelled
+    config, handler, wb_labels, df_wide, sheet, sel = chosen
 
     # WB labeled reference mode
     if (
@@ -917,7 +1033,6 @@ def _run_impl(book: Any) -> None:
         return
 
     result = _application_analysis.analyze_dataframe(df_wide, config)
-    sel = book.selection
     _application_analysis.build_analysis_writeback_plan(
         result,
         config,
@@ -931,7 +1046,11 @@ def _run_impl(book: Any) -> None:
 
 
 def _run_quick_impl(book: Any) -> None:
-    sel = _entry_selection_or_error(book)
+    raw_frames: dict[int, pd.DataFrame] = {}
+    sel = _read_valid_selection(book)
+    if sel is None:
+        sel = _prompt_data_range(book, book.sheets.active, "XSTARS Quick Run",
+                                 "Select data with headers (A1:C6):", raw_frames=raw_frames)
     if sel is None:
         return
     sheet = sel.sheet
@@ -939,11 +1058,11 @@ def _run_quick_impl(book: Any) -> None:
     config = PrismConfig.load()
 
     handler = DataHandler(config)
-    _labels, df_wide = _read_selection_auto(handler, book)
+    _labels, df_wide = _read_selection_auto(handler, book, selection=sel,
+                                           raw=raw_frames.pop(id(sel), None))
     handler.validate(df_wide)
 
     result = _application_analysis.analyze_dataframe(df_wide, config)
-    sel = book.selection
     _application_analysis.build_analysis_writeback_plan(
         result,
         config,
@@ -1758,7 +1877,7 @@ def _ensure_export_extension(path: str, ext: str) -> str:
     return path
 
 
-def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
+def _prompt_range_macos(book: Any, sheet, title: str, message: str, parent_root=None):
     """Prompt for an active-sheet A1 range without using Excel COM APIs."""
     root = None
     try:
@@ -1766,8 +1885,9 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
         from tkinter import messagebox, simpledialog
 
         with _silenced_stderr_fd():
-            root = tk.Tk()
-            root.withdraw()
+            root = parent_root if parent_root is not None else tk.Tk()
+            if parent_root is None:
+                root.withdraw()
             try:
                 root.attributes("-topmost", True)
             except Exception as exc:
@@ -1775,9 +1895,7 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
 
             while True:
                 address = simpledialog.askstring(
-                    "Standard Curve — Select Sample Data",
-                    "Enter the sample OD data range on the active sheet "
-                    "(with headers), for example A1:C6:",
+                    title, message,
                     parent=root,
                 )
                 if address is None:
@@ -1795,13 +1913,13 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
                 try:
                     rng = sheet.range(address)
                     raw = rng.options(pd.DataFrame, header=1, index=False).value
+                    if not _range_has_data(rng, raw):
+                        raise ValueError("Select more than one row with nonempty data and headers.")
                     raw.columns = [str(c).strip() for c in raw.columns]
-                    for col in raw.columns:
-                        raw[col] = pd.to_numeric(raw[col], errors="coerce")
-                    return raw.dropna(how="all").reset_index(drop=True)
+                    return rng, raw
                 except Exception as exc:
                     _ARTIFACT_LOGGER.info(
-                        "Invalid macOS sample range %r: %s", address, exc
+                        "Invalid macOS range %r: %s", address, exc
                     )
                     messagebox.showerror(
                         "Invalid Range",
@@ -1810,19 +1928,37 @@ def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
                         parent=root,
                     )
     except Exception as exc:
-        _ARTIFACT_LOGGER.warning("macOS sample-range dialog failed: %s", exc)
+        _ARTIFACT_LOGGER.warning("macOS range dialog failed: %s", exc)
         _show_error(
             book,
-            "Could not open the sample range dialog. Please check your Python "
+            "Could not open the range dialog. Please check your Python "
             "tkinter installation and try again.",
+            parent_root=parent_root,
         )
         return None
     finally:
-        if root is not None:
+        if parent_root is not None:
+            parent_root.grab_set()
+            parent_root.lift()
+        if root is not None and parent_root is None:
             try:
                 root.destroy()
             except Exception as exc:
-                _ARTIFACT_LOGGER.debug("Tk sample dialog cleanup failed: %s", exc)
+                _ARTIFACT_LOGGER.debug("Tk range dialog cleanup failed: %s", exc)
+
+
+def _select_sample_data_macos(book: Any, sheet) -> pd.DataFrame | None:
+    picked = _prompt_range_macos(
+        book, sheet, "Standard Curve — Select Sample Data",
+        "Enter the sample OD data range on the active sheet "
+        "(with headers), for example A1:C6:",
+    )
+    if picked is None:
+        return None
+    _rng, raw = picked
+    for col in raw.columns:
+        raw[col] = pd.to_numeric(raw[col], errors="coerce")
+    return raw.dropna(how="all").reset_index(drop=True)
 
 
 def _select_sample_data(book: Any, sheet) -> pd.DataFrame | None:

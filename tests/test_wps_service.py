@@ -1221,3 +1221,166 @@ def test_real_subprocess_quick_job_returns_result_and_cleans_ipc_files(tmp_path)
     assert not (job_directory / "request.json").exists()
     assert not (job_directory / "result.json").exists()
     assert not (job_directory / "cancel").exists()
+
+
+def test_dialog_commands_allow_missing_selection_but_not_quick_or_null():
+    runner = FakeRunner()
+    with _running_server(runner) as service:
+        for command in ("run", "run_wb", "run_qpcr", "run_cck8"):
+            payload = _payload(command)
+            payload.pop("selection")
+            payload["interactionEnabled"] = True
+            status, _, _ = _request(service, "/command", method="POST", payload=payload, headers=_auth())
+            assert status == 200
+            assert runner.calls[-1]["interactionEnabled"] is True
+        for payload in ({**_payload("run"), "selection": None},
+                        {"version": SCHEMA_VERSION, "command": "run_quick"}):
+            status, _, _ = _request(service, "/command", method="POST", payload=payload, headers=_auth())
+            assert status == 400
+
+
+def test_interaction_auth_contract_stale_id_and_file_delivery(tmp_path):
+    worker = import_module("xstars.application.worker")
+    directory = tmp_path / "job"
+    directory.mkdir()
+    runner = SubprocessJobRunner(tmp_path / "jobs")
+    runner.interaction_poll_seconds = .01
+    with _running_server(runner) as service:
+        status, _, _ = _request(service, "/interaction")
+        assert status == 401
+        status, _, data = _request(service, "/interaction", headers=_auth())
+        assert status == 200 and data["interaction"] is None
+        interaction_id = worker.request_interaction(directory, "Choose data")
+        runner._monitor_interaction(directory)
+        status, _, data = _request(service, "/interaction", headers=_auth())
+        assert data["interaction"]["id"] == interaction_id
+        for selection in ("invalid", {**_payload()["selection"], "values": [[1]] * 201},
+                          {key: value for key, value in _payload()["selection"].items() if key != "sheet"}):
+            status, _, _ = _request(service, "/interaction", method="POST",
+                                    payload={"id": interaction_id, "selection": selection}, headers=_auth())
+            assert status == 400
+        status, _, _ = _request(service, "/interaction", method="POST",
+                                payload={"id": "0" * 32, "selection": None}, headers=_auth())
+        assert status == 409
+        status, _, _ = _request(service, "/interaction", method="POST",
+                                payload={"id": interaction_id, "selection": {**_payload()["selection"], "workbook": "Book1.xlsx"}}, headers=_auth())
+        assert status == 200
+        picked = worker.wait_interaction(directory, interaction_id, directory / "cancel")
+        assert picked.address == "$A$1:$B$4"
+        status, _, _ = _request(service, "/interaction", method="POST",
+                                payload={"id": interaction_id, "selection": None}, headers=_auth())
+        assert status == 409
+
+
+def test_interaction_is_available_while_command_blocks_and_cancel_invalidates(tmp_path):
+    worker = import_module("xstars.application.worker")
+    class InteractiveRunner(BlockingRunner):
+        def __init__(self):
+            super().__init__()
+            self.ipc = SubprocessJobRunner(tmp_path / "jobs")
+            self.ipc.interaction_poll_seconds = .01
+        def poll_interaction(self):
+            return self.ipc.poll_interaction()
+        def submit_interaction(self, interaction_id, selection):
+            return self.ipc.submit_interaction(interaction_id, selection)
+
+    runner = InteractiveRunner()
+    directory = tmp_path / "job"
+    directory.mkdir()
+    with _running_server(runner) as service:
+        results = []
+        thread = threading.Thread(target=lambda: results.append(
+            _request(service, "/command", method="POST", payload={"version": SCHEMA_VERSION, "command": "run", "interactionEnabled": True}, headers=_auth())))
+        thread.start()
+        assert runner.entered.wait(2)
+        interaction_id = worker.request_interaction(directory, "Choose")
+        runner.ipc._monitor_interaction(directory)
+        status, _, data = _request(service, "/interaction", headers=_auth())
+        assert status == 200 and data["interaction"]["id"] == interaction_id
+        (directory / "cancel").touch()
+        status, _, _ = _request(service, "/interaction", method="POST",
+                                payload={"id": interaction_id, "selection": None}, headers=_auth())
+        assert status == 409
+        runner.release.set()
+        thread.join(3)
+        assert results[0][0] == 200
+
+
+def test_missing_selection_with_disabled_interaction_is_rejected_before_job():
+    runner = FakeRunner()
+    with _running_server(runner) as service:
+        for command in ("run", "run_wb", "run_qpcr", "run_cck8"):
+            for flag in (False, None):
+                payload = _payload(command)
+                payload.pop("selection")
+                if flag is not None:
+                    payload["interactionEnabled"] = flag
+                status, _, data = _request(service, "/command", method="POST", payload=payload, headers=_auth())
+                assert status == 400
+                assert data["error"]["code"] == "INVALID_SELECTION"
+        assert runner.calls == []
+
+
+def test_interaction_capability_is_boolean_and_only_for_dialog_commands():
+    with _running_server() as service:
+        for command, flag in (("run", "yes"), ("run_quick", True)):
+            status, _, _ = _request(service, "/command", method="POST",
+                payload={**_payload(command), "interactionEnabled": flag}, headers=_auth())
+            assert status == 400
+        status, _, _ = _request(service, "/interaction", method="OPTIONS",
+            headers={"Origin": "null", "Access-Control-Request-Method": "GET"})
+        assert status == 204
+        status, _, _ = _request(service, "/interaction", headers=_auth("https://evil.example"))
+        assert status == 403
+
+
+def test_no_selection_http_file_handshake_real_worker_analysis_e2e(tmp_path):
+    """Fake JS/GUI, real broker monitoring, worker file protocol and analysis."""
+    script = tmp_path / "interactive_worker.py"
+    script.write_text('''
+import sys
+from pathlib import Path
+from xstars.application.worker import execute_request, run_worker, request_interaction, wait_interaction
+
+def execute(request, directory):
+    def choose(selection, config):
+        assert selection is None
+        interaction_id = request_interaction(directory, "Choose data")
+        payload = wait_interaction(directory, interaction_id, directory / "cancel", timeout=5)
+        return config, payload
+    return execute_request(request, directory, dialog_config=choose)
+
+raise SystemExit(run_worker(sys.argv[1], sys.argv[2], executor=execute))
+''', encoding="utf-8")
+    runner = SubprocessJobRunner(tmp_path / "jobs", timeout=15)
+    real_popen = subprocess.Popen
+
+    def launch(command, **kwargs):
+        request = command[command.index("--request") + 1]
+        result = command[command.index("--result") + 1]
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+        return real_popen([runner.python_executable, str(script), request, result], env=environment, **kwargs)
+
+    with mock.patch.object(_service.subprocess, "Popen", side_effect=launch), _running_server(runner) as service:
+        results = []
+        command = _payload("run")
+        command.pop("selection")
+        command["interactionEnabled"] = True
+        client = threading.Thread(target=lambda: results.append(
+            _request(service, "/command", method="POST", payload=command, headers=_auth())))
+        client.start()
+        status, _, interaction = _request(service, "/interaction", headers=_auth())
+        assert status == 200 and interaction["interaction"] is not None
+        status, _, _ = _request(service, "/interaction", method="POST",
+            payload={"id": interaction["interaction"]["id"], "selection": _payload()["selection"]}, headers=_auth())
+        assert status == 200
+        client.join(5)
+        assert not client.is_alive()
+        assert results[0][0] == 200
+        plan = results[0][2]["writebackPlan"]
+        assert plan["tables"][0]["startCell"] == "A7"
+        assert plan["images"][0]["anchorCell"] == "A10"
+        assert Path(plan["images"][0]["artifact"]["path"]).is_file()
+        assert runner._pending_interaction is None
+        assert not list((tmp_path / "jobs").glob("*/interaction_*.json"))

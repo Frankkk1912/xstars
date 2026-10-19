@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import secrets
 import threading
+import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import fields
@@ -171,25 +174,126 @@ def _require_main_thread_dialog() -> None:
         raise RuntimeError("Tkinter dialogs must run on the worker main thread")
 
 
+def request_interaction(job_directory: Path, prompt: str) -> str:
+    """Publish a single, generation-tagged selection request in the job directory."""
+    interaction_id = secrets.token_hex(16)
+    (job_directory / "interaction_response.json").unlink(missing_ok=True)
+    atomic_write_json(job_directory / "interaction_request.json",
+                      {"id": interaction_id, "prompt": prompt})
+    return interaction_id
+
+
+def wait_interaction(job_directory: Path, interaction_id: str, cancel_path: Path,
+                     timeout: float = 120.0) -> SelectionPayload | None:
+    deadline = time.monotonic() + timeout
+    response_path = job_directory / "interaction_response.json"
+    try:
+        while True:
+            _check_cancelled(cancel_path)
+            if response_path.exists():
+                response = json.loads(response_path.read_text(encoding="utf-8"))
+                if response.get("id") == interaction_id:
+                    raw = response.get("selection")
+                    return SelectionPayload.from_dict(raw) if raw is not None else None
+            # Check the response once more on the iteration after the deadline.
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.05)
+    finally:
+        (job_directory / "interaction_request.json").unlink(missing_ok=True)
+        response_path.unlink(missing_ok=True)
+
+
+def _wait_dialog_interaction(root, job_directory: Path, cancel_path: Path):
+    """Only file I/O runs off-thread; Tk polling and completion stay on the main thread."""
+    import tkinter as tk
+    interaction_id = request_interaction(job_directory, "请选择含表头的连续数据区域")
+    results: queue.Queue = queue.Queue()
+    done = tk.BooleanVar(master=root, value=False)
+    poll_id = None
+
+    def wait():
+        try:
+            results.put(wait_interaction(job_directory, interaction_id, cancel_path))
+        except Exception as exc:
+            results.put(exc)
+
+    def poll():
+        nonlocal poll_id
+        poll_id = None
+        if not results.empty():
+            done.set(True)
+        else:
+            poll_id = root.after(50, poll)
+
+    def destroyed(event):
+        if event.widget is root:
+            if poll_id is not None:
+                root.after_cancel(poll_id)
+            cancel_path.touch()
+            done.set(True)
+
+    binding = root.bind("<Destroy>", destroyed, add="+")
+    threading.Thread(target=wait, daemon=True).start()
+    poll_id = root.after(0, poll)
+    try:
+        root.wait_variable(done)
+        _check_cancelled(cancel_path)
+        result = results.get()
+        if isinstance(result, Exception):
+            raise result
+        return result
+    finally:
+        try:
+            if poll_id is not None:
+                root.after_cancel(poll_id)
+            root.unbind("<Destroy>", binding)
+        except tk.TclError:
+            pass  # The root may already have been destroyed by dialog Cancel.
+
+
 def _dialog_config(
-    selection: SelectionPayload, base_config: PrismConfig
-) -> PrismConfig:
-    """Show general WPS settings without the unsupported file-export controls."""
+    selection: SelectionPayload | None, base_config: PrismConfig, *,
+    job_directory: Path | None = None, cancel_path: Path | None = None,
+    interaction_enabled: bool = True,
+) -> PrismConfig | tuple[PrismConfig, SelectionPayload]:
+    """Show settings and return the exact payload used by the analysis."""
     _require_main_thread_dialog()
-    _labels, frame = split_selection_labels(selection)
-    from ..ui_dialog import SettingsDialog  # GUI import remains worker-only.
+    from ..ui_dialog import SelectionSummary, SettingsDialog  # GUI stays worker-only.
+
+    def summary(payload):
+        labels, frame = split_selection_labels(payload)
+        DataHandler().validate(frame)
+        return SelectionSummary(DataHandler.group_names(frame),
+                                DataHandler.group_sizes(frame),
+                                f"{payload.sheet}!{payload.address}",
+                                labels is not None, payload)
+
+    initial = summary(selection) if selection is not None else None
+
+    def provider():
+        if job_directory is None or cancel_path is None:
+            return None
+        try:
+            payload = _wait_dialog_interaction(dialog._root, job_directory, cancel_path)
+        except WorkerCancelled:
+            if not dialog._closed:
+                dialog._root.after_idle(dialog._on_cancel)
+            return None
+        return summary(payload) if payload is not None else None
 
     dialog = SettingsDialog(
-        DataHandler.group_names(frame),
-        DataHandler.group_sizes(frame),
-        base_config=base_config,
-        hide_file_export=True,
+        initial.group_names if initial else [], initial.group_sizes if initial else {},
+        base_config=base_config, hide_file_export=True,
+        selection_label=initial.label if initial else None,
+        request_selection=provider if interaction_enabled or selection is None else None,
     )
+    dialog.selected_payload = selection
     chosen = dialog.show()
-    if chosen is None:
+    if chosen is None or dialog.selected_payload is None:
         raise WorkerCancelled("settings dialog cancelled")
     chosen.export_path = ""
-    return chosen
+    return (chosen, dialog.selected_payload) if job_directory is not None else chosen
 
 
 def _transform_dialog(
@@ -532,7 +636,7 @@ def execute_request(
     job_directory: Path,
     *,
     dialog_config: Callable[
-        [SelectionPayload, PrismConfig], PrismConfig
+        [SelectionPayload | None, PrismConfig], PrismConfig | tuple[PrismConfig, SelectionPayload]
     ] = _dialog_config,
     transform_dialog: Callable[
         [SelectionPayload, PrismConfig], tuple[PrismConfig, TransformOptions]
@@ -634,20 +738,40 @@ def execute_request(
             ErrorCode.INVALID_COMMAND, f"command is not implemented: {command.value}"
         )
     selection_data = request.get("selection")
-    if not isinstance(selection_data, Mapping):
-        raise ContractError(ErrorCode.INVALID_SELECTION, "selection must be an object")
-    selection = SelectionPayload.from_dict(selection_data)
-    _configure_preset(command, selection, config)
+    if selection_data is None and command in _DIALOG_COMMANDS and "selection" not in request:
+        selection = None
+        if command in _PRESET_COMMANDS:
+            config.experiment_preset = _PRESET_COMMANDS[command]
+    else:
+        if not isinstance(selection_data, Mapping):
+            raise ContractError(ErrorCode.INVALID_SELECTION, "selection must be an object")
+        selection = SelectionPayload.from_dict(selection_data)
+        _configure_preset(command, selection, config)
     transform_options = TransformOptions()
     selected_fit = None
     back_calculate_samples = False
     show_fit_curve = False
     stage = request.get("stage")
     if command in _DIALOG_COMMANDS:
-        config = dialog_config(selection, config)
+        if dialog_config is _dialog_config:
+            chosen = _dialog_config(selection, config, job_directory=job_directory,
+                                    cancel_path=cancel_path,
+                                    interaction_enabled=request.get("interactionEnabled", False))
+        else:
+            chosen = dialog_config(selection, config)
+        if isinstance(chosen, tuple):
+            config, selection = chosen
+        else:
+            config = chosen
+        if selection is None:
+            raise WorkerCancelled("no data selection")
     elif command is Command.TRANSFORM_ONLY:
+        if selection is None:
+            raise WorkerCancelled("no data selection")
         config, transform_options = transform_dialog(selection, config)
     elif command is Command.STANDARD_CURVE and stage == "configure":
+        if selection is None:
+            raise WorkerCancelled("no data selection")
         selected_fit, back_calculate_samples = standard_dialog(selection, config)
         _check_cancelled(cancel_path)
         continuation = StandardCurveOptions(
@@ -669,9 +793,15 @@ def execute_request(
         config.preset_elisa_fit_method = curve_options.fit_method
         back_calculate_samples = curve_options.back_calculate
     elif command is Command.STANDARD_CURVE:
+        if selection is None:
+            raise WorkerCancelled("no data selection")
         selected_fit, back_calculate_samples = standard_dialog(selection, config)
     elif command is Command.ELISA:
+        if selection is None:
+            raise WorkerCancelled("no data selection")
         config, selected_fit, show_fit_curve = elisa_dialog(selection, config)
+    if selection is None:
+        raise WorkerCancelled("no data selection")
     if selected_fit is not None and isinstance(
         getattr(selected_fit, "method", None), str
     ):

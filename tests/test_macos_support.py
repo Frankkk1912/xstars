@@ -197,19 +197,19 @@ def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
 
 
 def test_darwin_run_entries_fail_friendly_when_picture_selected(tmp_path):
-    """DC2 residual R1: with a picture selected (Mac selection=None), the
-    Run-style entries must show a friendly error instead of an
-    AttributeError traceback."""
+    """Transform is unchanged; Quick now offers a minimal selection prompt."""
     book, _ = _darwin_book(tmp_path, [])
-    book.selection = None  # a clicked picture makes Mac selection return None
-
-    for entry in (main._run_quick_impl, main._run_transform_only_impl):
-        with (
-            patch("xstars.main.sys.platform", "darwin"),
-            patch("xstars.main._show_error") as show_error,
-        ):
-            entry(book)
-        assert show_error.called, f"{entry.__name__} did not surface a friendly error"
+    book.selection = None
+    with (
+        patch("xstars.main.sys.platform", "darwin"),
+        patch("xstars.main._prompt_data_range", return_value=None) as prompt,
+        patch("xstars.main._show_error") as show_error,
+    ):
+        main._run_quick_impl(book)
+        prompt.assert_called_once()
+        show_error.assert_not_called()
+        main._run_transform_only_impl(book)
+        assert show_error.called
         assert "data range" in show_error.call_args.args[1]
 
 
@@ -1326,3 +1326,46 @@ def test_run_export_entrypoint_still_uses_book_caller_and_impl():
     caller.assert_called_once_with()
     implementation.assert_called_once_with(book)
     show_error.assert_not_called()
+
+
+def test_prompt_range_macos_embedded_parent_preserves_labels_and_restores_grab(monkeypatch):
+    root = MagicMock()
+    tk = _install_tk_modules(monkeypatch, root, answers=["A1:C4"])
+    raw = pd.DataFrame({"Protein": ["Target", "Ref", "Ref"], "Control": [1, 2, 3], "Drug": [2, 3, 4]})
+    rng = MagicMock()
+    rng.options.return_value.value = raw
+    sheet = MagicMock()
+    sheet.range.return_value = rng
+    picked = main._prompt_range_macos(SimpleNamespace(), sheet, "Select", "Enter A1", parent_root=root)
+    assert picked is not None
+    assert picked[0] is rng
+    assert picked[1]["Protein"].tolist() == ["Target", "Ref", "Ref"]
+    tk.Tk.assert_not_called()
+    root.destroy.assert_not_called()
+    root.grab_set.assert_called_once()
+    root.lift.assert_called_once()
+
+
+def test_show_error_reuses_existing_parent_without_creating_or_destroying_root(monkeypatch):
+    root = MagicMock()
+    tk = _install_tk_modules(monkeypatch, root)
+    book = SimpleNamespace(app=MagicMock())
+    main._show_error(book, "invalid single column", parent_root=root)
+    tk.Tk.assert_not_called()
+    tk.messagebox.showerror.assert_called_once_with("Excel-Prism", "invalid single column", parent=root)
+    root.destroy.assert_not_called()
+    root.attributes.assert_not_called()
+
+
+@pytest.mark.parametrize("raw", [pd.DataFrame(columns=["A", "B"]),
+                                   pd.DataFrame({None: [None, None], " ": [None, None]})])
+def test_prompt_range_macos_retries_single_row_or_all_empty_data(monkeypatch, raw):
+    root = MagicMock()
+    tk = _install_tk_modules(monkeypatch, root, answers=["A1:B3", None])
+    rng = MagicMock()
+    rng.options.return_value.value = raw
+    sheet = MagicMock()
+    sheet.range.return_value = rng
+    assert main._prompt_range_macos(SimpleNamespace(), sheet, "Select", "Data", root) is None
+    tk.messagebox.showerror.assert_called_once()
+    assert tk.messagebox.showerror.call_args.kwargs["parent"] is root

@@ -48,6 +48,7 @@ function makeHost() {
   const pictures = [];
   const sheet = {
     Name: "Data",
+    Parent: { Name: "Book1.xlsx" },
     Range: (address) => {
       if (address === "D5") {
         return { Left: 400, Top: 200 };
@@ -144,6 +145,7 @@ test("Run and Quick Run serialize selection, call the broker, and execute Writeb
     ],
     address: "$A$1:$B$3",
     sheet: "Data",
+    workbook: "Book1.xlsx",
   });
 });
 
@@ -516,7 +518,7 @@ test("selection and broker errors are shown without triggering real dialogs", as
   );
 
   const selectionResult = await unavailable.context.window.XstarsWpsAddin.runCommand(
-    "run_quick",
+    "run_transform_only",
   );
 
   assert.match(selectionResult.message, /单个连续选区/);
@@ -546,3 +548,186 @@ test("selection and broker errors are shown without triggering real dialogs", as
   ]);
   assert.match(busyHost.application.StatusBar, /正在处理另一个任务/);
 });
+
+function emptyPlanResponse() {
+  return jsonResponse({ ok: true, writebackPlan: { version: "1.0", tables: [], images: [], statusMessage: "done" } });
+}
+
+for (const command of ["run", "run_quick", "run_wb", "run_qpcr", "run_cck8"]) {
+  test(`${command} missing selection uses provisional preprompt and cancellation is clean`, async () => {
+    const host = makeHost();
+    const picked = host.application.Selection;
+    host.application.Selection = null;
+    let prompts = 0;
+    host.application.InputBox = () => { prompts++; return picked; };
+    let body;
+    const { context, alerts } = loadAddin((url, init) => {
+      if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+      body = JSON.parse(init.body);
+      return emptyPlanResponse();
+    }, host.application);
+    const result = await context.window.XstarsWpsAddin.runCommand(command);
+    assert.equal(result.response.ok, true);
+    assert.equal(prompts, 1);
+    assert.equal(body.selection.address, "$A$1:$B$3");
+    assert.deepEqual(alerts, []);
+    host.application.InputBox = () => false;
+    const cancel = await context.window.XstarsWpsAddin.runCommand(command);
+    assert.equal(cancel.cancelled, true);
+    assert.deepEqual(alerts, []);
+  });
+}
+
+for (const preselected of [false, true]) {
+  test(`interactive mode supplements/reselects data (preselected=${preselected})`, async () => {
+    const host = makeHost();
+    const picked = host.application.Selection;
+    if (!preselected) { host.application.Selection = null; }
+    let finishCommand;
+    let first = true;
+    let prompts = 0;
+    host.application.InputBox = () => { prompts++; return picked; };
+    const { context, alerts, fetchCalls } = loadAddin(async (url, init) => {
+      if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+      if (url.endsWith("/command")) { return new Promise((resolve) => { finishCommand = resolve; }); }
+      if (init.method === "POST") {
+        assert.equal(JSON.parse(init.body).selection.sheet, "Data");
+        assert.equal(JSON.parse(init.body).selection.workbook, "Book1.xlsx");
+        finishCommand(emptyPlanResponse());
+        return jsonResponse({ ok: true });
+      }
+      if (first) {
+        first = false;
+        return jsonResponse({ ok: true, interaction: { id: "a".repeat(32), prompt: "Select" } });
+      }
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => { const error = new Error("abort"); error.name = "AbortError"; reject(error); });
+      });
+    }, host.application);
+    context.window.XSTARS_WPS_CONFIG = { ...context.window.XSTARS_WPS_CONFIG, inDialogSelection: true };
+    const result = await context.window.XstarsWpsAddin.runCommand("run");
+    assert.equal(result.selection.address, "$A$1:$B$3");
+    assert.equal(prompts, 1);
+    const body = JSON.parse(fetchCalls.find((call) => call.url.endsWith("/command")).init.body);
+    assert.equal(body.interactionEnabled, true);
+    assert.equal(Boolean(body.selection), preselected);
+    assert.deepEqual(alerts, []);
+  });
+}
+
+test("old broker INVALID_SELECTION falls back to promptRange and retries with data", async () => {
+  const host = makeHost();
+  const picked = host.application.Selection;
+  host.application.Selection = null;
+  host.application.InputBox = () => picked;
+  const bodies = [];
+  const { context } = loadAddin(async (url, init) => {
+    if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+    if (url.endsWith("/interaction")) {
+      return new Promise((_resolve, reject) => { init.signal.addEventListener("abort", () => {
+        const error = new Error("abort"); error.name = "AbortError"; reject(error);
+      }); });
+    }
+    bodies.push(JSON.parse(init.body));
+    if (bodies.length === 1) { return jsonResponse({ ok: false, error: { code: "INVALID_SELECTION" } }, false, 400); }
+    return emptyPlanResponse();
+  }, host.application);
+  context.window.XSTARS_WPS_CONFIG = { ...context.window.XSTARS_WPS_CONFIG, inDialogSelection: true };
+  const result = await context.window.XstarsWpsAddin.runCommand("run");
+  assert.equal(result.response.ok, true);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].selection, undefined);
+  assert.equal(bodies[1].selection.sheet, "Data");
+  assert.equal("interactionEnabled" in bodies[1], false);
+});
+
+test("ELISA with no current selection still uses both standard and sample prompts", async () => {
+  const host = makeHost();
+  const picked = host.application.Selection;
+  host.application.Selection = null;
+  let prompts = 0;
+  host.application.InputBox = () => { prompts++; return picked; };
+  let body;
+  const { context, alerts } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+    body = JSON.parse(init.body);
+    return emptyPlanResponse();
+  }, host.application);
+  const result = await context.window.XstarsWpsAddin.runElisa();
+  assert.equal(result.response.ok, true);
+  assert.equal(prompts, 2);
+  assert.equal(body.selection.sheet, "Data");
+  assert.equal(body.sampleSelection.sheet, "Data");
+  assert.deepEqual(alerts, []);
+});
+
+for (const values of [[["A", "B"]], [[null, null], [null, ""]]]) {
+  test("single row or all blank current cells trigger minimal supplementation", async () => {
+    const host = makeHost();
+    const picked = { ...host.application.Selection };
+    host.application.Selection = { ...picked, Value2: values, Rows: { Count: values.length } };
+    let prompts = 0;
+    host.application.InputBox = () => { prompts++; return picked; };
+    const { context } = loadAddin((url) => {
+      if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+      return emptyPlanResponse();
+    }, host.application);
+    const result = await context.window.XstarsWpsAddin.runCommand("run_quick");
+    assert.equal(result.response.ok, true);
+    assert.equal(prompts, 1);
+  });
+}
+
+for (const interactive of [false, true]) {
+  test(`supplemented data restores workbook writeback guard (interactive=${interactive})`, async () => {
+    const host = makeHost();
+    const picked = host.application.Selection;
+    host.application.Selection = null;
+    host.application.InputBox = () => picked;
+    let finishCommand;
+    let first = true;
+    const plan = { version: "1.0", tables: [{ startCell: "D2", values: [[1]] }], images: [] };
+    const { context, alerts } = loadAddin(async (url, init) => {
+      if (url.endsWith("/health")) { return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 }); }
+      if (url.endsWith("/command")) {
+        if (interactive) { return new Promise((resolve) => { finishCommand = resolve; }); }
+        host.application.ActiveSheet.Parent.Name = "Other.xlsx";
+        return jsonResponse({ ok: true, writebackPlan: plan });
+      }
+      if (init.method === "POST") {
+        const body = JSON.parse(init.body);
+        assert.equal(body.selection.workbook, "Book1.xlsx");
+        host.application.ActiveSheet.Parent.Name = "Other.xlsx";
+        finishCommand(jsonResponse({ ok: true, writebackPlan: plan }));
+        return jsonResponse({ ok: true });
+      }
+      if (first) {
+        first = false;
+        return jsonResponse({ ok: true, interaction: { id: "a".repeat(32) } });
+      }
+      return new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => {
+        const error = new Error("abort"); error.name = "AbortError"; reject(error);
+      }));
+    }, host.application);
+    context.window.XSTARS_WPS_CONFIG.inDialogSelection = interactive;
+    const result = await context.window.XstarsWpsAddin.runCommand("run");
+    assert.match(result.message, /活动工作簿已切换/);
+    assert.equal(host.tableWrites.length, 0);
+    assert.equal(alerts.length, 1);
+  });
+}
+
+for (const command of ["run", "run_quick"]) {
+  for (const values of [[["A", "B"]], [[null, ""], [null, " "]]]) {
+    test(`${command} rejects prompted single row or all-empty data before sending a job`, async () => {
+      const host = makeHost();
+      const picked = { ...host.application.Selection, Value2: values, Rows: { Count: values.length } };
+      host.application.Selection = null;
+      host.application.InputBox = () => picked;
+      const { context, fetchCalls } = loadAddin(() => { throw new Error("must not call broker"); }, host.application);
+      const result = await context.window.XstarsWpsAddin.runCommand(command);
+      assert.equal(result.error.code, "INVALID_SELECTION");
+      assert.equal(fetchCalls.length, 0);
+    });
+  }
+}

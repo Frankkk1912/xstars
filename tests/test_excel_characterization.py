@@ -220,3 +220,300 @@ def test_reset_settings_deletes_file_and_uses_excel_message_box(tmp_path: Path):
     book.app.macro.return_value.assert_called_once_with(
         "Settings have been reset to defaults.", 64, "Excel-Prism"
     )
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_run_without_selection_selects_data_and_anchors_same_range(platform):
+    df = pd.DataFrame({"Control": [1., 1.1, .9], "Drug": [2., 2.1, 1.9]})
+    book, sheet, ranges = _book_with_selection(df, row=8, col=4)
+    selected = book.selection
+    book.selection = None
+
+    def show(dialog):
+        dialog._root = MagicMock()
+        summary = dialog.request_selection()
+        dialog.selected_payload = summary.payload
+        assert summary.group_sizes["Control"] == 3
+        # A subsequent host click must not change the writeback anchor.
+        book.selection = MagicMock(row=100, column=20)
+        return PrismConfig(output_stats=True)
+
+    with (
+        patch.object(main.sys, "platform", platform),
+        patch.object(main, "_prompt_data_range", return_value=selected),
+        patch.object(main.SettingsDialog, "show", show),
+    ):
+        main._run_impl(book)
+    assert (14, 4) in ranges
+    sheet.pictures.add.assert_called_once()
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_run_without_selection_cancel_is_clean(platform):
+    book, sheet, _ = _book_with_selection(pd.DataFrame({"A": [1, 2], "B": [2, 3]}))
+    book.selection = None
+
+    def cancel(dialog):
+        dialog._root = MagicMock()
+        assert dialog.request_selection() is None
+        return None
+
+    with (
+        patch.object(main.sys, "platform", platform),
+        patch.object(main, "_prompt_data_range", return_value=None),
+        patch.object(main.SettingsDialog, "show", cancel),
+        patch.object(main, "_show_error") as error,
+    ):
+        main._run_impl(book)
+    sheet.pictures.add.assert_not_called()
+    error.assert_not_called()
+
+
+def test_run_selected_range_is_reported_to_dialog():
+    book, _, _ = _book_with_selection(pd.DataFrame({"A": [1, 2, 3], "B": [2, 3, 4]}))
+    book.selection.sheet.name = "Data"
+    book.selection.address = "$C$5:$D$8"
+
+    def cancel(dialog):
+        assert dialog.selection_label == "Data!$C$5:$D$8"
+        assert dialog.group_sizes == {"A": 3, "B": 3}
+        return None
+
+    with patch.object(main.SettingsDialog, "show", cancel):
+        main._run_impl(book)
+
+
+def test_windows_prompt_rejects_multiarea_crosssheet_and_invalid_address_then_retries():
+    book = MagicMock()
+    sheet = MagicMock(name="sheet")
+    sheet.name = "Data"
+    from types import SimpleNamespace as NS
+    book.app.api.InputBox.side_effect = [
+        NS(Areas=NS(Count=2), Worksheet=NS(Name="Data"), Address="$A$1"),
+        NS(Areas=NS(Count=1), Worksheet=NS(Name="Other"), Address="$A$1"),
+        NS(Areas=NS(Count=1), Worksheet=NS(Name="Data"), Address="named_range"),
+        NS(Areas=NS(Count=1), Worksheet=NS(Name="Data"), Address="$A$1:$B$4"),
+    ]
+    with patch.object(main, "_show_error") as error:
+        assert main._prompt_range_windows(book, sheet, "Select", "Data") is sheet.range.return_value
+    assert error.call_count == 3
+    assert error.call_args.kwargs["parent_root"] is None
+    assert "Invalid Range" in error.call_args.args[1]
+    sheet.range.assert_called_once_with("$A$1:$B$4")
+
+
+def test_read_valid_selection_rejects_shapes_and_disjoint_ranges():
+    from types import SimpleNamespace as NS
+    assert main._read_valid_selection(NS(selection=None)) is None
+    assert main._read_valid_selection(NS(selection=NS())) is None
+    book, _, _ = _book_with_selection(pd.DataFrame({"A": [1, 2]}))
+    book.selection.api.Areas.Count = 2
+    assert main._read_valid_selection(book) is None
+    book.selection.api.Areas.Count = 1
+    assert main._read_valid_selection(book) is book.selection
+
+
+def test_read_valid_selection_uses_cheap_first_cell_probe():
+    book, _, _ = _book_with_selection(pd.DataFrame({"A": [1, 2]}))
+    book.selection[0, 0].value = "A"
+    # The expensive full matrix property must not be read on the common path.
+    from unittest.mock import PropertyMock
+    with patch.object(type(book.selection), "value", new_callable=PropertyMock, create=True,
+                      side_effect=AssertionError("full matrix read")):
+        assert main._read_valid_selection(book) is book.selection
+
+
+def test_read_valid_selection_logs_and_propagates_host_failure(caplog):
+    from unittest.mock import PropertyMock
+    book = MagicMock()
+    with (
+        patch.object(type(book), "selection", new_callable=PropertyMock, create=True,
+                     side_effect=RuntimeError("AppleScript failed")),
+        pytest.raises(RuntimeError, match="AppleScript failed"),
+    ):
+        main._read_valid_selection(book)
+    assert "Failed to read worksheet selection" in caplog.text
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_analysis_provider_validation_error_is_parented_and_retries(platform):
+    book, _, _ = _book_with_selection(pd.DataFrame({"Only": [1, 2, 3]}))
+    selected = book.selection
+    book.selection = None
+    root = MagicMock()
+
+    def show(dialog):
+        dialog._root = root
+        assert dialog.request_selection() is None
+        return None
+
+    with (
+        patch.object(main.sys, "platform", platform),
+        patch.object(main, "_prompt_data_range", side_effect=[selected, None]),
+        patch.object(main.SettingsDialog, "show", show),
+        patch.object(main, "_show_error") as error,
+    ):
+        main._analysis_settings(book)
+    assert error.call_args.kwargs["parent_root"] is root
+
+
+def test_analysis_provider_reuses_macos_prompt_frame_without_second_host_read():
+    frame = pd.DataFrame({"Control": [1, 2, 3], "Drug": [2, 3, 4]})
+    book, _, _ = _book_with_selection(frame)
+    selected = book.selection
+    book.selection = None
+
+    def show(dialog):
+        dialog._root = MagicMock()
+        summary = dialog.request_selection()
+        assert summary.group_sizes == {"Control": 3, "Drug": 3}
+        return None
+
+    with (
+        patch.object(main.sys, "platform", "darwin"),
+        patch.object(main, "_prompt_range_macos", return_value=(selected, frame)),
+        patch.object(main.SettingsDialog, "show", show),
+    ):
+        main._analysis_settings(book)
+    selected.options.assert_not_called()
+
+
+@pytest.mark.parametrize("entry", [main._run_quick_impl, main._run_elisa_impl])
+def test_quick_and_elisa_reuse_already_read_macos_prompt_frame(entry):
+    from matplotlib import pyplot as plt
+    frame = pd.DataFrame({"0": [.1, .2, .3], "10": [.5, .6, .7]})
+    book, sheet, _ = _book_with_selection(frame)
+    selected = book.selection
+    book.selection = None
+    with (
+        patch.object(main.sys, "platform", "darwin"),
+        patch.object(main, "_prompt_range_macos", return_value=(selected, frame)),
+        patch("xstars.presets.elisa_dialog.ELISADialog.show", return_value=None),
+    ):
+        entry(book)
+    selected.options.assert_not_called()
+    if sheet.pictures.add.called:
+        plt.close(sheet.pictures.add.call_args.args[0])
+
+
+@pytest.mark.parametrize("values,rows", [([["A", "B"]], 1), ([[None, ""], [None, None]], 2)])
+def test_prompt_range_windows_rejects_empty_data_and_parents_error(values, rows):
+    from types import SimpleNamespace as NS
+    book, sheet, _ = _book_with_selection(pd.DataFrame({"A": [1, 2]}))
+    sheet.name = "Data"
+    sheet.range.side_effect = None
+    rng = sheet.range.return_value
+    rng.rows.count = rows
+    rng.value = values
+    book.app.api.InputBox.side_effect = [NS(Address="$A$1:$B$2"), False]
+    root = MagicMock()
+    with patch.object(main, "_show_error") as error:
+        assert main._prompt_range_windows(book, sheet, "Select", "Data", root) is None
+    error.assert_called_once()
+    assert error.call_args.kwargs["parent_root"] is root
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_quick_missing_selection_uses_minimal_prompt(platform):
+    book, sheet, _ = _book_with_selection(pd.DataFrame({"A": [1, 2, 3], "B": [2, 3, 4]}))
+    sel = book.selection
+    book.selection = None
+    with (
+        patch.object(main.sys, "platform", platform),
+        patch.object(main, "_prompt_data_range", return_value=sel),
+        patch.object(main.SettingsDialog, "show") as dialog,
+    ):
+        main._run_quick_impl(book)
+    dialog.assert_not_called()
+    sheet.pictures.add.assert_called_once()
+
+
+def test_elisa_missing_standard_selection_cancel_exits_before_dialog():
+    book, sheet, _ = _book_with_selection(pd.DataFrame({"0": [1, 2], "10": [2, 3]}))
+    book.selection = None
+    with patch.object(main, "_prompt_data_range", return_value=None) as prompt:
+        main._run_elisa_impl(book)
+    assert "standard" in prompt.call_args.args[3]
+    sheet.pictures.add.assert_not_called()
+
+
+@pytest.mark.parametrize("values,row_count", [(None, 1), ([[None, ""], [None, None]], 2), ([["A", "B"]], 1)])
+def test_empty_or_header_only_selection_is_missing(values, row_count):
+    book, _, _ = _book_with_selection(pd.DataFrame({"A": [1, 2, 3]}))
+    book.selection.rows.count = row_count
+    book.selection.value = values
+    assert main._read_valid_selection(book) is None
+
+
+def test_header_plus_empty_data_rows_keeps_existing_validation():
+    book, _, _ = _book_with_selection(pd.DataFrame({"A": [None, None, None]}))
+    book.selection.value = [["A"], [None], [None], [None]]
+    assert main._read_valid_selection(book) is book.selection
+
+
+@pytest.mark.parametrize("mode", ["inputbox", "a1"])
+def test_windows_modal_selection_has_both_inputbox_and_a1_paths(mode):
+    book = MagicMock()
+    sheet = MagicMock()
+    root = MagicMock()
+    selected = MagicMock()
+    with (
+        patch.object(main.sys, "platform", "win32"),
+        patch.object(main, "_WINDOWS_SELECTION_MODE", mode),
+        patch.object(main, "_prompt_range_windows", return_value=selected) as inputbox,
+        patch.object(main, "_prompt_range_macos", return_value=(selected, pd.DataFrame())) as a1,
+    ):
+        assert main._prompt_data_range(book, sheet, "Select", "Data", root) is selected
+    if mode == "inputbox":
+        inputbox.assert_called_once()
+        a1.assert_not_called()
+        root.grab_release.assert_called_once()
+        root.grab_set.assert_called_once()
+    else:
+        a1.assert_called_once_with(book, sheet, "Select", "Data", root)
+        inputbox.assert_not_called()
+
+
+@pytest.mark.parametrize("preset,branch", [(main.ExperimentPreset.WB, "_run_wb_labeled"), (main.ExperimentPreset.QPCR, "_run_qpcr_labeled")])
+def test_preset_supplemented_labels_use_final_data_and_reference_selection(preset, branch):
+    df = pd.DataFrame({"Label": ["Target"] * 3 + ["GAPDH"] * 3,
+                       "Control": [1, 2, 3, 2, 3, 4], "Drug": [2, 3, 4, 3, 4, 5]})
+    book, _, _ = _book_with_selection(df)
+    selected = book.selection
+    book.selection = None
+
+    def show(dialog):
+        dialog._root = MagicMock()
+        summary = dialog.request_selection()
+        assert summary.has_label_column
+        dialog.selected_payload = summary.payload
+        return PrismConfig(experiment_preset=preset, preset_has_reference=True)
+
+    with (
+        patch.object(main, "_prompt_data_range", return_value=selected),
+        patch.object(main.SettingsDialog, "show", show),
+        patch.object(main, branch) as labeled,
+    ):
+        main._run_preset_impl(book, preset)
+    labeled.assert_called_once()
+    assert labeled.call_args.args[2]._selection_ref is selected
+    assert labeled.call_args.args[3].tolist() == df["Label"].tolist()
+    assert labeled.call_args.args[4].columns.tolist() == ["Control", "Drug"]
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_elisa_supplements_standards_before_existing_fit_dialog(platform):
+    from types import SimpleNamespace
+    book, _, _ = _book_with_selection(pd.DataFrame({"0": [.1, .12, .11], "10": [.8, .9, .85]}))
+    selected = book.selection
+    book.selection = None
+    with (
+        patch.object(main.sys, "platform", platform),
+        patch.object(main, "_prompt_data_range", return_value=selected),
+        patch("xstars.presets.elisa_dialog.ELISADialog") as dialog,
+    ):
+        dialog.return_value.show.return_value = SimpleNamespace(fit_result=None)
+        main._run_elisa_impl(book)
+    concentrations, od = dialog.call_args.args
+    assert len(concentrations) == len(od) == 6
+    assert set(concentrations) == {0, 10}

@@ -47,6 +47,7 @@
     "run_cck8",
     "run_transform_only",
   ]);
+  const DIALOG_COMMANDS = Object.freeze(["run", "run_wb", "run_qpcr", "run_cck8"]);
   const PICTURE_ID = /^XSTARS_[0-9]{8}_[0-9a-z]{8,32}$/;
 
   let client = null;
@@ -79,6 +80,13 @@
     return { error, message };
   }
 
+  function hasDataSelection(selection) {
+    return selection && selection.values.length > 1 && !selection.values.every(
+      (row) => row.every((value) => value === null ||
+        (typeof value === "string" && value.trim() === "")),
+    );
+  }
+
   async function runCommand(command, options) {
     const application = root.Application;
     let modules;
@@ -86,22 +94,81 @@
       modules = dependencies();
       modules.spreadsheet.setStatus(application, "XSTARS: 正在处理…");
       const supplied = options || {};
-      const selection = "selection" in supplied
-        ? supplied.selection
-        : SELECTION_COMMANDS.includes(command)
-          ? modules.spreadsheet.readSelection(application)
-          : null;
-      const expectedContext = supplied.expectedContext || selection || {
-        sheet: application && application.ActiveSheet
-          ? application.ActiveSheet.Name
-          : "",
+      const dialogCommand = DIALOG_COMMANDS.includes(command);
+      const interactive = dialogCommand && root.XSTARS_WPS_CONFIG &&
+        root.XSTARS_WPS_CONFIG.inDialogSelection === true;
+      let selection = "selection" in supplied ? supplied.selection : null;
+      if (!("selection" in supplied) && SELECTION_COMMANDS.includes(command)) {
+        try {
+          selection = modules.spreadsheet.readSelection(application);
+          if ((dialogCommand || command === "run_quick") && !hasDataSelection(selection)) {
+            selection = null;
+          }
+        } catch (error) {
+          if (!dialogCommand && command !== "run_quick") {
+            throw error;
+          }
+        }
+      }
+      let expectedContext = supplied.expectedContext || selection || {
+        sheet: application && application.ActiveSheet ? application.ActiveSheet.Name : "",
       };
-      const response = await getClient(modules.service).command(
-        command,
-        selection,
-        supplied.config || {},
-        supplied.extra || {},
-      );
+      const chooseRange = (interaction) => {
+        const picked = modules.spreadsheet.promptRange(
+          application, interaction.prompt || "请选择含表头的连续数据区域", "XSTARS — 选择数据",
+        );
+        if (picked && !hasDataSelection(picked)) {
+          throw new modules.service.ServiceError("INVALID_SELECTION", "Select more than one row with nonempty data and headers");
+        }
+        if (picked && picked.sheet !== expectedContext.sheet) {
+          throw new Error(`请选择工作表“${expectedContext.sheet}”上的连续区域`);
+        }
+        if (picked) {
+          selection = picked;
+          expectedContext = supplied.expectedContext || selection;
+        }
+        return picked;
+      };
+      if (!selection && (command === "run_quick" || (dialogCommand && !interactive))) {
+        selection = chooseRange({});
+        if (!selection) {
+          modules.spreadsheet.setStatus(application, "XSTARS: 补选已取消");
+          return { cancelled: true };
+        }
+      }
+      const serviceClient = getClient(modules.service);
+      const extra = { ...(supplied.extra || {}) };
+      if (dialogCommand) {
+        extra.interactionEnabled = Boolean(interactive);
+      }
+      let response;
+      try {
+        response = await serviceClient.command(
+          command, selection, supplied.config || {}, extra,
+          interactive ? { onInteraction: (interaction) => {
+            try {
+              return chooseRange(interaction);
+            } catch (error) {
+              reportError(application, modules, error);
+              return null;
+            }
+          } } : undefined,
+        );
+      } catch (error) {
+        if (!dialogCommand || !["INTERACTION_UNAVAILABLE", "INVALID_SELECTION", "INVALID_REQUEST"].includes(error.code)) {
+          throw error;
+        }
+        // Older brokers do not recognize the capability field or the interaction endpoint.
+        if (!selection || error.code !== "INVALID_REQUEST") {
+          selection = chooseRange({});
+        }
+        if (!selection) {
+          modules.spreadsheet.setStatus(application, "XSTARS: 补选已取消");
+          return { cancelled: true };
+        }
+        delete extra.interactionEnabled;
+        response = await serviceClient.command(command, selection, supplied.config || {}, extra);
+      }
       const writeback = modules.spreadsheet.executeWritebackPlan(
         application,
         response.writebackPlan,
