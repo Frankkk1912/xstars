@@ -353,12 +353,25 @@ def publish_interaction_response(directory, selection, cancel=False):
     while not request_path.exists() and time.monotonic() < deadline:
         time.sleep(.01)
     assert request_path.exists()
-    interaction_id = json.loads(request_path.read_text())["id"]
+    interaction_id = json.loads(request_path.read_text(encoding="utf-8"))["id"]
     if cancel:
         (directory / "cancel").touch()
     else:
         atomic_write_json(directory / "interaction_response.json",
                           {"id": interaction_id, "selection": selection})
+
+
+def test_interaction_responder_reads_utf8_under_windows_default(tmp_path, monkeypatch):
+    interaction_id = _worker.request_interaction(tmp_path, "请选择数据")
+    original_read_text = Path.read_text
+
+    def windows_read_text(path, encoding=None, errors=None, **kwargs):
+        return original_read_text(path, encoding=encoding or "cp1252", errors=errors, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", windows_read_text)
+    publish_interaction_response(tmp_path, None)
+    response = json.loads((tmp_path / "interaction_response.json").read_text(encoding="utf-8"))
+    assert response == {"id": interaction_id, "selection": None}
 
 
 @pytest.mark.parametrize("outcome", ["success", "cancel", "destroy", "invalid"])
