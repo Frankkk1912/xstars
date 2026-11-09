@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
+from importlib import import_module
 from tkinter import filedialog
+from typing import Any
 
 import numpy as np
 
-try:
-    import ttkbootstrap as ttkb
-    from ttkbootstrap.constants import *
-    try:
-        from ttkbootstrap.scrolled import ScrolledFrame
-    except ImportError:
-        from ttkbootstrap.widgets.scrolled import ScrolledFrame
-    HAS_TTKB = True
-except ImportError:
-    HAS_TTKB = False
-
 from ..config import (
-    AnnotationFormat, BaseTheme, ChartType, ErrorBarType,
-    JournalPalette, JournalPreset, PalettePreset, PrismConfig,
+    AnnotationFormat,
+    BarWidth,
+    BaseTheme,
+    CanvasMode,
+    ChartType,
+    ErrorBarType,
+    JournalPalette,
+    JournalPreset,
+    PalettePreset,
+    PrismConfig,
+    YAxisScale,
 )
 from ..tools.standard_curve import (
     CurveFitResult,
@@ -29,6 +29,19 @@ from ..tools.standard_curve import (
     four_param_logistic,
 )
 
+ttkb: Any
+ScrolledFrame: Any
+try:
+    ttkb = import_module("ttkbootstrap")
+    try:
+        ScrolledFrame = import_module("ttkbootstrap.widgets.scrolled").ScrolledFrame
+    except ImportError:
+        ScrolledFrame = import_module("ttkbootstrap.scrolled").ScrolledFrame
+    HAS_TTKB = True
+except ImportError:
+    ttkb = None
+    ScrolledFrame = None
+    HAS_TTKB = False
 
 @dataclass
 class ELISADialogResult:
@@ -77,7 +90,7 @@ class ELISADialog:
 
     def _build_ui(self) -> None:
         root = self._root
-        pad = {"padx": 10, "pady": 5}
+        pad: dict[str, Any] = {"padx": 10, "pady": 5}
 
         if HAS_TTKB:
             ttk = ttkb
@@ -125,6 +138,15 @@ class ELISADialog:
                 row, text=chart_labels[ct],
                 variable=self._chart_var, value=ct.value,
             ).pack(side="left", padx=8)
+
+        # -- Canvas size --
+        canvas_frame = ttk.Labelframe(general_frame, text="Canvas Size", padding=6)
+        canvas_frame.pack(fill="x", **pad)
+        from ..ui_dialog import _build_canvas_controls
+
+        self._canvas_var, self._bar_width_var, self._y_axis_var = _build_canvas_controls(
+            ttk, canvas_frame, self.config,
+        )
 
         # -- Error bars --
         eb_frame = ttk.Labelframe(general_frame, text="Error Bars", padding=6)
@@ -308,7 +330,7 @@ class ELISADialog:
 
         self._result_text = tk.Text(
             self._fit_frame, height=6, width=55, state="disabled",
-            font=("Consolas", 9) if HAS_TTKB else None,
+            font=("Consolas", 9) if HAS_TTKB else "TkFixedFont",
         )
         self._result_text.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -453,7 +475,7 @@ class ELISADialog:
         # Auto-fit on open
         self._on_fit()
 
-    def _make_scrollable(self, parent):
+    def _make_scrollable(self, parent: Any) -> tuple[Any, Any]:
         if HAS_TTKB:
             wrapper = ttkb.Frame(parent)
             sf = ScrolledFrame(wrapper, autohide=True, padding=5)
@@ -558,10 +580,10 @@ class ELISADialog:
                 slope = float(self._ep_param_vars["slope"].get())
                 intercept = float(self._ep_param_vars["intercept"].get())
 
-                def predict(c):
+                def linear_predict(c):
                     return slope * np.asarray(c, dtype=float) + intercept
 
-                def inverse(y):
+                def linear_inverse(y):
                     y = np.asarray(y, dtype=float)
                     if slope == 0:
                         return np.full_like(y, np.nan, dtype=float)
@@ -572,8 +594,8 @@ class ELISADialog:
                     params={"slope": slope, "intercept": intercept},
                     r_squared=None,
                     equation_str=f"y = {slope:.4g} * x + {intercept:.4g}",
-                    predict=predict,
-                    inverse=inverse,
+                    predict=linear_predict,
+                    inverse=linear_inverse,
                     conc_range=(0.0, 1e6),
                 )
             else:
@@ -640,6 +662,11 @@ class ELISADialog:
 
         config = PrismConfig(
             chart_type=ChartType(self._chart_var.get()),
+            canvas_mode=CanvasMode(self._canvas_var.get()),
+            bar_width=BarWidth(self._bar_width_var.get()),
+            y_axis_scale=YAxisScale(self._y_axis_var.get()),
+            fig_width=self.config.fig_width,
+            fig_height=self.config.fig_height,
             error_bar=ErrorBarType(self._eb_var.get()),
             show_points=self._points_var.get(),
             show_ns=self._ns_var.get(),

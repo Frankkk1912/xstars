@@ -37,7 +37,7 @@ XSTARS.xlam（不会双载），共享 xlwings 文件已做安装前备份；**�
   cat "$HOME/Library/Containers/com.microsoft.Excel/Data/xlwings.conf"
   ```
 
-  预期：`"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"`；
+  预期：`"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"`（`~/.xstars/runtime` 是指向 `~/Library/Application Support/XSTARS/python` 的链接；xlwings 不给解释器路径加引号，路径不能含空格）；
   若你 dev conf 里有其它自定义键，它们应被保留（只换 INTERPRETER_MAC 行）。
 
 - [ ] **P0-4 注册库无指向其它路径的 XSTARS 加载值（防双载）**

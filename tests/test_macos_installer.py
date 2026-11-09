@@ -871,8 +871,7 @@ def test_package_commands_are_unsigned_user_domain_and_one_way(tmp_path):
 
 def test_render_xlwings_conf_creates_canonical_interpreter_entry():
     assert build_pkg.render_xlwings_conf() == (
-        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
-        'XSTARS/python/bin/python3"\n'
+        '"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"\n'
     )
 
 
@@ -887,8 +886,7 @@ def test_render_xlwings_conf_preserves_unknown_keys_and_replaces_only_interprete
 
     assert rendered == (
         '"LOG_FILE","$HOME/xlwings.log"\n'
-        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
-        'XSTARS/python/bin/python3"\n'
+        '"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"\n'
         '"USE_UDF_SERVER","False"\n'
     )
     assert build_pkg.render_xlwings_conf(rendered) == rendered
@@ -911,8 +909,7 @@ def test_postinstall_has_user_domain_deployment_and_fail_closed_runtime_contract
         'XLWINGS_CONF_DIR="$USER_HOME/Library/Containers/com.microsoft.Excel/Data"'
     ) in script
     assert (
-        '"INTERPRETER_MAC","$HOME/Library/Application Support/'
-        'XSTARS/python/bin/python3"'
+        '"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"'
     ) in script
     assert "COPYFILE_DISABLE=1 /usr/bin/tar -xzf" in script
     assert 'elif [ ! -x "$PYTHON_EXECUTABLE" ]; then' in script
@@ -1078,7 +1075,11 @@ def test_uninstall_has_backup_registration_cleanup_and_data_safety_contract():
     assert "/usr/sbin/pkgutil --forget" in script
     assert 'PACKAGE_IDENTIFIER="com.frank-sysu.xstars"' in script
     assert "~/.xstars" not in script.casefold()
-    assert "$user_home/.xstars" not in script.casefold()
+    # The only ~/.xstars path the uninstaller touches is the runtime link, and
+    # only when it is a symbolic link; settings and artifacts stay.
+    assert script.casefold().count("$user_home/.xstars") == 1
+    assert 'RUNTIME_LINK="$USER_HOME/.xstars/runtime"' in script
+    assert 'if [ -L "$RUNTIME_LINK" ]; then' in script
     deletion_lines = [line for line in script.splitlines() if "/bin/rm" in line]
     assert all(".xstars" not in line.casefold() for line in deletion_lines)
 
@@ -1408,3 +1409,59 @@ def test_built_pkg_is_unsigned_product_archive(tmp_path):
     )
     assert signature.returncode != 0
     assert "no signature" in (signature.stdout + signature.stderr).casefold()
+
+
+DEV_SPACE_LINE = '"INTERPRETER_MAC" "/Users/dev/xstars/.venv/bin/python"'
+
+
+def test_render_xlwings_conf_replaces_space_separated_interpreter_line():
+    existing = f'{DEV_SPACE_LINE}\n"OTHER","value"\n"INTERPRETER_MAC_EXTRA","keep"\n'
+    rendered = build_pkg.render_xlwings_conf(existing)
+    assert rendered == (
+        '"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"\n'
+        '"OTHER","value"\n"INTERPRETER_MAC_EXTRA","keep"\n'
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="runs the scripts' awk matcher with /usr/bin/awk, which Windows lacks",
+)
+@pytest.mark.parametrize("script", ["postinstall.sh", "uninstall.sh"])
+def test_shell_interpreter_matchers_accept_comma_and_space_forms(script):
+    source = (MAC_INSTALLER_DIR / script).read_text(encoding="utf-8")
+    match = re.search(r'toupper\((?:line|\$0)\) !?~ (/\^.*INTERPRETER_MAC.*?/)', source)
+    assert match, f"INTERPRETER_MAC matcher not found in {script}"
+    program = f"{{ print (toupper($0) ~ {match[1]}) ? \"hit\" : \"miss\" }}"
+    lines = [
+        '"INTERPRETER_MAC","/a"',
+        DEV_SPACE_LINE,
+        '  INTERPRETER_MAC, /c',
+        '"INTERPRETER_MAC_EXTRA","keep"',
+        '"OTHER","value"',
+    ]
+    result = subprocess.run(
+        ["/usr/bin/awk", program], input="\n".join(lines) + "\n",
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.split() == ["hit", "hit", "hit", "miss", "miss"]
+
+
+def test_configured_interpreter_path_has_no_spaces():
+    # xlwings' AppleScript bridge passes the interpreter to the shell unquoted.
+    value = build_pkg.XLWINGS_INTERPRETER_LINE.split(",", 1)[1].strip('"')
+    assert " " not in value
+    script = POSTINSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert f"EXPECTED_CONF_LINE='{build_pkg.XLWINGS_INTERPRETER_LINE}'" in script
+    assert 'RUNTIME_LINK="$RUNTIME_LINK_DIR/runtime"' in script
+    assert '/bin/ln -sfn "$INSTALL_ROOT/python" "$RUNTIME_LINK"' in script
+    assert value == "$HOME/.xstars/runtime/bin/python3"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS uninstall behavior")
+def test_uninstall_dry_run_mentions_runtime_link(tmp_path):
+    result = subprocess.run(
+        [str(UNINSTALL_SCRIPT), "--dry-run"],
+        env={**os.environ, "HOME": str(tmp_path)}, capture_output=True, text=True,
+    )
+    assert "runtime link" in result.stdout

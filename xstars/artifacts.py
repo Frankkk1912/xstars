@@ -28,7 +28,9 @@ import pandas as pd
 
 from .config import (
     AnnotationFormat,
+    BarWidth,
     BaseTheme,
+    CanvasMode,
     ChartType,
     DoseAxisScale,
     ErrorBarType,
@@ -39,8 +41,9 @@ from .config import (
     PalettePreset,
     PrismConfig,
     QPCRErrorSpace,
+    YAxisScale,
 )
-from .plot_engine import PlotEngine
+from .plot_engine import PlotEngine, fit_canvas, resolve_figsize
 from .presets.cck8 import CCK8FitInfo
 from .stats_engine import PairResult, StatsResult
 
@@ -348,7 +351,8 @@ def build_standard_curve_figure(
         raise CorruptArtifactError("Standard-curve data arrays are invalid.")
 
     with get_prism_context(config.journal_preset, config.base_theme):
-        fig, ax = plt.subplots(figsize=(4.5, 3.5), dpi=config.dpi)
+        size = (4.5, 3.5) if config.canvas_mode is CanvasMode.FIXED else resolve_figsize(config)
+        fig, ax = plt.subplots(figsize=size, dpi=config.dpi)
         ax.scatter(
             conc,
             od_values,
@@ -379,7 +383,7 @@ def build_standard_curve_figure(
         else:
             ax.set_title("Standard Curve")
         ax.legend(fontsize=8)
-        fig.tight_layout()
+        fit_canvas(fig, ax, config)
     return fig
 
 
@@ -564,7 +568,10 @@ def _config_from_dict(snapshot: Any) -> PrismConfig:
     expected_fields = {field.name for field in fields(PrismConfig)}
     # Fields added after older artifacts were written. Missing keys fall back
     # to the dataclass default so existing workbooks still rebuild.
-    optional_fields = frozenset({"preset_qpcr_error_space"})
+    optional_fields = frozenset({
+        "preset_qpcr_error_space", "canvas_mode", "bar_width", "y_axis_scale",
+        "hidden_comparisons",
+    })
     missing = sorted(expected_fields - snapshot.keys() - optional_fields)
     if missing:
         raise CorruptArtifactError(
@@ -572,6 +579,9 @@ def _config_from_dict(snapshot: Any) -> PrismConfig:
         )
 
     enum_fields = {
+        "canvas_mode": CanvasMode,
+        "bar_width": BarWidth,
+        "y_axis_scale": YAxisScale,
         "chart_type": ChartType,
         "error_bar": ErrorBarType,
         "annotation_format": AnnotationFormat,

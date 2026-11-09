@@ -31,6 +31,7 @@ from ..config import (
     PrismConfig,
 )
 from ..data_handler import DataHandler
+from ..plot_engine import export_figure
 from ..styles import get_palette
 from .analysis import (
     AnalysisResult,
@@ -551,11 +552,7 @@ def _finalize_analysis(
         ):
             target_artifact = artifact_path.with_stem(f"{artifact_path.stem}_{index}")
             if not target_artifact.is_file():
-                target.figure.savefig(
-                    target_artifact,
-                    format="png",
-                    dpi=config.export_dpi,
-                )
+                export_figure(target.figure, str(target_artifact), config.export_dpi)
             picture_id = export_module.new_picture_id()
             # Analysis/writeback remains usable; later export reports a stable
             # missing-payload error if this best-effort persistence fails.
@@ -578,7 +575,7 @@ def _finalize_analysis(
         return _success(command, result.writeback_plan)
 
     if not artifact_path.is_file():
-        result.figure.savefig(artifact_path, format="png", dpi=config.export_dpi)
+        export_figure(result.figure, str(artifact_path), config.export_dpi)
     picture_id = export_module.new_picture_id()
     frame = (
         result.transformed_data
@@ -606,7 +603,7 @@ def _finalize_analysis(
             else artifact_path.with_stem(f"{artifact_path.stem}_{index}")
         )
         if not image_artifact.is_file():
-            figure.savefig(image_artifact, format="png", dpi=config.export_dpi)
+            export_figure(figure, str(image_artifact), config.export_dpi)
         image_picture_id = picture_id if index == 1 else export_module.new_picture_id()
         image_renderer = (
             "standard_curve" if source_key == "standard_curve_figure" else renderer

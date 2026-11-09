@@ -67,6 +67,24 @@ class ChartType(Enum):
     LINE = "line"
 
 
+class CanvasMode(Enum):
+    FIXED = "fixed"  # image size as configured (or journal preset)
+    PANEL = "panel"  # fixed height; width grows with the number of groups
+
+
+class YAxisScale(Enum):
+    FIT_BRACKETS = "fit_brackets"  # y-axis extends up through the brackets
+    FIT_DATA = "fit_data"  # data fills ~80% of the axis; brackets may sit above it
+
+
+class BarWidth(Enum):
+    """Width per group in Panel mode."""
+
+    NARROW = "narrow"
+    MEDIUM = "medium"
+    WIDE = "wide"
+
+
 class ErrorBarType(Enum):
     SEM = "sem"
     SD = "sd"
@@ -108,6 +126,9 @@ class PrismConfig:
     control_group: str | None = (
         None  # None = all pairwise; group name = compare all vs control
     )
+    # Comparisons whose brackets are not drawn, as [group_a, group_b] pairs.
+    # Display only: statistics and the stats table keep every comparison.
+    hidden_comparisons: list[list[str]] = field(default_factory=list)
 
     # Labels
     y_label: str = "Value"
@@ -121,6 +142,9 @@ class PrismConfig:
     journal_palette: JournalPalette = JournalPalette.DEFAULT
 
     # Figure
+    canvas_mode: CanvasMode = CanvasMode.FIXED
+    bar_width: BarWidth = BarWidth.MEDIUM
+    y_axis_scale: YAxisScale = YAxisScale.FIT_BRACKETS
     fig_width: float = 4.0
     fig_height: float = 3.5
     dpi: int = 300
@@ -185,6 +209,9 @@ class PrismConfig:
         """Serialize to a JSON-friendly dict."""
         d = asdict(self)
         # Convert enums to their string values
+        d["canvas_mode"] = self.canvas_mode.value
+        d["bar_width"] = self.bar_width.value
+        d["y_axis_scale"] = self.y_axis_scale.value
         d["chart_type"] = self.chart_type.value
         d["error_bar"] = self.error_bar.value
         d["annotation_format"] = self.annotation_format.value
@@ -197,6 +224,7 @@ class PrismConfig:
         for key in (
             "export_path",
             "control_group",
+            "hidden_comparisons",
             "preset_control_group",
             "preset_has_reference",
             "preset_reference_protein",
@@ -235,6 +263,9 @@ class PrismConfig:
             return cls()
         # Map enum strings back
         enum_map = {
+            "canvas_mode": CanvasMode,
+            "bar_width": BarWidth,
+            "y_axis_scale": YAxisScale,
             "chart_type": ChartType,
             "error_bar": ErrorBarType,
             "annotation_format": AnnotationFormat,
@@ -250,6 +281,7 @@ class PrismConfig:
             if f in (
                 "export_path",
                 "control_group",
+                "hidden_comparisons",
                 "preset_control_group",
                 "preset_has_reference",
                 "preset_reference_protein",

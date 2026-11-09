@@ -11,6 +11,7 @@ Palette is orthogonal and returned separately via ``get_palette()``.
 from __future__ import annotations
 
 import colorsys
+from contextlib import AbstractContextManager
 
 import matplotlib as mpl
 import matplotlib.colors as mcolors
@@ -46,7 +47,7 @@ BASE_RCPARAMS: dict = {
     # Figure
     "figure.dpi": 150,
     "savefig.dpi": 300,
-    "savefig.bbox": "tight",
+    "savefig.bbox": None,  # preserve the selected canvas dimensions
     "savefig.transparent": False,
 
     # Legend
@@ -380,7 +381,7 @@ def get_journal_figsize(
 def get_prism_context(
     preset: JournalPreset = JournalPreset.NONE,
     base_theme: BaseTheme = BaseTheme.CLASSIC,
-) -> mpl.rc_context:
+) -> AbstractContextManager[None]:
     """Return a context manager that temporarily applies the merged style."""
     return mpl.rc_context(rc=get_theme_rcparams(base_theme, preset))
 

@@ -28,11 +28,9 @@ APP_VERSION = re.search(r'__version__\s*=\s*["\'](.+?)["\']', _init_text).group(
 # Locate site-packages for data collection
 import matplotlib
 import ttkbootstrap
-import statannotations
 
 mpl_data = Path(matplotlib.get_data_path())
 ttkb_root = Path(ttkbootstrap.__file__).parent
-sa_root = Path(statannotations.__file__).parent
 
 # xlwings ships separate Windows / macOS backends. The Mac backend pulls in
 # AppleScript via py-appscript, which PyInstaller can't always autodetect.
@@ -60,8 +58,6 @@ a = Analysis(
         (str(mpl_data), "matplotlib/mpl-data"),
         # ttkbootstrap themes
         (str(ttkb_root), "ttkbootstrap"),
-        # statannotations package data
-        (str(sa_root), "statannotations"),
         *pandas_datas,
     ],
     hiddenimports=[

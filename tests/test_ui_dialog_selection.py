@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from xstars.config import PrismConfig
+from xstars.config import BarWidth, CanvasMode, PrismConfig, YAxisScale
 from xstars.ui_dialog import SelectionSummary, SettingsDialog, selection_banner
 
 
@@ -183,3 +183,115 @@ def test_select_data_preserves_wps_file_export_restrictions(selection_dialog):
         assert control.instate(["disabled"])
     assert dialog._notebook.tab(dialog._data_tabs[3], "state") == "normal"
     assert dialog._notebook.select() == str(dialog._data_tabs[0])
+
+
+@pytest.mark.parametrize("mode", list(CanvasMode))
+@pytest.mark.parametrize("bar_width", list(BarWidth))
+def test_canvas_mode_collected_and_custom_size_preserved(selection_dialog, mode, bar_width):
+    dialog = selection_dialog
+    assert dialog._canvas_var.get() == "fixed"
+    assert dialog._bar_width_var.get() == "medium"
+    dialog._on_select_data()
+    dialog._canvas_var.set(mode.value)
+    dialog._bar_width_var.set(bar_width.value)
+    dialog.config.fig_width = 6.0
+    dialog.config.fig_height = 5.0
+    with patch.object(PrismConfig, "save") as save:
+        dialog._on_ok()
+    save.assert_called_once()
+    assert dialog.result.canvas_mode is mode
+    assert dialog.result.bar_width is bar_width
+    assert (dialog.result.fig_width, dialog.result.fig_height) == (6.0, 5.0)
+
+
+def test_reset_restores_fixed_canvas(selection_dialog, tmp_path):
+    dialog = selection_dialog
+    dialog._canvas_var.set("panel")
+    dialog._bar_width_var.set("wide")
+    with patch("xstars.config.DEFAULT_SETTINGS_PATH", tmp_path / "settings.json"):
+        dialog._on_reset()
+    assert dialog._canvas_var.get() == "fixed"
+    assert dialog._bar_width_var.get() == "medium"
+
+
+def test_elisa_dialog_initializes_and_collects_canvas_mode(selection_dialog):
+    import numpy as np
+
+    from xstars.presets.elisa_dialog import ELISADialog
+    from xstars.tools.standard_curve import fit_standard_curve
+
+    config = PrismConfig(canvas_mode=CanvasMode.PANEL, bar_width=BarWidth.NARROW, fig_width=6)
+    dialog: Any = ELISADialog(np.array([1, 10, 100]), np.array([.1, 1, 10]), config)
+    dialog._root = selection_dialog._root
+    with patch.object(dialog, "_on_fit"):
+        dialog._build_ui()
+    assert dialog._canvas_var.get() == "panel"
+    assert dialog._bar_width_var.get() == "narrow"
+    dialog._fit_result = fit_standard_curve(dialog.conc, dialog.od, "linear")
+    dialog._canvas_var.set("fixed")
+    dialog._bar_width_var.set("wide")
+    with patch.object(PrismConfig, "save"):
+        dialog._on_ok()
+    assert dialog.result.config.canvas_mode is CanvasMode.FIXED
+    assert dialog.result.config.bar_width is BarWidth.WIDE
+    assert dialog.result.config.fig_width == 6
+
+
+def test_y_axis_scale_collected_and_reset(selection_dialog, tmp_path):
+    dialog = selection_dialog
+    assert dialog._y_axis_var.get() == "fit_brackets"
+    dialog._on_select_data()
+    dialog._y_axis_var.set("fit_data")
+    with patch("xstars.config.DEFAULT_SETTINGS_PATH", tmp_path / "settings.json"):
+        dialog._on_reset()
+    assert dialog._y_axis_var.get() == "fit_brackets"
+    dialog._y_axis_var.set("fit_data")
+    with patch.object(PrismConfig, "save"):
+        dialog._on_ok()
+    assert dialog.result.y_axis_scale is YAxisScale.FIT_DATA
+
+
+def three_groups(dialog):
+    dialog._apply_data(SelectionSummary(
+        ["Control", "Drug A", "Drug B"], {"Control": 3, "Drug A": 3, "Drug B": 3},
+        "Data!A1:C4", False, object(),
+    ))
+
+
+def test_bracket_picker_hides_selected_comparisons(selection_dialog, tmp_path):
+    dialog = selection_dialog
+    three_groups(dialog)
+    assert dialog._bracket_summary.get() == "All brackets shown"
+
+    def hide_first_two():
+        window, choices = dialog._open_bracket_picker()
+        assert list(choices) == dialog._comparison_pairs()
+        first, second = list(choices)[:2]
+        choices[first].set(False)
+        choices[second].set(False)
+        dialog._apply_bracket_picker(choices)
+        window.destroy()
+        return first, second, len(choices)
+
+    hide_first_two()
+    with patch("xstars.config.DEFAULT_SETTINGS_PATH", tmp_path / "settings.json"):
+        dialog._on_reset()
+    assert dialog._bracket_summary.get() == "All brackets shown"
+    three_groups(dialog)
+    first, second, total = hide_first_two()
+    assert dialog._bracket_summary.get() == f"2 of {total} hidden"
+    with patch.object(PrismConfig, "save"):
+        dialog._on_ok()
+    assert dialog.result.hidden_comparisons == [list(first), list(second)]
+
+
+def test_bracket_picker_follows_control_mode(selection_dialog):
+    dialog = selection_dialog
+    three_groups(dialog)
+    control = dialog.group_names[1]
+    dialog._control_combo.set(control)
+    pairs = dialog._comparison_pairs()
+    assert pairs == [(control, name) for name in dialog.group_names if name != control]
+    window, choices = dialog._open_bracket_picker()
+    window.destroy()
+    assert list(choices) == pairs

@@ -77,8 +77,13 @@ jobs:
           fetch-depth: 0
       - name: Verify Ribbon VBA behavior is unchanged from main
         shell: bash
+        # ribbon_callbacks.bas (macOS) may change deliberately: the
+        # "macOS / Build installer package" job requires it to match the VBA
+        # embedded in the shipped XSTARS.xlam and XSTARS_mac.xlsm exactly.
         run: |
-          git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas' ':(exclude)ribbon/ribbon_callbacks_installed.bas'
+          git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas' \
+            ':(exclude)ribbon/ribbon_callbacks_installed.bas' \
+            ':(exclude)ribbon/ribbon_callbacks.bas'
           python - <<'PY'
           import pathlib
           import re
@@ -138,7 +143,7 @@ jobs:
         run: >-
           installer/mac/staging/python/bin/python3 -c
           "import xstars, xlwings, ttkbootstrap, matplotlib, PIL, pandas, numpy,
-          scipy, scikit_posthocs, statannotations, seaborn; import sys;
+          scipy, scikit_posthocs, seaborn; import sys;
           assert sys.prefix in xstars.__file__, xstars.__file__;
           print('OK', xstars.__version__)"
       - name: Check bundled runtime dependency consistency

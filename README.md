@@ -100,6 +100,20 @@ Auto-select the appropriate test:
 
 Significance brackets (`*`, `**`, `***`, `****`, or exact p-values) are drawn automatically. ✨
 
+**Canvas size:** In Run Analysis → Figure, choose:
+
+- **Fixed size** (default): the configured width and height, or the journal preset's.
+- **Panel (width by groups):** every plot gets the same height and the same width per group (Narrow 0.5 in / Medium 0.7 in / Wide 0.9 in), so plots line up when you assemble a multi-panel figure at 100% scale.
+
+**Y-axis:**
+
+- **Fit brackets** (default): the y-axis extends up through the significance brackets to the next round tick. The image keeps its size; with many comparisons the bars get shorter.
+- **Fit data (brackets above):** the y-axis is scaled so the tallest value fills about 80% of it (e.g. a maximum of 8 gives an axis to 10). Brackets start just above the data and may continue above the axis; the image grows taller instead of the bars getting shorter.
+
+**Choose brackets…** (under Comparison Mode) lets you untick individual comparisons. Like *Show "ns" labels*, this only hides brackets: p-values, multiple-comparison correction and the statistics table still include every comparison. The choice is kept with each figure but not saved as a global default, because group names change between datasets.
+
+Brackets are stacked compactly: shorter comparisons sit lower, and comparisons that don't overlap share a row. Every selected comparison is always drawn. With many comparisons XSTARS shows a notice suggesting a taller figure, hiding `ns`, or comparing against a control. Hiding `ns` changes display only, not p-values or multiple-comparison correction. Exports keep the full canvas instead of tightly cropping it.
+
 > ⚠️ **Small samples (N < 5):** Normality tests are unreliable at very small N — XSTARS skips the test and assumes normality.
 
 ### 🧪 Experiment Presets

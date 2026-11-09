@@ -62,6 +62,7 @@ CONF_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.conf"
 CONF_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.conf.absent"
 REGISTRATION_DIR="$USER_HOME/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB"
 BACKUP_PARENT="$USER_HOME/Documents/XSTARS-uninstall-backups"
+RUNTIME_LINK="$USER_HOME/.xstars/runtime"
 
 log() {
     echo "uninstall: $*"
@@ -91,6 +92,7 @@ print_dry_run() {
     log "would back up MicrosoftRegistrationDB .reg files under: $BACKUP_PARENT"
     log "would delete Excel OPEN/OPENn values that point to XSTARS.xlam"
     log "would require PRAGMA integrity_check to return ok; otherwise restore backup"
+    log "would remove the runtime link when it is a link: $RUNTIME_LINK"
     log "would remove installed runtime: $INSTALL_ROOT"
     log "would run: pkgutil --forget $PACKAGE_IDENTIFIER"
     log "settings and generated artifacts are preserved"
@@ -124,6 +126,9 @@ remove_file_if_present() {
 
 remove_file_if_present "$EXCEL_STARTUP_ADDIN" "Excel Startup add-in"
 remove_file_if_present "$LEGACY_LAUNCH_SCRIPT" "legacy launch script"
+if [ -L "$RUNTIME_LINK" ]; then
+    remove_file_if_present "$RUNTIME_LINK" "runtime link"
+fi
 
 restore_xlwings_applescript() {
     if [ -f "$APPLESCRIPT_BACKUP" ]; then
@@ -148,7 +153,7 @@ remove_interpreter_mac() {
 
     temporary=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/xstars-uninstall-conf.XXXXXX")
     if ! /usr/bin/awk '
-        toupper($0) !~ /^[[:space:]]*"?INTERPRETER_MAC"?[[:space:]]*,/ { print }
+        toupper($0) !~ /^[[:space:]]*"?INTERPRETER_MAC"?([[:space:]]|,)/ { print }
     ' "$XLWINGS_CONF" >"$temporary"; then
         /bin/rm -f "$temporary"
         echo "uninstall: cannot filter $XLWINGS_CONF" >&2

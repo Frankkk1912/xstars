@@ -30,7 +30,9 @@ except ImportError:
 
 from .config import (
     AnnotationFormat,
+    BarWidth,
     BaseTheme,
+    CanvasMode,
     ChartType,
     DoseAxisScale,
     ErrorBarType,
@@ -41,6 +43,7 @@ from .config import (
     PalettePreset,
     PrismConfig,
     QPCRErrorSpace,
+    YAxisScale,
 )
 
 
@@ -60,6 +63,54 @@ def selection_banner(groups: list[str], sizes: dict[str, int], label: str | None
         return "No data range detected. Please select data."
     text = "  |  ".join(f"{g}: n={sizes.get(g, 0)}" for g in groups)
     return f"{text} · range {label}" if label else text
+
+
+def _ttk_module() -> Any:
+    if HAS_TTKB:
+        return ttkb
+    from tkinter import ttk
+
+    return ttk
+
+
+def _build_canvas_controls(
+    ttk: Any, parent: Any, config: PrismConfig,
+) -> tuple[Any, Any, Any]:
+    """Fixed/Panel, Panel bar width and y-axis scale; returns their variables."""
+    mode_var = tk.StringVar(value=config.canvas_mode.value)
+    width_var = tk.StringVar(value=config.bar_width.value)
+    y_axis_var = tk.StringVar(value=config.y_axis_scale.value)
+    mode_row = ttk.Frame(parent)
+    mode_row.pack(fill="x")
+    for mode, label in (
+        (CanvasMode.FIXED, "Fixed size"),
+        (CanvasMode.PANEL, "Panel (width by groups)"),
+    ):
+        ttk.Radiobutton(
+            mode_row, text=label, variable=mode_var, value=mode.value,
+        ).pack(side="left", padx=4)
+    width_row = ttk.Frame(parent)
+    width_row.pack(fill="x", pady=(4, 0))
+    ttk.Label(width_row, text="Panel bar width:").pack(side="left", padx=(4, 6))
+    for bar_width, label in (
+        (BarWidth.NARROW, "Narrow"),
+        (BarWidth.MEDIUM, "Medium"),
+        (BarWidth.WIDE, "Wide"),
+    ):
+        ttk.Radiobutton(
+            width_row, text=label, variable=width_var, value=bar_width.value,
+        ).pack(side="left", padx=4)
+    y_axis_row = ttk.Frame(parent)
+    y_axis_row.pack(fill="x", pady=(4, 0))
+    ttk.Label(y_axis_row, text="Y-axis:").pack(side="left", padx=(4, 6))
+    for scale, label in (
+        (YAxisScale.FIT_BRACKETS, "Fit brackets"),
+        (YAxisScale.FIT_DATA, "Fit data (brackets above)"),
+    ):
+        ttk.Radiobutton(
+            y_axis_row, text=label, variable=y_axis_var, value=scale.value,
+        ).pack(side="left", padx=4)
+    return mode_var, width_var, y_axis_var
 
 
 class SettingsDialog:
@@ -96,6 +147,9 @@ class SettingsDialog:
         else:
             self.config = saved
         self.result: PrismConfig | None = None
+        self._hidden_pairs: set[frozenset[str]] = {
+            frozenset(pair) for pair in self.config.hidden_comparisons
+        }
 
     def show(self) -> PrismConfig | None:
         """Display the dialog and block until closed. Returns config or None."""
@@ -173,6 +227,13 @@ class SettingsDialog:
                 variable=self._chart_var, value=ct.value,
             )
             rb.pack(side="left", padx=8)
+
+        # -- Canvas size --
+        canvas_frame = ttk.Labelframe(general_frame, text="Canvas Size", padding=6)
+        canvas_frame.pack(fill="x", **pad)
+        self._canvas_var, self._bar_width_var, self._y_axis_var = _build_canvas_controls(
+            ttk, canvas_frame, self.config,
+        )
 
         # -- Error bars --
         eb_frame = ttk.Labelframe(general_frame, text="Error Bars", padding=6)
@@ -271,6 +332,17 @@ class SettingsDialog:
             self._control_combo.set(self.config.control_group)
         else:
             self._control_combo.set("All pairwise")
+        bracket_row = ttk.Frame(comp_frame)
+        bracket_row.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Button(
+            bracket_row, text="Choose brackets…", command=self._open_bracket_picker,
+        ).pack(side="left")
+        self._bracket_summary = tk.StringVar()
+        ttk.Label(bracket_row, textvariable=self._bracket_summary).pack(side="left", padx=8)
+        self._control_combo.bind(
+            "<<ComboboxSelected>>", lambda _event: self._update_bracket_summary(), add="+",
+        )
+        self._update_bracket_summary()
 
         # -- Title --
         title_frame = ttk.Labelframe(general_frame, text="Chart Title (optional)", padding=6)
@@ -770,6 +842,7 @@ class SettingsDialog:
         self._control_combo.configure(values=comparison_choices)
         if current_control not in comparison_choices:
             self._control_combo.set("All pairwise")
+        self._update_bracket_summary()
         if not had_data and summary.has_label_column:
             self._wb_ref_var.set(True)
             self._qpcr_ref_var.set(True)
@@ -804,6 +877,74 @@ class SettingsDialog:
     # ------------------------------------------------------------------
     # Helpers (unchanged logic)
     # ------------------------------------------------------------------
+
+    def _comparison_pairs(self) -> list[tuple[str, str]]:
+        """Comparisons the current mode will test, in display order."""
+        names = list(self.group_names)
+        control = self._control_combo.get()
+        if control in names:
+            return [(control, name) for name in names if name != control]
+        return [(a, b) for i, a in enumerate(names) for b in names[i + 1:]]
+
+    def _update_bracket_summary(self) -> None:
+        if not hasattr(self, "_bracket_summary"):
+            return  # widgets not built yet
+        pairs = self._comparison_pairs()
+        hidden = sum(frozenset(pair) in self._hidden_pairs for pair in pairs)
+        self._bracket_summary.set(
+            "All brackets shown" if not hidden else f"{hidden} of {len(pairs)} hidden"
+        )
+
+    def _open_bracket_picker(self) -> tuple[Any, dict[tuple[str, str], Any]] | None:
+        """Checklist of comparisons; ticked ones get a bracket."""
+        pairs = self._comparison_pairs()
+        if not pairs:
+            return None
+        ttk = _ttk_module()
+        window = tk.Toplevel(self._root)
+        window.title("Choose brackets")
+        window.transient(self._root)
+        ttk.Label(
+            window,
+            text="Ticked comparisons get a bracket. Unticking only hides the bracket;\n"
+                 "p-values and the statistics table still include every comparison.",
+        ).pack(anchor="w", padx=10, pady=(10, 6))
+        box = ttk.Frame(window)
+        box.pack(fill="both", expand=True, padx=10)
+        choices: dict[tuple[str, str], Any] = {}
+        rows = 12
+        for index, pair in enumerate(pairs):
+            var = tk.BooleanVar(value=frozenset(pair) not in self._hidden_pairs)
+            ttk.Checkbutton(box, text=f"{pair[0]}  vs  {pair[1]}", variable=var).grid(
+                row=index % rows, column=index // rows, sticky="w", padx=6, pady=1,
+            )
+            choices[pair] = var
+
+        def set_all(value: bool) -> None:
+            for var in choices.values():
+                var.set(value)
+
+        def apply() -> None:
+            self._apply_bracket_picker(choices)
+            window.destroy()
+
+        buttons = ttk.Frame(window)
+        buttons.pack(fill="x", padx=10, pady=10)
+        ttk.Button(buttons, text="Show all", command=lambda: set_all(True)).pack(side="left")
+        ttk.Button(buttons, text="Hide all", command=lambda: set_all(False)).pack(
+            side="left", padx=6,
+        )
+        ttk.Button(buttons, text="Cancel", command=window.destroy).pack(side="right")
+        ttk.Button(buttons, text="OK", command=apply).pack(side="right", padx=6)
+        return window, choices
+
+    def _apply_bracket_picker(self, choices: dict[tuple[str, str], Any]) -> None:
+        for pair, var in choices.items():
+            if var.get():
+                self._hidden_pairs.discard(frozenset(pair))
+            else:
+                self._hidden_pairs.add(frozenset(pair))
+        self._update_bracket_summary()
 
     def _guess_control(self) -> str:
         for g in self.group_names:
@@ -916,6 +1057,11 @@ class SettingsDialog:
             DEFAULT_SETTINGS_PATH.unlink()
         defaults = PrismConfig()
         self._chart_var.set(defaults.chart_type.value)
+        self._canvas_var.set(defaults.canvas_mode.value)
+        self._bar_width_var.set(defaults.bar_width.value)
+        self._y_axis_var.set(defaults.y_axis_scale.value)
+        self._hidden_pairs.clear()
+        self._update_bracket_summary()
         self._eb_var.set(defaults.error_bar.value)
         self._points_var.set(defaults.show_points)
         self._paired_var.set(defaults.paired)
@@ -983,6 +1129,11 @@ class SettingsDialog:
         from .styles import get_palette
         self.result = PrismConfig(
             chart_type=ChartType(self._chart_var.get()),
+            canvas_mode=CanvasMode(self._canvas_var.get()),
+            bar_width=BarWidth(self._bar_width_var.get()),
+            y_axis_scale=YAxisScale(self._y_axis_var.get()),
+            fig_width=self.config.fig_width,
+            fig_height=self.config.fig_height,
             error_bar=ErrorBarType(self._eb_var.get()),
             show_points=self._points_var.get(),
             paired=self._paired_var.get(),
@@ -994,6 +1145,10 @@ class SettingsDialog:
             journal_palette=journal_palette,
             palette=get_palette(palette_preset, journal_palette),
             control_group=control_group,
+            hidden_comparisons=[
+                list(pair) for pair in self._comparison_pairs()
+                if frozenset(pair) in self._hidden_pairs
+            ],
             title=self._title_var.get(),
             y_label=self._ylabel_var.get(),
             output_stats=self._output_stats_var.get(),
@@ -1256,6 +1411,11 @@ class TransformOnlyDialog:
         self.result = PrismConfig(
             # Inherit display settings from saved config
             chart_type=saved.chart_type,
+            canvas_mode=saved.canvas_mode,
+            bar_width=saved.bar_width,
+            y_axis_scale=saved.y_axis_scale,
+            fig_width=saved.fig_width,
+            fig_height=saved.fig_height,
             error_bar=saved.error_bar,
             show_points=saved.show_points,
             paired=saved.paired,
