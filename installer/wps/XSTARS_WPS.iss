@@ -58,10 +58,25 @@ Filename: "{app}\service\xstars-wps-helper.exe"; Parameters: "install-page --dir
 Filename: "taskkill.exe"; Parameters: "/F /IM xstars-wps.exe /IM xstars-wps-helper.exe"; Flags: runhidden; RunOnceId: "StopXstarsWpsProcesses"
 
 [Code]
+// The background service has no window, so Restart Manager cannot close it
+// and an update fails with "DeleteFile failed; code 5". Stop it (and the
+// helper) before any file is replaced; [Run] or the logon entry restarts it.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM xstars-wps.exe /IM xstars-wps-helper.exe',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Give Windows a moment to release the file handles.
+  Sleep(1000);
+  Result := '';
+end;
+
 // Execute helper actions during installation: backup, bootstrap, and initial sync
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   HelperExe: String;
+  ServiceExe: String;
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
@@ -78,5 +93,11 @@ begin
       // 3. Sync config to any currently installed WPS add-in directory
       Exec(HelperExe, ExpandConstant('sync-config --template "{app}\addin\config.template.js"'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
+
+    // [Run] skips the service in silent installs; restart it so a silent
+    // update does not leave WPS without its service until the next logon.
+    ServiceExe := ExpandConstant('{app}\service\xstars-wps.exe');
+    if WizardSilent and FileExists(ServiceExe) then
+      Exec(ServiceExe, 'serve', ExpandConstant('{app}\service'), SW_HIDE, ewNoWait, ResultCode);
   end;
 end;
