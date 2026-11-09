@@ -731,3 +731,43 @@ for (const command of ["run", "run_quick"]) {
     });
   }
 }
+
+test("About button shows the service and add-in versions", async () => {
+  const host = makeHost();
+  const commands = [];
+  const { context, alerts } = loadAddin((url, init) => {
+    if (url.endsWith("/health")) {
+      return jsonResponse({ ok: true, service: "xstars-wps-service", port: 3892 });
+    }
+    const request = JSON.parse(init.body);
+    commands.push(request.command);
+    return jsonResponse({
+      version: "1.0",
+      ok: true,
+      command: request.command,
+      writebackPlan: {
+        version: "1.0",
+        tables: [],
+        images: [],
+        statusMessage: "XSTARS v9.9.9 — offline WPS support",
+      },
+    });
+  }, host.application);
+
+  const result = await context.window.XstarsWpsAddin.runAbout();
+  assert.ok(result.response);
+  assert.deepEqual(commands, ["run_about"]);
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /^XSTARS v9\.9\.9 — offline WPS support\n/);
+  const { ADDIN_VERSION } = context.window.XstarsWpsAddin;
+  assert.match(alerts[0], new RegExp(`WPS 加载项 v${ADDIN_VERSION.replaceAll(".", "\\.")}`));
+  assert.equal(context.window.XstarsWpsAddin.CONTROL_COMMANDS.xstarsAbout, "run_about");
+});
+
+test("ADDIN_VERSION matches package.json and the ribbon has an About button", () => {
+  const { context } = loadAddin(() => jsonResponse({ ok: false }, false, 500), makeHost().application);
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  assert.equal(context.window.XstarsWpsAddin.ADDIN_VERSION, pkg.version);
+  const ribbon = fs.readFileSync(path.join(__dirname, "..", "ribbon.xml"), "utf8");
+  assert.match(ribbon, /<button id="xstarsAbout"[^>]*onAction="OnAction"/);
+});

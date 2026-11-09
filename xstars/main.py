@@ -17,9 +17,10 @@ from typing import Any, cast
 import pandas as pd
 
 from . import artifacts
+from .annotations import layout_notice
 from .config import ExperimentPreset, PrismConfig
 from .data_handler import DataHandler
-from .plot_engine import PlotEngine, export_figure
+from .plot_engine import PlotEngine, canvas_export_options, export_figure
 from .stats_engine import StatsEngine
 from .ui_dialog import SettingsDialog, SelectionSummary, TransformOnlyDialog
 
@@ -42,6 +43,10 @@ _UNSAVED_WORKBOOK_ARTIFACT_MESSAGE = (
 )
 
 
+class _UnsavedWorkbookError(artifacts.ArtifactIdentityError):
+    """The workbook has no saved path, so charts cannot be registered yet."""
+
+
 def get_last_artifact_diagnostic() -> str | None:
     """Return the last non-blocking artifact registration failure, if any."""
     return _LAST_ARTIFACT_DIAGNOSTIC
@@ -60,7 +65,7 @@ def _workbook_artifact_identifier(book: Any) -> str:
         and os.path.dirname(fullname.strip()) != ""
     ):
         return f"path:{os.path.abspath(os.path.expanduser(fullname.strip()))}"
-    raise artifacts.ArtifactIdentityError(_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE)
+    raise _UnsavedWorkbookError(_UNSAVED_WORKBOOK_ARTIFACT_MESSAGE)
 
 
 def _register_artifact_best_effort(
@@ -102,7 +107,16 @@ def _register_artifact_best_effort(
         artifacts.save_artifact(payload)
     except Exception as exc:
         _LAST_ARTIFACT_DIAGNOSTIC = f"{type(exc).__name__}: {exc}"
-        _ARTIFACT_LOGGER.warning(
+        # An unsaved workbook is a normal state, not a failure. Log it below
+        # WARNING: xlwings on macOS shows any stderr output as an Error box,
+        # and Export already tells the user to save and regenerate.
+        level = (
+            logging.INFO
+            if isinstance(exc, _UnsavedWorkbookError)
+            else logging.WARNING
+        )
+        _ARTIFACT_LOGGER.log(
+            level,
             "Chart inserted, but rebuild artifact registration failed: %s",
             _LAST_ARTIFACT_DIAGNOSTIC,
         )
@@ -166,8 +180,14 @@ def _labeled_picture_target(book: Any, sheet, fixed_name: str) -> tuple[str, boo
             raise artifacts.ArtifactIdentityError(
                 "Worksheet identity is unavailable for artifact invalidation"
             )
+        try:
+            workbook_identifier = _workbook_artifact_identifier(book)
+        except _UnsavedWorkbookError:
+            # Unsaved workbooks never register artifacts, so no stale payload
+            # can exist: replace the fixed-name picture as on other platforms.
+            return fixed_name, True
         identity = artifacts.ArtifactIdentity(
-            workbook=_workbook_artifact_identifier(book),
+            workbook=workbook_identifier,
             sheet=sheet_name.strip(),
             picture=fixed_name,
         )
@@ -216,6 +236,8 @@ def _execute_analysis_writeback(book, sheet, result) -> list:
             "left": sheet.range((row, column)).left,
             "top": sheet.range((row, column)).top,
         }
+        if image.artifact is None:
+            kwargs["export_options"] = canvas_export_options(source)
         if image.width is not None:
             kwargs["width"] = image.width
         if image.height is not None:
@@ -561,6 +583,7 @@ def _run_elisa_impl(book: Any) -> None:
         name=pic_name,
         left=insert_left,
         top=insert_top,
+        export_options=canvas_export_options(fig),
     )
     _register_artifact_best_effort(
         book, sheet, pic, pic_name, conc_df, config, stats_result
@@ -576,6 +599,7 @@ def _run_elisa_impl(book: Any) -> None:
         std_name = _next_plot_name(sheet, "XSTARS_ELISA_StdCurve", book=book)
         std_pic = sheet.pictures.add(
             fig_std,
+            export_options=canvas_export_options(fig_std),
             name=std_name,
             left=insert_left,
             top=current_top,
@@ -595,6 +619,7 @@ def _run_elisa_impl(book: Any) -> None:
     r2_str = f", R²={fit.r_squared:.4f}" if fit.r_squared else ""
     book.app.status_bar = (
         f"XSTARS: ELISA ({fit.method}{r2_str}) — {stats_result.decision_path}"
+        + (f" | {layout_notice(fig)}" if layout_notice(fig) else "")
     )
 
 
@@ -825,6 +850,7 @@ def _run_wb_labeled(
     stats_start_row = sel.row + sel.rows.count + 2
     stats_col = sel.column
 
+    layout_notices: list[str] = []
     for protein_name, fold_df in target_dfs:
         handler.validate(fold_df)
 
@@ -843,10 +869,14 @@ def _run_wb_labeled(
         plotter = PlotEngine(plot_config)
         fig = plotter.plot(fold_df, stats_result)
 
+        notice = layout_notice(fig)
+        if notice and notice not in layout_notices:
+            layout_notices.append(notice)
         fixed_name = f"XSTARS_Plot_{protein_name}"
         pic_name, update_picture = _labeled_picture_target(book, sheet, fixed_name)
         pic = sheet.pictures.add(
             fig,
+            export_options=canvas_export_options(fig),
             name=pic_name,
             update=update_picture,
             left=base_left,
@@ -888,6 +918,7 @@ def _run_wb_labeled(
 
     book.app.status_bar = (
         f"XSTARS: WB labeled mode — {len(target_dfs)} target(s) analyzed"
+        + "".join(f" | {notice}" for notice in layout_notices)
     )
 
 
@@ -918,6 +949,7 @@ def _run_qpcr_labeled(
     stats_start_row = sel.row + sel.rows.count + 2
     stats_col = sel.column
 
+    layout_notices: list[str] = []
     for gene_name, fold_df in target_dfs:
         handler.validate(fold_df)
 
@@ -938,10 +970,14 @@ def _run_qpcr_labeled(
         plotter = PlotEngine(plot_config)
         fig = plotter.plot(fold_df, stats_result)
 
+        notice = layout_notice(fig)
+        if notice and notice not in layout_notices:
+            layout_notices.append(notice)
         fixed_name = f"XSTARS_Plot_{gene_name}"
         pic_name, update_picture = _labeled_picture_target(book, sheet, fixed_name)
         pic = sheet.pictures.add(
             fig,
+            export_options=canvas_export_options(fig),
             name=pic_name,
             update=update_picture,
             left=base_left,
@@ -985,6 +1021,7 @@ def _run_qpcr_labeled(
 
     book.app.status_bar = (
         f"XSTARS: qPCR labeled mode — {len(target_dfs)} gene(s) analyzed"
+        + "".join(f" | {notice}" for notice in layout_notices)
     )
 
 
@@ -1472,6 +1509,23 @@ def _run_export_impl(book: Any) -> None:
     book.app.status_bar = f"XSTARS: Exported to {path} ({dpi} DPI)"
 
 
+def about_text() -> str:
+    """About box text. The version comes from the installed package, so a
+    release only bumps ``xstars.__version__`` (no VBA rebuild needed)."""
+    from . import __version__
+
+    return (
+        f"XSTARS v{__version__}\n\n"
+        "Quick statistical analysis and publication-quality\n"
+        "visualization inside Excel & WPS.\n\n"
+        "Author: Yuxing Dai (Frank) -- SYSU\n"
+        "Powered by scipy, pandas, matplotlib, seaborn & xlwings.\n\n"
+        "License: MIT\n\n"
+        "Documentation & source:\n"
+        "https://github.com/Frankkk1912/xstars"
+    )
+
+
 def run_reset_settings() -> None:
     """Delete saved settings and restore defaults."""
     book = xw.Book.caller()
@@ -1678,26 +1732,17 @@ def run_set_palette_muted() -> None:
 
 
 def run_about() -> None:
-    """Show version info dialog."""
+    """Ribbon About button. The macOS add-in calls this through RunPython."""
     book = xw.Book.caller()
     try:
-        from . import __version__
-
-        version = __version__
-        url = "https://github.com/Frankkk1912/xstars"
-        msg = (
-            f"XSTARS v{version}\n\n"
-            "Quick statistical analysis and publication-quality\n"
-            "visualization inside Excel & WPS.\n\n"
-            "Author: Yuxing Dai (Frank) -- SYSU\n"
-            "Powered by scipy, pandas, matplotlib, seaborn & xlwings.\n\n"
-            "License: MIT\n\n"
-            f"Documentation & source:\n{url}"
-        )
+        text = about_text()
         try:
-            book.app.macro("MsgBox")(msg, 64, "About XSTARS")
+            book.app.alert(text, title="About XSTARS", mode="info")
         except Exception:
-            book.app.status_bar = f"XSTARS v{version}"
+            try:
+                book.app.macro("MsgBox")(text, 64, "About XSTARS")
+            except Exception:
+                book.app.status_bar = text.splitlines()[0]
     except Exception:
         _show_error(book, traceback.format_exc(), is_unexpected=True)
 
@@ -1816,6 +1861,7 @@ def _run_standard_curve_impl(book: Any) -> None:
         name=pic_name,
         left=sheet.range((out_row, out_col)).left,
         top=sheet.range((out_row, out_col)).top,
+        export_options=canvas_export_options(fig),
     )
     _register_artifact_best_effort(
         book,

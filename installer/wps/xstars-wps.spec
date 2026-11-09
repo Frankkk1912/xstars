@@ -25,10 +25,6 @@ REPO_ROOT = SPEC_DIR.parent.parent.resolve()
 
 datas = []
 datas += collect_data_files("ttkbootstrap")
-try:
-    datas += collect_data_files("statannotations")
-except Exception:
-    pass
 
 hiddenimports = []
 hiddenimports += collect_submodules("xstars")

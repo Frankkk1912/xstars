@@ -290,9 +290,10 @@ def render_payload_export(
             output.parent.mkdir(parents=True, exist_ok=True)
     else:
         output = _output_path(picture_id, image_format, dpi, exports_root)
-    save_format = "jpeg" if image_format == "jpg" else image_format
+    from ..plot_engine import export_figure
+
     try:
-        figure.savefig(output, format=save_format, dpi=dpi)
+        export_figure(figure, str(output), dpi)
     except (OSError, ValueError) as exc:
         raise ContractError(ErrorCode.EXPORT_PATH, f"cannot write export: {exc}") from exc
     finally:

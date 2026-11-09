@@ -8,27 +8,204 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, MultipleLocator
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
 from . import annotations as ann
 from .config import (
+    BarWidth,
+    CanvasMode,
     ChartType,
     DoseAxisScale,
     ErrorBarType,
     ExperimentPreset,
     PrismConfig,
     QPCRErrorSpace,
+    YAxisScale,
 )
 from .stats_engine import StatsResult
 from .styles import get_journal_figsize, get_prism_context
 
 
 def export_figure(fig: Figure, path: str, dpi: int = 300) -> None:
-    """Save figure to file. Format is inferred from extension by matplotlib."""
-    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    """Save the full canvas. Format is inferred from extension by matplotlib."""
+    fig.savefig(path, **canvas_export_options(fig, dpi))
+
+
+def canvas_export_options(fig: Figure, dpi: int = 200) -> dict[str, Any]:
+    """Explicit full-canvas bounds, including for xlwings' figure adapter."""
+    # A Bbox also defeats a caller's global savefig.bbox='tight'. None would
+    # fall back to that rcParam, and xlwings defaults to tight cropping.
+    return {"bbox_inches": fig.bbox_inches, "dpi": dpi}
+
+
+# Fit-data mode: space kept between the top bracket label and the title.
+_TOP_PAD_ABOVE_AXIS_PT = 4.0
+
+# Plot-area width per group in Panel mode, in inches.
+PANEL_BAR_WIDTH_IN = {
+    BarWidth.NARROW: 0.5,
+    BarWidth.MEDIUM: 0.7,
+    BarWidth.WIDE: 0.9,
+}
+
+
+def resolve_figsize(config: PrismConfig) -> tuple[float, float]:
+    """Starting canvas size: configured, or the journal preset's.
+
+    Fixed mode keeps it. Panel mode keeps the height, and ``fit_canvas``
+    sets the width from the number of groups.
+    """
+    journal_size = get_journal_figsize(config.journal_preset)
+    defaults = PrismConfig()
+    size = (
+        journal_size
+        if journal_size
+        and config.fig_width == defaults.fig_width
+        and config.fig_height == defaults.fig_height
+        else (config.fig_width, config.fig_height)
+    )
+    if not all(np.isfinite(value) and value > 0 for value in size):
+        raise ValueError("Figure width and height must be finite positive numbers.")
+    return size
+
+
+def _nice_tops(bottom: float, top: float) -> list[tuple[float, float]]:
+    """(candidate top, step) pairs near *top* that give 3-7 tick intervals.
+
+    Steps are 1, 2, 2.5 or 5 times a power of ten; each step offers the tick
+    just below and just above *top*.
+    """
+    span = top - bottom
+    magnitude = int(np.floor(np.log10(span))) if span > 0 else 0
+    found = []
+    for exponent in range(magnitude - 2, magnitude + 2):
+        for mantissa in (1.0, 2.0, 2.5, 5.0):
+            step = mantissa * 10.0**exponent
+            for candidate in (np.floor(top / step + 1e-9), np.ceil(top / step - 1e-9)):
+                candidate = float(candidate * step)
+                if 3 <= (candidate - bottom) / step <= 7:
+                    found.append((candidate, step))
+    return found
+
+
+def _apply_top(ax: Axes, bottom: float, choice: tuple[float, float] | None, top: float) -> float:
+    if choice is None:
+        ax.set_ylim(bottom, top)
+        return top
+    ax.set_ylim(bottom, choice[0])
+    ax.yaxis.set_major_locator(MultipleLocator(choice[1]))
+    return choice[0]
+
+
+def _round_up_to_tick(ax: Axes, bottom: float, top: float) -> float:
+    """Raise the y-limit to the lowest round value at or above *top*.
+
+    Ticks the axis at the chosen step so the axis line ends on a label.
+    Ties go to the larger step (fewer ticks).
+    """
+    above = [c for c in _nice_tops(bottom, top) if c[0] >= top - 1e-12]
+    choice = min(above, key=lambda c: (c[0], -c[1]), default=None)
+    return _apply_top(ax, bottom, choice, top)
+
+
+def _scale_to_data(ax: Axes, fill: float = 0.8) -> float:
+    """Set a round y-limit so the data fills about *fill* of the axis.
+
+    The tallest value (bars, error bars, points) keeps at least 5% headroom.
+    """
+    bottom = ax.get_ylim()[0]
+    data_max = float(ax.dataLim.y1)
+    target = bottom + (data_max - bottom) / fill
+    minimum = bottom + (data_max - bottom) * 1.05
+    usable = [c for c in _nice_tops(bottom, target) if c[0] >= minimum]
+    choice = min(usable, key=lambda c: (abs(c[0] - target), -c[1]), default=None)
+    return _apply_top(ax, bottom, choice, max(target, minimum))
+
+
+def _grow_top(fig: Figure, ax: Axes, extra_pt: float) -> None:
+    """Add *extra_pt* above the plot area without changing its size."""
+    width, height = fig.get_size_inches()
+    position = ax.get_position()
+    new_height = height + extra_pt / 72.0
+    fig.set_size_inches(width, new_height)
+    ax.set_position((
+        position.x0, position.y0 * height / new_height,
+        position.width, position.height * height / new_height,
+    ))
+    if ax.get_title():
+        ax.set_title(ax.get_title(), y=1.0 + extra_pt / 72.0 / (position.height * height))
+
+
+def _room_above_pt(ax: Axes, data_top: float) -> float:
+    """Physical space between *data_top* and the top of the y-axis."""
+    bottom, top = ax.get_ylim()
+    height_pt = ax.bbox.height * 72.0 / ax.figure.dpi
+    return (top - data_top) / (top - bottom) * height_pt
+
+
+def _fit_panel_width(fig: Figure, ax: Axes, plot_width_in: float) -> None:
+    """Set the canvas width so the plot area is *plot_width_in* wide."""
+    for _ in range(4):
+        width, height = fig.get_size_inches()
+        new_width = plot_width_in + width * (1.0 - ax.get_position().width)
+        if abs(new_width - width) < 1e-3:
+            return
+        fig.set_size_inches(new_width, height)
+        fig.tight_layout()
+
+
+def fit_canvas(
+    fig: Figure,
+    ax: Axes,
+    config: PrismConfig,
+    band_pt: float = 0.0,
+    data_limits: tuple[float, float] | None = None,
+    n_groups: int | None = None,
+) -> tuple[float, float]:
+    """Final layout: size the canvas and make room for brackets.
+
+    Fixed keeps the canvas size. Panel keeps the height and sets the width
+    so every group gets the same plot-area width (``bar_width``); charts
+    without groups keep the configured width. In both, *band_pt* of
+    brackets fit inside the height by extending the y-axis to a round
+    tick. The height only grows when brackets would leave the data under
+    20% of the plot.
+
+    Returns the (bottom, data top) limits the brackets are placed above.
+    """
+    panel_width_in = (
+        n_groups * PANEL_BAR_WIDTH_IN[config.bar_width]
+        if config.canvas_mode is CanvasMode.PANEL and n_groups
+        else None
+    )
+
+    def settle() -> None:
+        fig.tight_layout()
+        if panel_width_in is not None:
+            _fit_panel_width(fig, ax, panel_width_in)
+
+    settle()
+    bottom, data_top = data_limits or ax.get_ylim()
+    if band_pt <= 0:
+        return bottom, data_top
+    span = data_top - bottom
+    for _ in range(4):
+        height_pt = ax.bbox.height * 72.0 / fig.dpi
+        share = band_pt / height_pt
+        if share > 0.8:
+            width, height = fig.get_size_inches()
+            fig.set_size_inches(width, height + (band_pt / 0.8 - height_pt) / 72.0)
+            settle()
+            continue
+        _round_up_to_tick(ax, bottom, bottom + span / (1.0 - share))
+        settle()
+        if _room_above_pt(ax, data_top) >= band_pt - 0.01:
+            break
+    return bottom, data_top
 
 
 class PlotEngine:
@@ -64,10 +241,6 @@ class PlotEngine:
             )
             builder(ax, long_df, df_wide)
 
-            # Significance annotations
-            if stats_result is not None:
-                ann.annotate(ax, long_df, stats_result, cfg)
-
             # Labels
             ax.set_xlabel(cfg.x_label)
             ax.set_ylabel(cfg.y_label)
@@ -75,9 +248,74 @@ class PlotEngine:
                 ax.set_title(cfg.title)
 
             ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=False))
-            fig.tight_layout()
+            try:
+                self._layout_with_brackets(fig, ax, long_df, stats_result)
+            except ValueError:
+                plt.close(fig)
+                raise
 
         return fig
+
+    def _layout_with_brackets(
+        self,
+        fig: Figure,
+        ax: Axes,
+        long_df: pd.DataFrame,
+        stats_result: StatsResult | None,
+    ) -> None:
+        """Fit the canvas, then draw brackets in the space it reserved."""
+        cfg = self.config
+        n_groups = int(long_df["Group"].nunique())
+        # Width first: bracket rows depend on where the groups sit.
+        fit_canvas(fig, ax, cfg, n_groups=n_groups)
+        plan = (
+            ann.plan_brackets(ax, long_df, stats_result, cfg)
+            if stats_result is not None
+            else None
+        )
+        if cfg.y_axis_scale is YAxisScale.FIT_DATA:
+            self._brackets_above_data(fig, ax, long_df, stats_result, n_groups)
+            return
+        if plan is None:
+            return
+        limits = fit_canvas(fig, ax, cfg, plan.band_pt, n_groups=n_groups)
+        # Tick labels can change width after the y-axis grows, shifting the
+        # groups slightly; re-measure and refit if that changes the rows.
+        final = ann.plan_brackets(ax, long_df, cast(StatsResult, stats_result), cfg)
+        assert final is not None
+        if final.lanes != plan.lanes:
+            limits = fit_canvas(fig, ax, cfg, final.band_pt, limits, n_groups)
+        ann.draw_brackets(ax, final, limits[1])
+        ann.record_layout(ax, final, limits[1])
+
+    def _brackets_above_data(
+        self,
+        fig: Figure,
+        ax: Axes,
+        long_df: pd.DataFrame,
+        stats_result: StatsResult | None,
+        n_groups: int,
+    ) -> None:
+        """Fit-data y-axis: brackets never shrink the bars.
+
+        The y-axis is scaled to the data alone. Brackets start just above
+        the tallest value; any that do not fit under the axis top continue
+        above it, and the canvas grows by that amount.
+        """
+        cfg = self.config
+        _scale_to_data(ax)
+        fit_canvas(fig, ax, cfg, n_groups=n_groups)
+        if stats_result is None:
+            return
+        plan = ann.plan_brackets(ax, long_df, stats_result, cfg)
+        if plan is None:
+            return
+        data_top = float(ax.dataLim.y1)
+        overflow_pt = plan.band_pt - _TOP_PAD_ABOVE_AXIS_PT - _room_above_pt(ax, data_top)
+        if overflow_pt > 0:
+            _grow_top(fig, ax, overflow_pt + _TOP_PAD_ABOVE_AXIS_PT)
+        ann.draw_brackets(ax, plan, data_top)
+        ann.record_layout(ax, plan, data_top, warn=False)
 
     # ------------------------------------------------------------------
     # Chart types
@@ -85,7 +323,7 @@ class PlotEngine:
 
     def _bar_scatter(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         long_df: pd.DataFrame,
         df_wide: pd.DataFrame,
     ) -> None:
@@ -129,7 +367,7 @@ class PlotEngine:
 
     def _qpcr_bars(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         df_wide: pd.DataFrame,
         groups: list[str],
     ) -> None:
@@ -176,7 +414,7 @@ class PlotEngine:
 
     def _violin(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         long_df: pd.DataFrame,
         df_wide: pd.DataFrame,
     ) -> None:
@@ -212,7 +450,7 @@ class PlotEngine:
 
     def _line(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         long_df: pd.DataFrame,
         df_wide: pd.DataFrame,
     ) -> None:
@@ -221,12 +459,12 @@ class PlotEngine:
         x_positions = np.arange(len(groups))
 
         means = [df_wide[g].mean() for g in groups]
-        errors = [self._error_value(df_wide[g].dropna()) for g in groups]
+        errors = [self._error_value(cast(pd.Series, df_wide[g]).dropna()) for g in groups]
 
         if self._qpcr_log_display():
             geo_means, lower_err, upper_err = [], [], []
             for group in groups:
-                geo, lower, upper = self._qpcr_geo_stats(df_wide[group])
+                geo, lower, upper = self._qpcr_geo_stats(cast(pd.Series, df_wide[group]))
                 geo_means.append(geo)
                 lower_err.append(lower)
                 upper_err.append(upper)
@@ -267,7 +505,7 @@ class PlotEngine:
     def _dose_response_figure(self, df_wide: pd.DataFrame) -> Figure:
         """Generate a dose-response curve with fit and IC50 markers."""
         cfg = self.config
-        fit_info = cfg.ic50_fit_info
+        fit_info = cast(Any, cfg.ic50_fit_info)
         conc = np.array(fit_info.concentrations, dtype=float)
         dose_cols = fit_info.dose_col_names
         params = fit_info.fit_params
@@ -293,7 +531,7 @@ class PlotEngine:
             # Mean ± error bars
             means = np.array([df_wide[col].dropna().mean() for col in dose_cols])
             errors = np.array(
-                [self._error_value(df_wide[col].dropna()) for col in dose_cols]
+                [self._error_value(cast(pd.Series, df_wide[col]).dropna()) for col in dose_cols]
             )
             ax.errorbar(
                 conc,
@@ -408,7 +646,7 @@ class PlotEngine:
             if cfg.title:
                 ax.set_title(cfg.title)
             ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=False))
-            fig.tight_layout()
+            fit_canvas(fig, ax, cfg)
 
         return fig
 
@@ -469,17 +707,8 @@ class PlotEngine:
         return float(se * t_crit)
 
     def _resolve_figsize(self) -> tuple[float, float]:
-        """Use journal-recommended size if available and user hasn't customized."""
-        cfg = self.config
-        journal_size = get_journal_figsize(cfg.journal_preset)
-        defaults = PrismConfig()
-        if (
-            journal_size
-            and cfg.fig_width == defaults.fig_width
-            and cfg.fig_height == defaults.fig_height
-        ):
-            return journal_size
-        return (cfg.fig_width, cfg.fig_height)
+        """Resolve canvas shape, retaining legacy Auto sizing."""
+        return resolve_figsize(self.config)
 
     def _seaborn_ci(self) -> tuple[str, int] | str:
         """Map ErrorBarType to seaborn ``errorbar`` parameter."""

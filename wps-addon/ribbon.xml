@@ -51,6 +51,7 @@
                         <button id="xstarsPaletteMuted" label="Muted" onAction="OnAction"/>
                     </menu>
                     <button id="xstarsResetSettings" label="Reset Settings" onAction="OnAction"/>
+                    <button id="xstarsAbout" label="About" screentip="XSTARS 版本与信息" onAction="OnAction"/>
                 </group>
             </tab>
         </tabs>

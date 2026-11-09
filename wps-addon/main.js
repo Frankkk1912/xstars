@@ -1,5 +1,8 @@
 (function exposeAddin(root) {
 
+  // Keep equal to package.json "version" (checked by tests/main.test.cjs).
+  const ADDIN_VERSION = "1.3.0";
+
   const CONTROL_COMMANDS = Object.freeze({
     xstarsRun: "run",
     xstarsQuickRun: "run_quick",
@@ -11,6 +14,7 @@
     xstarsStandardCurve: "run_standard_curve",
     xstarsExport: "run_export",
     xstarsResetSettings: "run_reset_settings",
+    xstarsAbout: "run_about",
     xstarsBaseClassic: "run_set_base_theme_classic",
     xstarsBaseBW: "run_set_base_theme_bw",
     xstarsBaseMinimal: "run_set_base_theme_minimal",
@@ -335,6 +339,25 @@
     }
   }
 
+  async function runAbout() {
+    const result = await runCommand("run_about", { selection: null });
+    const plan = result && result.response && result.response.writebackPlan;
+    if (plan && typeof root.alert === "function") {
+      root.alert([
+        plan.statusMessage,
+        `WPS 加载项 v${ADDIN_VERSION}`,
+        "",
+        "Quick statistical analysis and publication-quality",
+        "visualization inside Excel & WPS.",
+        "",
+        "Author: Yuxing Dai (Frank) -- SYSU",
+        "License: MIT",
+        "https://github.com/Frankkk1912/xstars",
+      ].join("\n"));
+    }
+    return result;
+  }
+
   function cancelActiveRequest() {
     return client ? client.cancelActiveRequest() : false;
   }
@@ -354,6 +377,8 @@
       void runExport();
     } else if (command === "run_standard_curve") {
       void runStandardCurve();
+    } else if (command === "run_about") {
+      void runAbout();
     } else if (command) {
       void runCommand(command);
     }
@@ -370,7 +395,9 @@
   root.OnAction = OnAction;
   root.GetImage = GetImage;
   root.XstarsWpsAddin = Object.freeze({
+    ADDIN_VERSION,
     CONTROL_COMMANDS,
+    runAbout,
     cancelActiveRequest,
     runCommand,
     runElisa,

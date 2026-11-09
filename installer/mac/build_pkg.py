@@ -71,10 +71,13 @@ XLWINGS_VBA_VERSION_PATTERN = re.compile(
     flags=re.IGNORECASE | re.MULTILINE,
 )
 XLWINGS_INTERPRETER_LINE = (
-    '"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"'
+    '"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"'
 )
+# xlwings reads the file with VBA ``Input #``, which accepts the key and value
+# separated by a comma or by whitespace ("INTERPRETER_MAC" "/path"), and uses
+# the first match. Both forms must be replaced, or an old line wins.
 INTERPRETER_MAC_PATTERN = re.compile(
-    r'^\s*"?INTERPRETER_MAC"?\s*,',
+    r'^\s*"?INTERPRETER_MAC"?(\s|,)',
     flags=re.IGNORECASE,
 )
 USER_INSTALL_LOCATION = "/"

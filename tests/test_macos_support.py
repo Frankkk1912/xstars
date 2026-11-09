@@ -182,6 +182,30 @@ def test_unsaved_workbook_registration_is_skipped_with_diagnostic(tmp_path):
     assert not list(tmp_path.glob("*.json"))
 
 
+def test_unsaved_workbook_writes_nothing_to_stderr(tmp_path, capsys):
+    """xlwings on macOS shows any stderr output as an Error box, so an unsaved
+    workbook (a normal state) must not emit warnings there."""
+    book = SimpleNamespace(fullname="Book1", name="Book1")
+    sheet = SimpleNamespace(name="Analysis", pictures=[])
+    picture = SimpleNamespace(name="XSTARS_Plot_DNP")
+    frame = pd.DataFrame({"Control": [1.0], "Drug": [2.0]})
+
+    with (
+        patch.object(artifacts, "DEFAULT_ARTIFACT_ROOT", tmp_path),
+        patch("xstars.main.sys.platform", "darwin"),
+    ):
+        target = main._labeled_picture_target(book, sheet, "XSTARS_Plot_DNP")
+        registered = main._register_artifact_best_effort(
+            book, sheet, picture, picture.name, frame, PrismConfig()
+        )
+
+    # The fixed-name picture is replaced in place, not duplicated as _1.
+    assert target == ("XSTARS_Plot_DNP", True)
+    assert not registered
+    assert "Save the workbook" in main.get_last_artifact_diagnostic()
+    assert capsys.readouterr().err == ""
+
+
 def test_artifact_identifier_supports_books_without_path_attribute(tmp_path):
     """Real xlwings Book (0.33/0.37) exposes no ``path`` attribute; identity
     must be derived from ``fullname`` alone (DC2 real-Excel finding)."""

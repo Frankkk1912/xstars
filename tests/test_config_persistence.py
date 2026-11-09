@@ -5,10 +5,13 @@ from pathlib import Path
 
 from xstars.config import (
     AnnotationFormat,
+    BarWidth,
+    CanvasMode,
     ChartType,
     ErrorBarType,
     PrismConfig,
     QPCRErrorSpace,
+    YAxisScale,
 )
 
 
@@ -17,6 +20,10 @@ class TestConfigPersistence:
         p = tmp_path / "settings.json"
         cfg = PrismConfig(
             chart_type=ChartType.VIOLIN,
+            canvas_mode=CanvasMode.PANEL,
+            bar_width=BarWidth.WIDE,
+            y_axis_scale=YAxisScale.FIT_DATA,
+            hidden_comparisons=[["A", "B"]],
             error_bar=ErrorBarType.SD,
             show_points=False,
             paired=True,
@@ -28,6 +35,11 @@ class TestConfigPersistence:
         cfg.save(p)
         loaded = PrismConfig.load(p)
         assert loaded.chart_type == ChartType.VIOLIN
+        assert loaded.canvas_mode is CanvasMode.PANEL
+        assert loaded.bar_width is BarWidth.WIDE
+        assert loaded.y_axis_scale is YAxisScale.FIT_DATA
+        # Hidden brackets depend on group names, so they are never saved globally.
+        assert loaded.hidden_comparisons == []
         assert loaded.error_bar == ErrorBarType.SD
         assert loaded.show_points is False
         assert loaded.paired is True
@@ -69,3 +81,12 @@ class TestConfigPersistence:
         assert loaded.chart_type == ChartType.VIOLIN
         # Other fields should be defaults
         assert loaded.error_bar == ErrorBarType.SEM
+        assert loaded.canvas_mode is CanvasMode.FIXED
+        assert loaded.bar_width is BarWidth.MEDIUM
+
+    def test_invalid_canvas_values_fall_back_to_defaults(self, tmp_path: Path):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"canvas_mode": "pannel", "bar_width": "huge"}))
+        loaded = PrismConfig.load(path)
+        assert loaded.canvas_mode is CanvasMode.FIXED
+        assert loaded.bar_width is BarWidth.MEDIUM

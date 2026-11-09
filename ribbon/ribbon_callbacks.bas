@@ -150,14 +150,7 @@ Sub SetPaletteMuted(control As IRibbonControl)
 End Sub
 
 Sub ShowAbout(control As IRibbonControl)
-    Dim msg As String
-    msg = "XSTARS v1.2.1" & vbCrLf & vbCrLf & _
-          "Quick statistical analysis and publication-quality" & vbCrLf & _
-          "visualization inside Excel & WPS." & vbCrLf & vbCrLf & _
-          "Author: Yuxing Dai (Frank) -- SYSU" & vbCrLf & _
-          "Powered by scipy, pandas, matplotlib, seaborn & xlwings." & vbCrLf & vbCrLf & _
-          "License: MIT" & vbCrLf & vbCrLf & _
-          "Documentation & source:" & vbCrLf & _
-          "https://github.com/Frankkk1912/xstars"
-    MsgBox msg, vbInformation, "About XSTARS"
+    ' Text and version come from Python (xstars.main.about_text), so a
+    ' version bump does not require rebuilding the add-in.
+    RunPython "import xstars.main; xstars.main.run_about()"
 End Sub

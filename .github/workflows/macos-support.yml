@@ -138,7 +138,7 @@ jobs:
         run: >-
           installer/mac/staging/python/bin/python3 -c
           "import xstars, xlwings, ttkbootstrap, matplotlib, PIL, pandas, numpy,
-          scipy, scikit_posthocs, statannotations, seaborn; import sys;
+          scipy, scikit_posthocs, seaborn; import sys;
           assert sys.prefix in xstars.__file__, xstars.__file__;
           print('OK', xstars.__version__)"
       - name: Check bundled runtime dependency consistency

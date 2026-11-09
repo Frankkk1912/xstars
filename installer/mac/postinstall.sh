@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 CONF_TEMPLATE="$SCRIPT_DIR/xlwings.conf"
-EXPECTED_CONF_LINE='"INTERPRETER_MAC","$HOME/Library/Application Support/XSTARS/python/bin/python3"'
+EXPECTED_CONF_LINE='"INTERPRETER_MAC","$HOME/.xstars/runtime/bin/python3"'
 
 warn() {
     echo "postinstall: warning: $*" >&2
@@ -59,6 +59,11 @@ APPLESCRIPT_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.applescript"
 APPLESCRIPT_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.applescript.absent"
 CONF_BACKUP="$PREINSTALL_BACKUP_DIR/xlwings.conf"
 CONF_ABSENT_MARKER="$PREINSTALL_BACKUP_DIR/.xlwings.conf.absent"
+# xlwings' AppleScript bridge runs the interpreter path unquoted through the
+# shell, so the configured path must not contain spaces ("Application Support"
+# does). xlwings.conf points at this space-free link to the runtime instead.
+RUNTIME_LINK_DIR="$USER_HOME/.xstars"
+RUNTIME_LINK="$RUNTIME_LINK_DIR/runtime"
 
 run_as_user() {
     if [ "$(/usr/bin/id -u)" -eq 0 ]; then
@@ -194,7 +199,7 @@ merge_xlwings_conf() {
     if [ -f "$XLWINGS_CONF" ]; then
         if ! run_as_user /usr/bin/awk -v replacement="$configured_line" '
             function is_interpreter(line) {
-                return toupper(line) ~ /^[[:space:]]*"?INTERPRETER_MAC"?[[:space:]]*,/
+                return toupper(line) ~ /^[[:space:]]*"?INTERPRETER_MAC"?([[:space:]]|,)/
             }
             BEGIN { replaced = 0 }
             is_interpreter($0) {
@@ -235,7 +240,36 @@ merge_xlwings_conf() {
     return 0
 }
 
-if backup_user_file_once \
+link_runtime() {
+    case "$RUNTIME_LINK" in
+    *[[:space:]]*)
+        warn "home directory path contains spaces; xlwings cannot run $RUNTIME_LINK"
+        return 1
+        ;;
+    esac
+    if [ -e "$RUNTIME_LINK" ] && [ ! -L "$RUNTIME_LINK" ]; then
+        warn "$RUNTIME_LINK exists and is not a link; leaving it unchanged"
+        return 1
+    fi
+    if ! run_as_user /bin/mkdir -p "$RUNTIME_LINK_DIR"; then
+        warn "cannot create $RUNTIME_LINK_DIR"
+        return 1
+    fi
+    if ! run_as_user /bin/ln -sfn "$INSTALL_ROOT/python" "$RUNTIME_LINK"; then
+        warn "cannot link $RUNTIME_LINK to $INSTALL_ROOT/python"
+        return 1
+    fi
+    if [ ! -x "$RUNTIME_LINK/bin/python3" ]; then
+        warn "runtime link does not reach $PYTHON_EXECUTABLE"
+        return 1
+    fi
+    echo "postinstall: linked $RUNTIME_LINK -> $INSTALL_ROOT/python"
+    return 0
+}
+
+if ! link_runtime; then
+    warn "leaving the existing xlwings configuration unchanged"
+elif backup_user_file_once \
     "$XLWINGS_CONF" \
     "$CONF_BACKUP" \
     "$CONF_ABSENT_MARKER" \

@@ -15,9 +15,10 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 
+from ..annotations import layout_notice
 from ..config import ExperimentPreset, PrismConfig
 from ..data_handler import DataHandler
-from ..plot_engine import PlotEngine, export_figure
+from ..plot_engine import PlotEngine, export_figure, fit_canvas, resolve_figsize
 from ..presets import BasePreset, get_preset
 from ..presets.cck8 import CCK8FitInfo, CCK8Options, CCK8Preset
 from ..presets.elisa import ELISAOptions
@@ -391,6 +392,9 @@ def build_analysis_writeback_plan(
         ],
         status_message=f"XSTARS: {result.stats_result.decision_path}",
     )
+    notice = layout_notice(result.figure)
+    if notice:
+        plan.status_message += f" | {notice}"
     result.writeback_plan = plan
     return plan
 
@@ -542,6 +546,9 @@ def _analyze_labeled(
             f"XSTARS: {preset_label} labeled mode — {len(targets)} {kind}(s) analyzed"
         ),
     )
+    notices = list(dict.fromkeys(layout_notice(target.figure) for target in targets))
+    for notice in filter(None, notices):
+        plan.status_message += f" | {notice}"
     return LabeledAnalysisResult(targets, preset, plan)
 
 
@@ -609,7 +616,7 @@ def plot_standard_curve(
 
     with get_prism_context(config.journal_preset, config.base_theme):
         figure, axis = plt.subplots(
-            figsize=(config.fig_width, config.fig_height),
+            figsize=resolve_figsize(config),
             dpi=config.dpi,
         )
         axis.scatter(
@@ -632,7 +639,7 @@ def plot_standard_curve(
             title += f" (R² = {fit.r_squared:.4f})"
         axis.set_title(title)
         axis.legend(fontsize=8)
-        figure.tight_layout()
+        fit_canvas(figure, axis, config)
     return fit, figure
 
 

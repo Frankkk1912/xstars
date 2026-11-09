@@ -140,6 +140,7 @@ def test_quick_run_writes_stats_below_selection_and_inserts_named_picture():
         "name": "XSTARS_Plot_1",
         "left": 120.0,
         "top": 240.0,
+        "export_options": {"bbox_inches": figure.bbox_inches, "dpi": 200},
     }
     assert (14, 3) in ranges
     assert str(book.app.status_bar).startswith("XSTARS: ")
