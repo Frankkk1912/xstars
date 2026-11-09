@@ -1423,6 +1423,10 @@ def test_render_xlwings_conf_replaces_space_separated_interpreter_line():
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="runs the scripts' awk matcher with /usr/bin/awk, which Windows lacks",
+)
 @pytest.mark.parametrize("script", ["postinstall.sh", "uninstall.sh"])
 def test_shell_interpreter_matchers_accept_comma_and_space_forms(script):
     source = (MAC_INSTALLER_DIR / script).read_text(encoding="utf-8")
@@ -1441,7 +1445,6 @@ def test_shell_interpreter_matchers_accept_comma_and_space_forms(script):
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.split() == ["hit", "hit", "hit", "miss", "miss"]
-
 
 
 def test_configured_interpreter_path_has_no_spaces():

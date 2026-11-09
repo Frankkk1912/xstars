@@ -200,7 +200,9 @@ def test_comparisons_sharing_a_group_share_a_lane_without_touching():
 
 def test_scientific_label_wider_than_plot_fails_clearly():
     stats = selected_stats([("G1", "G2", .01), ("G3", "G4", .02)])
-    config = PrismConfig(fig_width=2.0, fig_height=4, annotation_format=AnnotationFormat.SCIENTIFIC)
+    # Locally the labels stop fitting below ~2.2 in; stay well under that so
+    # font differences between platforms cannot tip the result.
+    config = PrismConfig(fig_width=1.2, fig_height=4, annotation_format=AnnotationFormat.SCIENTIFIC)
     with pytest.raises(AnnotationLayoutError, match="too wide"):
         PlotEngine(config).plot(groups(4), stats)
 

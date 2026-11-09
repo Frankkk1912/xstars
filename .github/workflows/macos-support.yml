@@ -77,8 +77,13 @@ jobs:
           fetch-depth: 0
       - name: Verify Ribbon VBA behavior is unchanged from main
         shell: bash
+        # ribbon_callbacks.bas (macOS) may change deliberately: the
+        # "macOS / Build installer package" job requires it to match the VBA
+        # embedded in the shipped XSTARS.xlam and XSTARS_mac.xlsm exactly.
         run: |
-          git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas' ':(exclude)ribbon/ribbon_callbacks_installed.bas'
+          git diff --exit-code origin/main...HEAD -- 'ribbon/*.bas' \
+            ':(exclude)ribbon/ribbon_callbacks_installed.bas' \
+            ':(exclude)ribbon/ribbon_callbacks.bas'
           python - <<'PY'
           import pathlib
           import re
