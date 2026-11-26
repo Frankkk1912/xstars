@@ -34,7 +34,7 @@ def test_pyproject_keeps_excel_ui_out_of_the_core_install():
     core, _, extras = text.partition("[project.optional-dependencies]")
     assert 'version = "1.3.1"' in core
     assert 'license = "MIT"' in core
-    assert 'name = "Frankkk1912"' in core
+    assert 'name = "Yuxing Dai (@Frankkk1912)"' in core
     assert "email" not in core
     assert 'readme = "README.pypi.md"' in core
     for package in (
