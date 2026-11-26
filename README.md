@@ -208,7 +208,18 @@ pip install -e ".[dev]"
 xlwings addin install
 ```
 
-Then open your `.xlsm` workbook and add the VBA callbacks — see [ribbon/README.md](ribbon/README.md).
+`pip install -e ".[dev]"` includes the `excel` extra (xlwings and ttkbootstrap), pytest, and the installer test tools. Then open your `.xlsm` workbook and add the VBA callbacks — see [ribbon/README.md](ribbon/README.md).
+
+### Install from PyPI (Python users)
+
+The installers on [GitHub Releases](https://github.com/Frankkk1912/xstars/releases) are what almost everyone should use. They bundle Python and the spreadsheet add-in. Install from PyPI only when you want the statistics and plotting engine in your own Python environment:
+
+```bash
+pip install xstars
+pip install "xstars[excel]"
+```
+
+`xstars` installs the stats and figure stack only. `xstars[excel]` adds xlwings and ttkbootstrap for the Excel/WPS UI. A short working example is in [README.pypi.md](README.pypi.md).
 
 ---
 

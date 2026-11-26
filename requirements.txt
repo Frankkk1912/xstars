@@ -1,7 +1,12 @@
-xlwings>=0.33.0
+# Core install: pip install xstars
 pandas>=2.0
 numpy>=1.24
 scipy>=1.11
 scikit-posthocs>=0.9
 matplotlib>=3.7
 seaborn>=0.13
+Pillow>=10.0
+
+# Excel/UI extra: pip install "xstars[excel]"
+xlwings>=0.33.0
+ttkbootstrap>=1.10

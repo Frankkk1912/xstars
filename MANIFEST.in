@@ -1,0 +1,14 @@
+include LICENSE
+include README.pypi.md
+include README.md
+include README.zh-CN.md
+include pyproject.toml
+recursive-include xstars *.py
+recursive-include tests *.py
+
+global-exclude *.xlam *.xlsm *.xlsx *.xls *.gif *.exe *.pkg
+prune installer
+prune assets
+prune ribbon
+prune wps-addon
+prune poc

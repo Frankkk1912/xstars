@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import xstars
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +41,8 @@ def test_mac_about_reads_the_version_from_python():
 
 
 def test_about_text_and_alert():
+    pytest.importorskip("xlwings")
+    pytest.importorskip("tkinter")
     from xstars import main
 
     assert main.about_text().startswith(f"XSTARS v{VERSION}\n")
@@ -52,6 +56,8 @@ def test_about_text_and_alert():
 
 
 def test_about_falls_back_to_status_bar():
+    pytest.importorskip("xlwings")
+    pytest.importorskip("tkinter")
     from xstars import main
 
     book = MagicMock()

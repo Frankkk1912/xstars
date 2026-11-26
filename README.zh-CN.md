@@ -207,7 +207,18 @@ pip install -e ".[dev]"
 xlwings addin install
 ```
 
-然后打开 `.xlsm` 工作簿并添加 VBA 回调 —— 参见 [ribbon/README.md](ribbon/README.md)。
+`pip install -e ".[dev]"` 会同时安装 `excel` 附加依赖（xlwings 与 ttkbootstrap）、pytest 和安装器测试工具。然后打开 `.xlsm` 工作簿并添加 VBA 回调 —— 参见 [ribbon/README.md](ribbon/README.md)。
+
+### 从 PyPI 安装（Python 用户）
+
+几乎所有用户都应该使用 [GitHub Releases](https://github.com/Frankkk1912/xstars/releases) 上的安装包。安装包已内置 Python 和表格插件。只有在自己的 Python 环境里使用统计与作图引擎时，才从 PyPI 安装：
+
+```bash
+pip install xstars
+pip install "xstars[excel]"
+```
+
+`xstars` 只安装统计和作图依赖。`xstars[excel]` 额外安装 xlwings 和 ttkbootstrap，供 Excel/WPS 界面使用。可运行的简短示例见 [README.pypi.md](README.pypi.md)。
 
 ---
 

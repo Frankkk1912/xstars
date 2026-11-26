@@ -2,13 +2,39 @@
 
 from __future__ import annotations
 
+import os
+import sys
+from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
-import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib.ticker import MaxNLocator, MultipleLocator
+
+
+def _use_agg_when_tkinter_is_missing() -> None:
+    """Keep pyplot importable on a core install that has no Tk.
+
+    Windows and macOS Excel hosts ship tkinter, so this leaves matplotlib's
+    own backend choice alone. An explicit ``MPLBACKEND``, a backend that is
+    already Agg, or an already-imported pyplot is also left alone.
+    """
+    if os.environ.get("MPLBACKEND") or "matplotlib.pyplot" in sys.modules:
+        return
+    backend = str(matplotlib.rcParams["backend"]).lower()
+    if backend == "agg" or backend.endswith("backend_agg"):
+        return
+    try:
+        import_module("tkinter")
+    except ImportError:
+        matplotlib.use("Agg")
+
+
+_use_agg_when_tkinter_is_missing()
+
+import matplotlib.pyplot as plt  # noqa: E402
+import seaborn as sns  # noqa: E402
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes

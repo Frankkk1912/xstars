@@ -16,8 +16,13 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
-import defusedxml.ElementTree as ET
 import pytest
+
+pytest.importorskip("defusedxml")
+pytest.importorskip("xlwings")
+pytest.importorskip("oletools")
+
+import defusedxml.ElementTree as ET
 import xlwings
 from oletools.olevba import VBA_Parser
 
@@ -420,6 +425,7 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
     xlwings_pin = (
         f"xlwings=={build_pkg.embedded_xlwings_vba_version(assets / 'XSTARS_mac.xlsm')}"
     )
+    project_req = f"{repo}[excel]"
     assert install == (
         str(python_executable),
         "-m",
@@ -427,13 +433,13 @@ def test_assemble_staging_installs_non_editably_and_gathers_assets(
         "install",
         "--no-cache-dir",
         xlwings_pin,
-        str(repo),
+        project_req,
     )
     assert "-e" not in install
     assert all("dev" not in argument for argument in install)
     pin_index = list(install).index(xlwings_pin)
-    repo_index = list(install).index(str(repo))
-    assert pin_index < repo_index, "xlwings pin must precede repo_root in pip argv"
+    repo_index = list(install).index(project_req)
+    assert pin_index < repo_index, "xlwings pin must precede the excel extra in pip argv"
     assert commands[2:] == commands[:2]
 
 

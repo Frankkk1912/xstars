@@ -119,6 +119,11 @@ class TestPipelinePython:
 class TestRunQuickMocked:
     """main.run_quick() must orchestrate all modules and insert the figure."""
 
+    @pytest.fixture(autouse=True)
+    def _require_excel_ui(self):
+        pytest.importorskip("xlwings")
+        pytest.importorskip("tkinter")
+
     def test_pictures_add_called_once(self, two_group_normal):
         mock_book, mock_sheet = _xw_mocks(two_group_normal)
         with patch("xlwings.Book.caller", return_value=mock_book):
