@@ -1,36 +1,78 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "xstars"
-version = "1.3.0"
-description = "Excel-based Statistics Tool for Analysis, Rapid Significance"
+version = "1.3.1"
+description = "Excel and WPS wet-lab statistics and figures for Western blot (WB), qPCR, CCK-8, and ELISA. Not the astronomy XSTAR code."
+readme = "README.pypi.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Yuxing Dai (@Frankkk1912)" },
+]
+keywords = [
+    "excel",
+    "wps",
+    "statistics",
+    "western-blot",
+    "qpcr",
+    "cck-8",
+    "elisa",
+    "wet-lab",
+    "scientific-figure",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
-    "xlwings>=0.33.0",
     "pandas>=2.0",
     "numpy>=1.24",
     "scipy>=1.11",
     "scikit-posthocs>=0.9",
     "matplotlib>=3.7",
-    "Pillow>=10.0",
     "seaborn>=0.13",
-    "ttkbootstrap>=1.10",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
+excel = [
+    "xlwings>=0.33.0",
+    "ttkbootstrap>=1.10",
+]
 dev = [
+    "xstars[excel]",
     "pytest>=7.0",
     "pytest-cov",
     "oletools>=0.60",
     "defusedxml>=0.7",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Frankkk1912/xstars"
+Source = "https://github.com/Frankkk1912/xstars"
+Issues = "https://github.com/Frankkk1912/xstars/issues"
+Releases = "https://github.com/Frankkk1912/xstars/releases"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+
+[tool.setuptools]
+include-package-data = false
 
 [tool.setuptools.packages.find]
 include = ["xstars*"]

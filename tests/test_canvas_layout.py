@@ -329,6 +329,7 @@ def test_payload_reexport_preserves_pixel_dimensions(tmp_path, mode):
 
 @pytest.mark.parametrize("mode", list(CanvasMode))
 def test_excel_xlwings_adapter_does_not_tight_crop_the_canvas(mode):
+    pytest.importorskip("xlwings")
     from pathlib import Path
 
     from xlwings.utils import process_image

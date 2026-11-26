@@ -8,6 +8,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("xlwings")
+pytest.importorskip("tkinter")
+
 from xstars import main
 from xstars.application import (
     MAX_SELECTION_COLUMNS,

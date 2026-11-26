@@ -159,6 +159,8 @@ def test_result_write_uses_atomic_replace_and_cleans_temp_file(tmp_path):
 
 
 def test_legacy_cli_command_and_workbook_syntax_is_unchanged(monkeypatch):
+    pytest.importorskip("xlwings")
+    pytest.importorskip("tkinter")
     from xstars import cli
     from xstars import main as application_main
 
@@ -251,6 +253,7 @@ def test_dialog_without_selection_uses_returned_payload_and_preserves_plan(tmp_p
 
 
 def test_dialog_provider_populates_payload_and_range_label_without_tk(tmp_path):
+    pytest.importorskip("tkinter")
     ui = import_module("xstars.ui_dialog")
     payload = _worker.SelectionPayload.from_dict(_request(tmp_path)["selection"])
     observed = []
@@ -301,6 +304,7 @@ def test_worker_interaction_file_success_cancel_timeout_and_stale_id(tmp_path):
 
 
 def test_preselection_without_interaction_hides_provider(tmp_path):
+    pytest.importorskip("tkinter")
     ui = import_module("xstars.ui_dialog")
     selection = _worker.SelectionPayload.from_dict(_request(tmp_path)["selection"])
     dialog = mock.Mock()
@@ -321,7 +325,7 @@ def test_worker_no_selection_cancel_keeps_job_cancel_semantics(tmp_path):
 @pytest.fixture
 def interaction_root():
     """Real Tk event loop: no doubles for after, variables, bind or wait_variable."""
-    import tkinter as tk
+    tk = pytest.importorskip("tkinter")
 
     class MainThreadRoot(tk.Tk):
         def after(self, ms, func: Any = None, *args):

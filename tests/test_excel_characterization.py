@@ -19,6 +19,9 @@ matplotlib.use("Agg")
 import pandas as pd
 import pytest
 
+pytest.importorskip("xlwings")
+pytest.importorskip("tkinter")
+
 from xstars import main
 from xstars.config import PrismConfig
 

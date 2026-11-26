@@ -19,6 +19,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytest.importorskip("xlwings")
+pytest.importorskip("tkinter")
+
 from xstars import artifacts, main
 from xstars.artifacts import (
     ArtifactIdentity,

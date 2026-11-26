@@ -124,6 +124,12 @@ def test_probe_echoes_matrix_and_returns_local_png(probe_server):
 
 @pytest.fixture
 def gate0_service(tmp_path, monkeypatch):
+    import socket
+
+    if not hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        pytest.skip(
+            "WPS gate0 probe server binds with the Windows SO_EXCLUSIVEADDRUSE option"
+        )
     monkeypatch.setattr(service_module, "artifact_root", lambda: tmp_path)
     server = service_module.create_server(port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

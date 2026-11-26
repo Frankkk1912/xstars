@@ -1,7 +1,7 @@
 (function exposeAddin(root) {
 
   // Keep equal to package.json "version" (checked by tests/main.test.cjs).
-  const ADDIN_VERSION = "1.3.0";
+  const ADDIN_VERSION = "1.3.1";
 
   const CONTROL_COMMANDS = Object.freeze({
     xstarsRun: "run",

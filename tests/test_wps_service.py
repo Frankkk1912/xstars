@@ -720,6 +720,7 @@ def test_worker_transform_uses_specialized_dialog_and_include_stats(tmp_path):
 
 
 def test_transform_dialog_preconfigures_labeled_reference_mode():
+    pytest.importorskip("tkinter")
     worker = import_module("xstars.application.worker")
     ui = import_module("xstars.ui_dialog")
     selection = worker.SelectionPayload.from_dict(
@@ -749,6 +750,7 @@ def test_transform_dialog_preconfigures_labeled_reference_mode():
 
 
 def test_wps_settings_dialog_disables_file_export_without_changing_default(tmp_path):
+    pytest.importorskip("tkinter")
     worker = import_module("xstars.application.worker")
     ui = import_module("xstars.ui_dialog")
     selection = worker.SelectionPayload.from_dict(_payload()["selection"])

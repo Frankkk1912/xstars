@@ -373,12 +373,13 @@ def install_project(
     xlwings_requirement: str | None = None,
     runner: CommandRunner = default_command_runner,
 ) -> None:
-    """Install XSTARS and runtime dependencies non-editably into the runtime.
+    """Install XSTARS and the Excel runtime non-editably into the runtime.
 
-    When *xlwings_requirement* is supplied (e.g. ``'xlwings==0.37.0'``) it is
-    passed to pip before *repo_root* so that the exact version is resolved
-    rather than whatever ``>=`` bound the project metadata would otherwise
-    float to.
+    PyPI's core install does not pull xlwings or ttkbootstrap. The packaged
+    Excel app still needs both, so this installs the ``excel`` extra. When
+    *xlwings_requirement* is supplied (e.g. ``'xlwings==0.37.0'``) it is
+    passed to pip before the project so that the exact bridge version is
+    resolved rather than whatever ``>=`` bound the extra would float to.
     """
     argv: list[str] = [
         str(python_executable),
@@ -389,7 +390,7 @@ def install_project(
     ]
     if xlwings_requirement is not None:
         argv.append(xlwings_requirement)
-    argv.append(str(repo_root))
+    argv.append(f"{repo_root}[excel]")
     _run_checked(
         argv,
         runner,

@@ -1,5 +1,10 @@
 """Selection state and real ttk refresh regressions for SettingsDialog."""
 import gc
+
+import pytest
+
+pytest.importorskip("tkinter")
+
 import tkinter as tk
 from contextlib import suppress
 from typing import Any

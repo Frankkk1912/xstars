@@ -253,6 +253,8 @@ def test_failed_atomic_replace_is_wrapped_and_temp_file_removed(
 def test_registration_failure_is_best_effort_and_diagnostic(
     tmp_path, frame, stats_result
 ):
+    pytest.importorskip("xlwings")
+    pytest.importorskip("tkinter")
     from xstars.main import (
         _register_artifact_best_effort,
         get_last_artifact_diagnostic,
